@@ -427,6 +427,8 @@ async def rate(body: RateIn, user: dict = Depends(get_current_user)):
     txn = await db.transactions.find_one({"id": body.transaction_id, "sender_id": user["id"]})
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    if txn.get("type") != "payment" or txn.get("receiver_id") != body.driver_user_id:
+        raise HTTPException(status_code=400, detail="Transaction does not match driver")
     existing = await db.ratings.find_one({"transaction_id": body.transaction_id})
     if existing:
         raise HTTPException(status_code=400, detail="Already rated")
