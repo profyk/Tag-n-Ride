@@ -1,0 +1,108 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+const TOKEN_KEY = "tnr_token";
+
+export const tokenStore = {
+  get: () => AsyncStorage.getItem(TOKEN_KEY),
+  set: (t: string) => AsyncStorage.setItem(TOKEN_KEY, t),
+  clear: () => AsyncStorage.removeItem(TOKEN_KEY),
+};
+
+async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const token = await tokenStore.get();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((opts.headers as Record<string, string>) || {}),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { detail: text };
+  }
+  if (!res.ok) {
+    const detail = data?.detail;
+    const msg = Array.isArray(detail)
+      ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(", ")
+      : typeof detail === "string"
+      ? detail
+      : `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+  return data as T;
+}
+
+export const api = {
+  register: (body: { phone_number: string; full_name: string; pin: string; role: "passenger" | "driver" }) =>
+    request<{ token: string; user: User }>("/api/auth/register", { method: "POST", body: JSON.stringify(body) }),
+  login: (body: { phone_number: string; pin: string }) =>
+    request<{ token: string; user: User }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  me: () => request<User>("/api/auth/me"),
+  wallet: () => request<Wallet>("/api/wallet"),
+  topup: (amount: number) =>
+    request<{ balance: number; transaction: Txn }>("/api/wallet/topup", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
+  lookupDriver: (driverId: string) => request<DriverInfo>(`/api/wallet/driver/${driverId}`),
+  transfer: (driver_user_id: string, amount: number, note?: string) =>
+    request<{ balance: number; transaction: Txn }>("/api/wallet/transfer", {
+      method: "POST",
+      body: JSON.stringify({ driver_user_id, amount, note }),
+    }),
+  transactions: () => request<Txn[]>("/api/wallet/transactions"),
+  withdraw: (body: { amount: number; bank_name: string; account_number: string; account_name?: string }) =>
+    request<{ balance: number; withdrawal: any; transaction: Txn }>("/api/wallet/withdraw", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  rate: (body: { driver_user_id: string; transaction_id: string; stars: number; comment?: string }) =>
+    request<{ ok: boolean }>("/api/wallet/rate", { method: "POST", body: JSON.stringify(body) }),
+  withdrawals: () => request<any[]>("/api/wallet/withdrawals"),
+};
+
+export type User = {
+  id: string;
+  phone_number: string;
+  full_name: string;
+  role: "passenger" | "driver";
+};
+
+export type Wallet = {
+  balance: number;
+  currency: string;
+  is_frozen: boolean;
+  qr_code?: string;
+  total_earnings?: number;
+  rating_avg?: number;
+  rating_count?: number;
+};
+
+export type Txn = {
+  id: string;
+  reference: string;
+  type: "topup" | "payment" | "withdrawal";
+  status: string;
+  amount: number;
+  currency: string;
+  sender_id: string | null;
+  receiver_id: string | null;
+  note?: string;
+  created_at: string;
+  counterparty_name?: string | null;
+  direction?: "in" | "out";
+};
+
+export type DriverInfo = {
+  user_id: string;
+  full_name: string;
+  phone_number: string;
+  qr_code: string;
+  is_verified: boolean;
+  rating_avg: number;
+  rating_count: number;
+};

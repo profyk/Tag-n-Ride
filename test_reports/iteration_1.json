@@ -1,0 +1,44 @@
+{
+  "summary": "Backend-only regression for Tag n Ride. Exercised auth, wallet, transfer, withdraw, transactions, driver lookup, and ratings via the public preview URL (https://ride-tagging.preview.emergentagent.com/api). 34/34 pytest cases pass including all role-based access checks and edge cases (insufficient balance, self-pay, duplicate ratings, unknown driver/transaction, missing/invalid JWT, duplicate phone, non-digit PIN).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "Pydantic Field caps", "issue": "amount fields in TopUp/Transfer/Withdraw use le=1_000_000 — over-cap requests return 422 (Pydantic) before reaching balance/role logic. Acceptable, but document for clients so 'insufficient balance' tests stay below 1,000,000 NGN."},
+      {"endpoint": "POST /api/wallet/transfer", "issue": "When passenger has insufficient balance, server returns 400 ‘Insufficient balance’ even if the driver_user_id is invalid (lookup happens first → 404, but only if wallet check is skipped). Behaviour matches code (driver lookup runs before debit), just noting precedence."},
+      {"endpoint": "GET /api/wallet/transactions", "issue": "Each transaction triggers a separate users.find_one for counterparty enrichment (N+1). Fine for now but consider $lookup or batched fetch for scale."},
+      {"endpoint": "POST /api/wallet/rate", "issue": "Rating allowed for any past payment txn regardless of txn.receiver_id matching driver_user_id — passenger could (in theory) rate any driver against any of their txns. Consider asserting txn.receiver_id == driver_user_id and txn.type == 'payment'."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tagnride_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional, low priority) In /api/wallet/rate, also validate that txn.receiver_id == body.driver_user_id and txn.type == 'payment' to harden the rating system.",
+    "(Optional) Reduce N+1 user lookups in /api/wallet/transactions by batching counterparty fetches.",
+    "(Optional) Expo dependency version warnings in expo logs (async-storage, expo-camera, expo-haptics, expo-linear-gradient, react-native-svg) — not blocking backend tests but main agent may want to align with `expo install` recommendations."
+  ],
+  "critical_code_review_comments": [
+    "JWT secret read from env at import time — good. Uses HS256 with 7-day TTL as documented.",
+    "bcrypt PIN hashing via bcrypt.hashpw + gensalt — correct ($2b$ format).",
+    "Atomic debit pattern uses find_one_and_update with {'balance': {'$gte': amount}} guard — prevents oversold race; transfer credits driver in a separate update (no Mongo multi-doc transaction). For production an explicit MongoDB session/transaction would be safer if the credit step fails after debit.",
+    "All endpoints exclude _id via projection {'_id': 0} — clean JSON.",
+    "CORS allow_origins=['*'] with allow_credentials=False — fine for Bearer-token mobile app (no cookies).",
+    "Duplicate-phone returns 400 (could be 409 Conflict, but 400 is acceptable and matches spec)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tagnride_backend.py (new pytest suite, 34 cases)"
+  ],
+  "success_rate": {"backend": "100% (34/34)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Each test run self-registers fresh TEST_Passenger / TEST_Driver users with timestamp-suffixed phones. No cleanup performed; created docs are prefixed with TEST_ in full_name for easy identification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use EXPO_PUBLIC_BACKEND_URL (frontend/.env) — note the preview URL var is EXPO_PUBLIC_BACKEND_URL, not EXPO_BACKEND_URL. JWT in Authorization: Bearer header. All amount fields capped at 1,000,000 by Pydantic (le=1_000_000) so 'too large' values return 422, not 400. Rating tests depend on a previous payment txn — use module-scoped fixtures and store the txn id (we used pytest._tagnride_payment_txn_id). Frontend tests not yet run — Expo web preview is up but main agent only requested backend.",
+  "rca_of_issue": "No backend bugs found. The single test failure observed during the first run was a test-side bug: I sent amount=99,999,999 to /api/wallet/withdraw expecting a 400 'Insufficient balance', but Pydantic field cap (le=1_000_000) intercepts at validation layer and returns 422. Lowered to 999,999 (under cap, over balance) and the test now correctly verifies the 400 path."
+}
