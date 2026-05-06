@@ -4,3 +4,10 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+MONGO_URL = "mongomock://"
+DB_NAME = "tagnride"
+EXPO_PUBLIC_BACKEND_URL = "https://8000-697fe63b-cc0c-41d0-b685-365b4065c08c-00-aaz82b03cqzl.spock.replit.dev"
