@@ -4,6 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
+packages = ["cargo", "libiconv", "libxcrypt", "rustc"]
 
 [userenv]
 
@@ -11,3 +12,51 @@ channel = "stable-25_05"
 MONGO_URL = "mongomock://"
 DB_NAME = "tagnride"
 EXPO_PUBLIC_BACKEND_URL = "https://8000-697fe63b-cc0c-41d0-b685-365b4065c08c-00-aaz82b03cqzl.spock.replit.dev"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start Backend"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start Frontend"
+
+[[workflows.workflow]]
+name = "Start Backend"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd backend && uvicorn server:app --host 0.0.0.0 --port 8000 --reload"
+waitForPort = 8000
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "Start Frontend"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd frontend && EXPO_NO_DOTENV=1 yarn web --port 5000"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 8000
+externalPort = 8000

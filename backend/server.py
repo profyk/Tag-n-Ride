@@ -15,7 +15,6 @@ import bcrypt
 import jwt
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -26,7 +25,13 @@ JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALG = "HS256"
 ACCESS_TTL_MIN = 60 * 24 * 7  # 7 days for mobile UX
 
-client = AsyncIOMotorClient(MONGO_URL)
+if MONGO_URL.startswith("mongomock"):
+    from mongomock_motor import AsyncMongoMockClient
+    client = AsyncMongoMockClient()
+else:
+    from motor.motor_asyncio import AsyncIOMotorClient
+    client = AsyncIOMotorClient(MONGO_URL)
+
 db = client[DB_NAME]
 
 app = FastAPI(title="Tag n Ride API")
