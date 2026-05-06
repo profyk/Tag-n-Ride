@@ -99,7 +99,7 @@ class RegisterIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     pin: str = Field(min_length=4, max_length=4)
     role: Role
-    vehicle_plate: Optional[str] = None
+    vehicle_plate: Optional[str] = Field(default=None, min_length=2, max_length=15)
 
     @field_validator("pin")
     @classmethod
