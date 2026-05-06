@@ -37,11 +37,13 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  register: (body: { phone_number: string; full_name: string; pin: string; role: "passenger" | "driver" }) =>
+  register: (body: { phone_number: string; full_name: string; pin: string; role: "passenger" | "driver"; vehicle_plate?: string }) =>
     request<{ token: string; user: User }>("/api/auth/register", { method: "POST", body: JSON.stringify(body) }),
   login: (body: { phone_number: string; pin: string }) =>
     request<{ token: string; user: User }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: () => request<User>("/api/auth/me"),
+  updateDriverProfile: (vehicle_plate: string) =>
+    request<{ vehicle_plate: string }>("/api/driver/profile", { method: "PATCH", body: JSON.stringify({ vehicle_plate }) }),
   wallet: () => request<Wallet>("/api/wallet"),
   topup: (amount: number) =>
     request<{ balance: number; transaction: Txn }>("/api/wallet/topup", {
@@ -70,6 +72,7 @@ export type User = {
   phone_number: string;
   full_name: string;
   role: "passenger" | "driver";
+  vehicle_plate?: string;
 };
 
 export type Wallet = {
@@ -77,6 +80,7 @@ export type Wallet = {
   currency: string;
   is_frozen: boolean;
   qr_code?: string;
+  vehicle_plate?: string;
   total_earnings?: number;
   rating_avg?: number;
   rating_count?: number;
@@ -102,6 +106,7 @@ export type DriverInfo = {
   full_name: string;
   phone_number: string;
   qr_code: string;
+  vehicle_plate?: string;
   is_verified: boolean;
   rating_avg: number;
   rating_count: number;

@@ -7,7 +7,7 @@ import { Field, Button } from "../src/ui";
 import { api, DriverInfo, Txn } from "../src/api";
 import { colors, formatNGN, radius } from "../src/theme";
 
-const QUICKS = [500, 1000, 1500, 2000, 3000, 5000];
+const QUICKS = [20, 50, 100, 150, 200, 500];
 
 type Stage = "review" | "confirm" | "success";
 
@@ -157,6 +157,12 @@ export default function Pay() {
               </View>
               <Text style={styles.driverName} testID="pay-driver-name">{driver.full_name}</Text>
               <Text style={styles.driverPhone}>{driver.phone_number}</Text>
+              {driver.vehicle_plate ? (
+                <View style={styles.plateBox} testID="pay-driver-plate">
+                  <Text style={styles.plateLabel}>VEHICLE</Text>
+                  <Text style={styles.plateValue}>{driver.vehicle_plate}</Text>
+                </View>
+              ) : null}
               <View style={styles.driverMeta}>
                 {driver.is_verified ? (
                   <View style={[styles.metaPill, { borderColor: colors.green, backgroundColor: colors.greenDim }]}>
@@ -175,7 +181,7 @@ export default function Pay() {
           ) : null}
 
           <Field
-            label="Amount (NGN)"
+            label="Amount (ZAR)"
             value={amount}
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ""))}
             placeholder="0.00"
@@ -217,6 +223,9 @@ const styles = StyleSheet.create({
   driverMeta: { flexDirection: "row", gap: 8, marginTop: 12 },
   metaPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
   metaText: { fontSize: 11, fontWeight: "700" },
+  plateBox: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#FFD60A", borderRadius: 8, borderWidth: 2, borderColor: "#0A0A0A" },
+  plateLabel: { color: "#666", fontSize: 9, fontWeight: "800", letterSpacing: 1.4, textAlign: "center" },
+  plateValue: { color: "#0A0A0A", fontSize: 22, fontWeight: "900", letterSpacing: 2, textAlign: "center", fontFamily: "monospace" },
   quickRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   quick: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
   quickText: { color: colors.text, fontWeight: "700", fontSize: 12 },

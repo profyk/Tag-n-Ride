@@ -7,7 +7,7 @@ import { Field, Button, Card } from "../src/ui";
 import { api } from "../src/api";
 import { colors, formatNGN, radius } from "../src/theme";
 
-const BANKS = ["Access", "GTBank", "Zenith", "First Bank", "UBA", "Kuda", "Opay"];
+const BANKS = ["Standard Bank", "FNB", "Absa", "Nedbank", "Capitec", "Investec", "Discovery", "TymeBank", "African Bank"];
 
 export default function Withdraw() {
   const router = useRouter();
@@ -49,7 +49,7 @@ export default function Withdraw() {
           </View>
 
           <Field
-            label="Amount (NGN)"
+            label="Amount (ZAR)"
             value={amount}
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ""))}
             placeholder="0.00"

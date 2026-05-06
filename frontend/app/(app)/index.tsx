@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { api, Wallet, Txn } from "../../src/api";
-import { colors, formatNGN, formatDate, radius } from "../../src/theme";
+import { colors, formatZAR, formatDate, radius } from "../../src/theme";
 import { Pill } from "../../src/ui";
 
 export default function Home() {
@@ -53,17 +53,17 @@ export default function Home() {
         {/* Balance card */}
         <View style={styles.balanceCard} testID="balance-card">
           <View style={styles.balanceCardGlow} />
-          <Text style={styles.balanceLabel}>WALLET BALANCE · NGN</Text>
+          <Text style={styles.balanceLabel}>WALLET BALANCE · ZAR</Text>
           {loading || !wallet ? (
             <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
           ) : (
-            <Text style={styles.balanceAmt} testID="balance-amount">{formatNGN(wallet.balance)}</Text>
+            <Text style={styles.balanceAmt} testID="balance-amount">{formatZAR(wallet.balance)}</Text>
           )}
           {isDriver && wallet ? (
             <View style={styles.statsRow}>
               <View style={styles.stat}>
                 <Text style={styles.statLabel}>Total earnings</Text>
-                <Text style={styles.statVal}>{formatNGN(wallet.total_earnings ?? 0)}</Text>
+                <Text style={styles.statVal}>{formatZAR(wallet.total_earnings ?? 0)}</Text>
               </View>
               <View style={[styles.stat, { borderLeftColor: colors.border, borderLeftWidth: 1, paddingLeft: 16 }]}>
                 <Text style={styles.statLabel}>Rating</Text>
@@ -146,7 +146,7 @@ const TxnRow: React.FC<{ t: Txn }> = ({ t }) => {
         <Text style={styles.txnSub}>{formatDate(t.created_at)} · {t.reference}</Text>
       </View>
       <View style={{ alignItems: "flex-end" }}>
-        <Text style={[styles.txnAmt, { color }]}>{sign}{formatNGN(t.amount).replace("₦", "₦")}</Text>
+        <Text style={[styles.txnAmt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
         <View style={{ marginTop: 4 }}>
           <Pill label={t.status} tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
         </View>

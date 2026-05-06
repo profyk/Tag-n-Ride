@@ -1,0 +1,63 @@
+{
+  "summary": "Backend regression for Tag n Ride South-Africa launch (NGN -> ZAR + vehicle_plate). Re-ran the full suite plus 6 new SA-specific cases via the public preview URL (https://ride-tagging.preview.emergentagent.com/api). 40/40 pytest cases pass: ZAR currency on wallets and on topup/payment/withdrawal transactions, vehicle_plate on driver register, /auth/me, /wallet, /wallet/driver/{id}, PATCH /api/driver/profile (auth + role + min_length=2 validation + uppercase normalization), passenger /me has NO vehicle_plate, driver registered without plate defaults to empty string. All previously-passing flows (login, topup, transfer with atomic balance guard, self-pay reject, withdraw, rate/duplicate-rate) continue to work end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "PATCH /api/driver/profile",
+        "issue": "Endpoint returns 200 even when the driver document does not exist (update_one with no match silently succeeds). Today every driver gets a drivers doc at register time so this is not reachable, but if a driver doc were ever missing the API would lie about success. Consider asserting matched_count==1 and 404 otherwise."
+      },
+      {
+        "endpoint": "POST /api/auth/register",
+        "issue": "vehicle_plate is accepted on RegisterIn for both roles but only persisted for drivers — not a bug, just note that for passengers any value is silently dropped. Consider rejecting with 422 if role!='driver' and vehicle_plate is set, for stricter API contract."
+      },
+      {
+        "endpoint": "POST /api/auth/register",
+        "issue": "vehicle_plate has no min_length on RegisterIn (only on DriverProfileIn). A driver could register with vehicle_plate='' or 'A'. PATCH then enforces min_length=2 — inconsistent. Consider Field(min_length=2,max_length=15) on RegisterIn.vehicle_plate too (when role='driver')."
+      },
+      {
+        "endpoint": "POST /api/wallet/rate",
+        "issue": "(Carry-over from iteration_1) Endpoint already validates txn.receiver_id == driver_user_id and txn.type == 'payment' on read of the suite — confirmed working in test_rate_unknown_transaction_404. No action needed."
+      },
+      {
+        "endpoint": "GET /api/wallet/transactions",
+        "issue": "(Carry-over) N+1 on counterparty enrichment — non-blocking, optimization later."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tagnride_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional, low priority) Add Field(min_length=2,max_length=15) to RegisterIn.vehicle_plate so the registration validation matches PATCH /api/driver/profile (currently a driver can register with plate='' or 'A' but cannot PATCH to those values).",
+    "(Optional) PATCH /api/driver/profile should 404 if the drivers doc is missing (today returns 200 even on no-match update_one).",
+    "(Optional, contract clarity) Reject vehicle_plate on register payload when role='passenger' (currently silently dropped).",
+    "Update /app/memory/test_credentials.md — it still lists Nigerian +234 sample numbers and does not mention the new ZAR currency, +27 country code constraint, or the vehicle_plate / PATCH /api/driver/profile endpoint."
+  ],
+  "critical_code_review_comments": [
+    "Currency migration NGN->ZAR is consistent across wallets and all 3 transaction types (topup/payment/withdrawal) — verified by tests.",
+    "vehicle_plate normalization (.upper().strip()) is applied in both register() and update_driver_profile() — verified plate ' bp 4242 wc ' becomes 'BP 4242 WC' on PATCH.",
+    "DriverProfileIn correctly enforces min_length=2/max_length=15 → empty and 'A' both 422.",
+    "/auth/me only adds vehicle_plate when role=='driver' — confirmed passenger response does NOT include the field.",
+    "PATCH /api/driver/profile correctly 403s for passengers via role check before update.",
+    "Atomic conditional debit using {'balance':{'$gte':amount}} is unchanged and continues to enforce insufficient-balance -> 400 for both transfer and withdraw.",
+    "Self-pay still rejected (driver_user_id == user.id -> 400).",
+    "CORS still allow_origins=['*'], allow_credentials=False — fine for Bearer-token mobile app."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tagnride_backend.py (rewrote for ZAR + +27 SA phones; added TestDriverProfile (4 cases) and TestDriverPlateOptional (1 case); added /auth/me passenger-vs-driver vehicle_plate split; added vehicle_plate assertions on /wallet and /wallet/driver/{id}; added currency==ZAR assertions across topup/payment/withdraw/transactions list — 34 -> 40 cases)"
+  ],
+  "success_rate": {"backend": "100% (40/40)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Each test run self-registers fresh TEST_Passenger / TEST_Driver / TEST_Broke / TEST_DriverNoPlate users with +27 + 9-digit timestamp-suffixed phones. Driver fixture initial vehicle_plate = 'CA123GP' (input 'ca123gp'); PATCH test mutates to 'BP 4242 WC'. No cleanup performed — TEST_-prefixed full_name makes them easy to identify.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env (https://ride-tagging.preview.emergentagent.com). All money fields capped at 1,000,000 by Pydantic le=1_000_000 → over-cap returns 422 not 400; for insufficient-balance tests use 999_999. Phone numbers must be +27 + 9 local digits to feel SA-realistic; backend itself only requires +/digit and length 7-20 so technically other formats still register (no country-code allowlist enforced server-side — mobile UI restricts to +27). Driver registration accepts optional vehicle_plate (no length validation at register time — see action_items). PATCH /api/driver/profile body is {vehicle_plate: 2-15 chars}. Frontend (Expo web) was not tested per request — main agent flagged QR scanner + flashlight as frontend-only and out of scope here.",
+  "rca_of_issue": "No backend bugs. The only behavior worth highlighting is that PATCH /api/driver/profile uses update_one without checking matched_count, so it would silently 200 if a drivers doc were ever missing. Today register() always inserts the drivers doc for role=='driver', so this is unreachable in normal flow."
+}

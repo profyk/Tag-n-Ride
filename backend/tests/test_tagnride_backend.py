@@ -1,8 +1,10 @@
 """
-Tag n Ride backend regression tests.
+Tag n Ride backend regression tests — South Africa launch (ZAR + vehicle_plate).
 Covers: auth (register/login/me), wallet (get/topup/transfer/withdraw/rate),
        transactions, driver lookup, withdrawals, role-based access controls,
-       and edge cases (insufficient balance, self-pay, duplicate ratings).
+       edge cases (insufficient balance, self-pay, duplicate ratings),
+       NEW: ZAR currency, vehicle_plate on driver register/me/wallet/lookup,
+            PATCH /api/driver/profile.
 """
 import os
 import time
@@ -19,7 +21,14 @@ API = f"{BASE_URL}/api"
 
 
 def _suffix() -> str:
+    # 9-digit SA-style local part
     return f"{int(time.time())}{uuid.uuid4().hex[:4]}"
+
+
+def _sa_phone(prefix_local_digit: str = "8") -> str:
+    """Return a +27XXXXXXXXX format phone (12 chars). +27 + 9 digits."""
+    sfx = _suffix()
+    return f"+27{prefix_local_digit}{sfx[-8:]}"
 
 
 @pytest.fixture(scope="module")
@@ -31,8 +40,7 @@ def session() -> requests.Session:
 
 @pytest.fixture(scope="module")
 def passenger(session):
-    sfx = _suffix()
-    phone = f"+23480{sfx[-9:]}"
+    phone = _sa_phone("8")
     payload = {
         "phone_number": phone,
         "full_name": "TEST_Passenger",
@@ -53,13 +61,13 @@ def passenger(session):
 
 @pytest.fixture(scope="module")
 def driver(session):
-    sfx = _suffix()
-    phone = f"+23490{sfx[-9:]}"
+    phone = _sa_phone("7")
     payload = {
         "phone_number": phone,
         "full_name": "TEST_Driver",
         "pin": "5678",
         "role": "driver",
+        "vehicle_plate": "ca123gp",   # lowercase to verify upper() normalization
     }
     r = session.post(f"{API}/auth/register", json=payload, timeout=15)
     assert r.status_code == 200, f"driver register failed: {r.status_code} {r.text}"
@@ -70,6 +78,7 @@ def driver(session):
         "token": data["token"],
         "user": data["user"],
         "headers": {"Authorization": f"Bearer {data['token']}"},
+        "initial_plate": "CA123GP",
     }
 
 
@@ -112,7 +121,7 @@ class TestAuth:
         r = session.post(
             f"{API}/auth/register",
             json={
-                "phone_number": f"+23470{_suffix()[-9:]}",
+                "phone_number": _sa_phone("6"),
                 "full_name": "Bad PIN",
                 "pin": "12a4",
                 "role": "passenger",
@@ -138,13 +147,22 @@ class TestAuth:
         )
         assert r.status_code == 401
 
-    def test_me_with_token(self, session, passenger):
+    def test_me_passenger_no_vehicle_plate(self, session, passenger):
         r = session.get(f"{API}/auth/me", headers=passenger["headers"], timeout=15)
         assert r.status_code == 200
         body = r.json()
         assert body["id"] == passenger["user"]["id"]
         assert "pin_hash" not in body
         assert "_id" not in body
+        assert "vehicle_plate" not in body, "passenger /me must not include vehicle_plate"
+
+    def test_me_driver_includes_vehicle_plate(self, session, driver):
+        r = session.get(f"{API}/auth/me", headers=driver["headers"], timeout=15)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["role"] == "driver"
+        assert "vehicle_plate" in body
+        assert body["vehicle_plate"] == driver["initial_plate"]
 
     def test_me_without_token_401(self, session):
         r = session.get(f"{API}/auth/me", timeout=15)
@@ -159,31 +177,84 @@ class TestAuth:
         assert r.status_code == 401
 
 
+# ---- Driver profile (vehicle_plate) ----
+class TestDriverProfile:
+    def test_patch_passenger_forbidden_403(self, session, passenger):
+        r = session.patch(
+            f"{API}/driver/profile",
+            json={"vehicle_plate": "ZA999GP"},
+            headers=passenger["headers"],
+            timeout=15,
+        )
+        assert r.status_code == 403
+
+    def test_patch_empty_plate_422(self, session, driver):
+        r = session.patch(
+            f"{API}/driver/profile",
+            json={"vehicle_plate": ""},
+            headers=driver["headers"],
+            timeout=15,
+        )
+        assert r.status_code == 422
+
+    def test_patch_short_plate_422(self, session, driver):
+        # min_length = 2
+        r = session.patch(
+            f"{API}/driver/profile",
+            json={"vehicle_plate": "A"},
+            headers=driver["headers"],
+            timeout=15,
+        )
+        assert r.status_code == 422
+
+    def test_patch_updates_plate_and_persists(self, session, driver):
+        new_plate_input = " bp 4242 wc "
+        expected = "BP 4242 WC"
+        r = session.patch(
+            f"{API}/driver/profile",
+            json={"vehicle_plate": new_plate_input},
+            headers=driver["headers"],
+            timeout=15,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body.get("vehicle_plate") == expected
+
+        # GET /auth/me should reflect new plate
+        me = session.get(f"{API}/auth/me", headers=driver["headers"], timeout=15).json()
+        assert me["vehicle_plate"] == expected
+        # update fixture for downstream assertions
+        driver["initial_plate"] = expected
+
+
 # ---- Wallet basics ----
 class TestWallet:
-    def test_passenger_wallet_initial(self, session, passenger):
+    def test_passenger_wallet_initial_zar(self, session, passenger):
         r = session.get(f"{API}/wallet", headers=passenger["headers"], timeout=15)
         assert r.status_code == 200
         w = r.json()
-        assert w["currency"] == "NGN"
+        assert w["currency"] == "ZAR"
         assert w["balance"] == 0.0
         assert w["user_id"] == passenger["user"]["id"]
         # passenger should not have driver-only fields
         assert "qr_code" not in w
         assert "total_earnings" not in w
+        assert "vehicle_plate" not in w
 
-    def test_driver_wallet_has_qr_and_rating_fields(self, session, driver):
+    def test_driver_wallet_zar_qr_plate_rating(self, session, driver):
         r = session.get(f"{API}/wallet", headers=driver["headers"], timeout=15)
         assert r.status_code == 200
         w = r.json()
-        assert w["currency"] == "NGN"
+        assert w["currency"] == "ZAR"
         assert "qr_code" in w
         assert w["qr_code"].startswith("app://pay?driver_id=")
         assert w["total_earnings"] == 0.0
         assert w["rating_avg"] == 0.0
         assert w["rating_count"] == 0
+        assert "vehicle_plate" in w
+        assert w["vehicle_plate"] == driver["initial_plate"]
 
-    def test_topup_passenger_increments_balance(self, session, passenger):
+    def test_topup_passenger_increments_balance_zar(self, session, passenger):
         r = session.post(
             f"{API}/wallet/topup",
             json={"amount": 5000},
@@ -196,7 +267,7 @@ class TestWallet:
         txn = body["transaction"]
         assert txn["type"] == "topup"
         assert txn["status"] == "completed"
-        assert txn["currency"] == "NGN"
+        assert txn["currency"] == "ZAR"
         assert txn["amount"] == 5000
         # verify GET
         w = session.get(f"{API}/wallet", headers=passenger["headers"], timeout=15).json()
@@ -223,7 +294,7 @@ class TestWallet:
 
 # ---- Driver lookup ----
 class TestDriverLookup:
-    def test_driver_lookup_returns_public_info(self, session, passenger, driver):
+    def test_driver_lookup_returns_public_info_with_plate(self, session, passenger, driver):
         r = session.get(
             f"{API}/wallet/driver/{driver['user']['id']}",
             headers=passenger["headers"],
@@ -237,6 +308,7 @@ class TestDriverLookup:
         assert "qr_code" in d
         assert "rating_avg" in d
         assert "rating_count" in d
+        assert d.get("vehicle_plate") == driver["initial_plate"]
 
     def test_driver_lookup_unknown_404(self, session, passenger):
         r = session.get(
@@ -254,7 +326,6 @@ class TestDriverLookup:
 # ---- Transfer ----
 class TestTransfer:
     def test_transfer_self_400(self, session, passenger):
-        # passenger trying to pay themselves (use own user_id even though not a driver)
         r = session.post(
             f"{API}/wallet/transfer",
             json={"driver_user_id": passenger["user"]["id"], "amount": 100},
@@ -265,7 +336,6 @@ class TestTransfer:
         assert "yourself" in r.json().get("detail", "").lower()
 
     def test_transfer_driver_forbidden_403(self, session, driver):
-        # driver attempting to transfer
         r = session.post(
             f"{API}/wallet/transfer",
             json={"driver_user_id": uuid.uuid4().hex, "amount": 100},
@@ -276,11 +346,10 @@ class TestTransfer:
 
     def test_transfer_insufficient_balance_400(self, session, driver):
         # New passenger with zero balance
-        sfx = _suffix()
         reg = session.post(
             f"{API}/auth/register",
             json={
-                "phone_number": f"+23481{sfx[-9:]}",
+                "phone_number": _sa_phone("8"),
                 "full_name": "TEST_Broke",
                 "pin": "9999",
                 "role": "passenger",
@@ -306,8 +375,7 @@ class TestTransfer:
         )
         assert r.status_code == 404
 
-    def test_transfer_success_atomic(self, session, passenger, driver):
-        # ensure passenger has enough balance (topped up to 5000 earlier)
+    def test_transfer_success_atomic_zar(self, session, passenger, driver):
         before_p = session.get(f"{API}/wallet", headers=passenger["headers"], timeout=15).json()["balance"]
         before_d = session.get(f"{API}/wallet", headers=driver["headers"], timeout=15).json()
         r = session.post(
@@ -322,6 +390,7 @@ class TestTransfer:
         txn = body["transaction"]
         assert txn["type"] == "payment"
         assert txn["status"] == "completed"
+        assert txn["currency"] == "ZAR"
         assert txn["amount"] == 1500
         assert txn["sender_id"] == passenger["user"]["id"]
         assert txn["receiver_id"] == driver["user"]["id"]
@@ -335,7 +404,7 @@ class TestTransfer:
 
 # ---- Transactions list ----
 class TestTransactions:
-    def test_passenger_sees_topup_and_payment(self, session, passenger, driver):
+    def test_passenger_sees_topup_and_payment_zar(self, session, passenger, driver):
         r = session.get(f"{API}/wallet/transactions", headers=passenger["headers"], timeout=15)
         assert r.status_code == 200
         items = r.json()
@@ -343,6 +412,10 @@ class TestTransactions:
         types = {t["type"] for t in items}
         assert "topup" in types
         assert "payment" in types
+        # all currencies should be ZAR
+        for t in items:
+            if "currency" in t:
+                assert t["currency"] == "ZAR", f"non-ZAR txn: {t}"
         # sorted desc
         ts = [t["created_at"] for t in items]
         assert ts == sorted(ts, reverse=True)
@@ -368,19 +441,19 @@ class TestWithdraw:
     def test_withdraw_passenger_forbidden_403(self, session, passenger):
         r = session.post(
             f"{API}/wallet/withdraw",
-            json={"amount": 100, "bank_name": "GTBank", "account_number": "0123456789"},
+            json={"amount": 100, "bank_name": "FNB", "account_number": "0123456789"},
             headers=passenger["headers"],
             timeout=15,
         )
         assert r.status_code == 403
 
-    def test_withdraw_driver_success(self, session, driver):
+    def test_withdraw_driver_success_zar(self, session, driver):
         before = session.get(f"{API}/wallet", headers=driver["headers"], timeout=15).json()["balance"]
         r = session.post(
             f"{API}/wallet/withdraw",
             json={
                 "amount": 500,
-                "bank_name": "GTBank",
+                "bank_name": "FNB",
                 "account_number": "0123456789",
                 "account_name": "TEST_Driver",
             },
@@ -393,11 +466,12 @@ class TestWithdraw:
         assert body["withdrawal"]["status"] == "pending"
         assert body["transaction"]["type"] == "withdrawal"
         assert body["transaction"]["status"] == "pending"
+        assert body["transaction"]["currency"] == "ZAR"
 
     def test_withdraw_insufficient_balance_400(self, session, driver):
         r = session.post(
             f"{API}/wallet/withdraw",
-            json={"amount": 999_999, "bank_name": "GTB", "account_number": "0123456789"},
+            json={"amount": 999_999, "bank_name": "FNB", "account_number": "0123456789"},
             headers=driver["headers"],
             timeout=15,
         )
@@ -481,3 +555,30 @@ class TestRatings:
             timeout=15,
         )
         assert r.status_code == 404
+
+
+# ---- Driver registered without vehicle_plate (optional) ----
+class TestDriverPlateOptional:
+    def test_register_driver_without_plate_defaults_to_empty(self, session):
+        phone = _sa_phone("7")
+        r = session.post(
+            f"{API}/auth/register",
+            json={
+                "phone_number": phone,
+                "full_name": "TEST_DriverNoPlate",
+                "pin": "1212",
+                "role": "driver",
+                # no vehicle_plate
+            },
+            timeout=15,
+        )
+        assert r.status_code == 200, r.text
+        token = r.json()["token"]
+        h = {"Authorization": f"Bearer {token}"}
+        me = session.get(f"{API}/auth/me", headers=h, timeout=15).json()
+        assert me["role"] == "driver"
+        assert "vehicle_plate" in me
+        assert me["vehicle_plate"] == ""
+        w = session.get(f"{API}/wallet", headers=h, timeout=15).json()
+        assert w["currency"] == "ZAR"
+        assert w.get("vehicle_plate", "") == ""

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Tou
 import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Field, Button } from "../../src/ui";
+import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
 import { colors } from "../../src/theme";
 import { useAuth } from "../../src/AuthContext";
 
@@ -17,13 +17,14 @@ export default function Login() {
 
   const onSubmit = async () => {
     setErr(null);
-    if (!phone.trim() || pin.length !== 4) {
+    const localDigits = phone.replace(/\D/g, "").replace(/^0+/, "");
+    if (localDigits.length < 9 || pin.length !== 4) {
       setErr("Enter your phone number and 4-digit PIN");
       return;
     }
     setLoading(true);
     try {
-      await signIn(phone.trim(), pin);
+      await signIn("+27" + localDigits, pin);
       router.replace("/(app)");
     } catch (e: any) {
       setErr(e?.message || "Login failed");
@@ -53,11 +54,12 @@ export default function Login() {
 
           <Field
             label="Phone number"
-            placeholder="+234 801 234 5678"
+            placeholder="82 123 4567"
             value={phone}
-            onChangeText={setPhone}
+            onChangeText={(t) => setPhone(t.replace(/[^0-9 ]/g, "").slice(0, 13))}
             keyboardType="phone-pad"
             testID="login-phone-input"
+            leftAddon={<CountryChip testID="login-country-chip" />}
           />
           <Field
             label="4-digit PIN"
@@ -66,6 +68,7 @@ export default function Login() {
             onChangeText={(t) => setPin(t.replace(/[^0-9]/g, "").slice(0, 4))}
             keyboardType="number-pad"
             secureTextEntry
+            toggleSecure
             maxLength={4}
             testID="login-pin-input"
           />
@@ -81,6 +84,8 @@ export default function Login() {
               <Text style={styles.link}> Create account</Text>
             </Link>
           </View>
+
+          <PoweredBy testID="login-powered" />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

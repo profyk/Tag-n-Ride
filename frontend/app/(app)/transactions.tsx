@@ -6,7 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, Txn } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { Pill } from "../../src/ui";
-import { colors, formatNGN, formatDate, radius } from "../../src/theme";
+import { colors, formatZAR, formatDate, radius } from "../../src/theme";
 
 type Filter = "all" | "in" | "out" | "topup" | "withdrawal";
 
@@ -85,7 +85,7 @@ export default function Transactions() {
                 {t.note ? <Text style={styles.note}>{t.note}</Text> : null}
               </View>
               <View style={{ alignItems: "flex-end" }}>
-                <Text style={[styles.amt, { color }]}>{sign}{formatNGN(t.amount)}</Text>
+                <Text style={[styles.amt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
                 <View style={{ marginTop: 6 }}>
                   <Pill label={t.status} tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
                 </View>

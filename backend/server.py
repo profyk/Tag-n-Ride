@@ -99,6 +99,7 @@ class RegisterIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     pin: str = Field(min_length=4, max_length=4)
     role: Role
+    vehicle_plate: Optional[str] = None
 
     @field_validator("pin")
     @classmethod
@@ -114,6 +115,10 @@ class RegisterIn(BaseModel):
         if not (v.startswith("+") or v.isdigit()):
             raise ValueError("Invalid phone number")
         return v
+
+
+class DriverProfileIn(BaseModel):
+    vehicle_plate: str = Field(min_length=2, max_length=15)
 
 
 class LoginIn(BaseModel):
@@ -192,7 +197,7 @@ async def register(body: RegisterIn):
         "id": str(uuid.uuid4()),
         "user_id": user_id,
         "balance": 0.0,
-        "currency": "NGN",
+        "currency": "ZAR",
         "is_frozen": False,
         "created_at": now_utc(),
     })
@@ -201,6 +206,7 @@ async def register(body: RegisterIn):
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "qr_code": f"app://pay?driver_id={user_id}",
+            "vehicle_plate": (body.vehicle_plate or "").upper().strip(),
             "total_earnings": 0.0,
             "is_verified": False,
             "rating_avg": 0.0,
@@ -240,7 +246,20 @@ async def login(body: LoginIn):
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
+    if user["role"] == "driver":
+        drv = await db.drivers.find_one({"user_id": user["id"]}, {"_id": 0, "vehicle_plate": 1})
+        if drv:
+            user["vehicle_plate"] = drv.get("vehicle_plate", "")
     return user
+
+
+@api.patch("/driver/profile")
+async def update_driver_profile(body: DriverProfileIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Driver only")
+    plate = body.vehicle_plate.upper().strip()
+    await db.drivers.update_one({"user_id": user["id"]}, {"$set": {"vehicle_plate": plate}})
+    return {"vehicle_plate": plate}
 
 
 # ---- Wallet ----
@@ -255,6 +274,7 @@ async def get_wallet(user: dict = Depends(get_current_user)):
         if drv:
             extras = {
                 "qr_code": drv["qr_code"],
+                "vehicle_plate": drv.get("vehicle_plate", ""),
                 "total_earnings": drv["total_earnings"],
                 "rating_avg": drv.get("rating_avg", 0.0),
                 "rating_count": drv.get("rating_count", 0),
@@ -280,7 +300,7 @@ async def topup(body: TopUpIn, user: dict = Depends(get_current_user)):
         "type": "topup",
         "status": "completed",
         "amount": body.amount,
-        "currency": "NGN",
+        "currency": "ZAR",
         "sender_id": None,
         "receiver_id": user["id"],
         "note": "Wallet top-up",
@@ -305,6 +325,7 @@ async def lookup_driver(driver_user_id: str, _: dict = Depends(get_current_user)
         "full_name": user["full_name"],
         "phone_number": user["phone_number"],
         "qr_code": drv["qr_code"],
+        "vehicle_plate": drv.get("vehicle_plate", ""),
         "is_verified": drv.get("is_verified", False),
         "rating_avg": drv.get("rating_avg", 0.0),
         "rating_count": drv.get("rating_count", 0),
@@ -344,7 +365,7 @@ async def transfer(body: TransferIn, user: dict = Depends(get_current_user)):
         "type": "payment",
         "status": "completed",
         "amount": body.amount,
-        "currency": "NGN",
+        "currency": "ZAR",
         "sender_id": user["id"],
         "receiver_id": body.driver_user_id,
         "note": body.note or "Ride payment",
@@ -406,7 +427,7 @@ async def withdraw(body: WithdrawIn, user: dict = Depends(get_current_user)):
         "type": "withdrawal",
         "status": "pending",
         "amount": body.amount,
-        "currency": "NGN",
+        "currency": "ZAR",
         "sender_id": user["id"],
         "receiver_id": None,
         "note": f"Withdraw to {body.bank_name} {body.account_number}",

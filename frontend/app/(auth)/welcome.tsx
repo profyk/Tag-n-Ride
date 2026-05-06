@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, Image, ImageBackground } from "react-native";
 import { Link } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Button } from "../../src/ui";
+import { Button, PoweredBy } from "../../src/ui";
 import { colors } from "../../src/theme";
 
 export default function Welcome() {
@@ -41,6 +41,7 @@ export default function Welcome() {
           <Link href="/(auth)/login" asChild>
             <Button label="I already have an account" onPress={() => {}} variant="secondary" testID="welcome-login-btn" />
           </Link>
+          <PoweredBy testID="welcome-powered" />
         </View>
       </SafeAreaView>
     </View>

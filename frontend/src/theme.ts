@@ -22,11 +22,14 @@ export const colors = {
 export const radius = { sm: 8, md: 16, lg: 24, pill: 9999 };
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 };
 
-export const formatNGN = (n: number | string | undefined | null): string => {
+export const formatZAR = (n: number | string | undefined | null): string => {
   const v = typeof n === "string" ? parseFloat(n) : n ?? 0;
-  if (Number.isNaN(v)) return "₦0.00";
-  return "₦" + (v as number).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (Number.isNaN(v)) return "R 0.00";
+  return "R " + (v as number).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+// Backwards-compat alias for any old call sites
+export const formatNGN = formatZAR;
 
 export const formatDate = (iso: string): string => {
   try {

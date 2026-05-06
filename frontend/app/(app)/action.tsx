@@ -25,6 +25,7 @@ function PassengerScan() {
   const [manualId, setManualId] = useState("");
   const [showManual, setShowManual] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [torch, setTorch] = useState(false);
 
   useEffect(() => {
     if (permission && !permission.granted && permission.canAskAgain) {
@@ -58,9 +59,16 @@ function PassengerScan() {
     <SafeAreaView style={styles.root} edges={["top"]} testID="scan-screen">
       <View style={styles.header}>
         <Text style={styles.title}>Scan & Pay</Text>
-        <TouchableOpacity onPress={() => setShowManual((s) => !s)} testID="toggle-manual-btn" style={styles.iconBtn}>
-          <Ionicons name={showManual ? "scan" : "keypad-outline"} size={22} color={colors.cyan} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {!showManual ? (
+            <TouchableOpacity onPress={() => setTorch((t) => !t)} testID="torch-btn" style={[styles.iconBtn, torch && { backgroundColor: "#FFD60A33", borderColor: colors.yellow }]}>
+              <Ionicons name={torch ? "flashlight" : "flashlight-outline"} size={20} color={torch ? colors.yellow : colors.cyan} />
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={() => setShowManual((s) => !s)} testID="toggle-manual-btn" style={styles.iconBtn}>
+            <Ionicons name={showManual ? "scan" : "keypad-outline"} size={22} color={colors.cyan} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {showManual ? (
@@ -71,33 +79,38 @@ function PassengerScan() {
         </View>
       ) : (
         <View style={styles.cameraWrap}>
-          {permission?.granted && Platform.OS !== "web" ? (
+          {permission?.granted ? (
             <CameraView
               style={StyleSheet.absoluteFillObject}
               facing="back"
+              enableTorch={torch}
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
               onBarcodeScanned={(r) => onScan(r.data)}
             />
           ) : (
             <View style={styles.cameraFallback}>
               <Ionicons name="camera-outline" size={56} color={colors.textDim} />
-              <Text style={styles.fallbackTitle}>Camera not available</Text>
-              <Text style={styles.fallbackText}>{Platform.OS === "web" ? "QR scanning needs the mobile app." : "Camera permission denied."}</Text>
+              <Text style={styles.fallbackTitle}>Camera permission needed</Text>
+              <Text style={styles.fallbackText}>Allow camera access to scan driver QR codes, or enter the driver ID manually.</Text>
               <View style={{ height: 12 }} />
+              <Button label="Allow camera" icon="camera" onPress={() => requestPermission()} testID="grant-camera-btn" />
+              <View style={{ height: 8 }} />
               <Button label="Enter Driver ID manually" variant="secondary" icon="keypad-outline" onPress={() => setShowManual(true)} testID="fallback-manual-btn" />
             </View>
           )}
 
           {/* Reticle */}
-          <View pointerEvents="none" style={styles.reticleWrap}>
-            <View style={styles.reticle}>
-              <Corner pos="tl" />
-              <Corner pos="tr" />
-              <Corner pos="bl" />
-              <Corner pos="br" />
+          {permission?.granted ? (
+            <View pointerEvents="none" style={styles.reticleWrap}>
+              <View style={styles.reticle}>
+                <Corner pos="tl" />
+                <Corner pos="tr" />
+                <Corner pos="bl" />
+                <Corner pos="br" />
+              </View>
+              <Text style={styles.reticleText}>Align QR code within the frame</Text>
             </View>
-            <Text style={styles.reticleText}>Align QR code within the frame</Text>
-          </View>
+          ) : null}
 
           {busy ? (
             <View style={styles.scanningOverlay}>
@@ -137,6 +150,13 @@ function DriverQR() {
         </View>
         <Text style={styles.driverName}>{state.user.full_name}</Text>
         <Text style={styles.driverPhone}>{state.user.phone_number}</Text>
+
+        {wallet?.vehicle_plate ? (
+          <View style={styles.plateBox} testID="driver-vehicle-plate">
+            <Text style={styles.plateLabel}>VEHICLE</Text>
+            <Text style={styles.plateValue}>{wallet.vehicle_plate}</Text>
+          </View>
+        ) : null}
 
         <TouchableOpacity onPress={copyId} style={styles.idChip} testID="driver-id-chip">
           <Ionicons name="finger-print" size={14} color={colors.cyan} />
@@ -182,4 +202,7 @@ const styles = StyleSheet.create({
   idChip: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.cyanDim, borderRadius: 999, marginTop: 14, borderWidth: 1, borderColor: colors.cyan },
   idChipText: { color: colors.cyan, fontWeight: "700", fontSize: 12 },
   qrHint: { color: colors.textMuted, fontSize: 13, marginTop: 18, textAlign: "center", paddingHorizontal: 32 },
+  plateBox: { marginTop: 14, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: "#FFD60A", borderRadius: 8, borderWidth: 2, borderColor: "#0A0A0A" },
+  plateLabel: { color: "#666", fontSize: 9, fontWeight: "800", letterSpacing: 1.4, textAlign: "center" },
+  plateValue: { color: "#0A0A0A", fontSize: 22, fontWeight: "900", letterSpacing: 2, textAlign: "center", fontFamily: "monospace" },
 });

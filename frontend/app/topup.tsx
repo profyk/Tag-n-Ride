@@ -5,9 +5,9 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Field, Button, Card } from "../src/ui";
 import { api } from "../src/api";
-import { colors, formatNGN, radius } from "../src/theme";
+import { colors, formatZAR, radius } from "../src/theme";
 
-const QUICKS = [500, 1000, 2000, 5000, 10000];
+const QUICKS = [50, 100, 200, 500, 1000];
 
 export default function TopUp() {
   const router = useRouter();
@@ -51,7 +51,7 @@ export default function TopUp() {
           </View>
 
           <Field
-            label="Amount (NGN)"
+            label="Amount (ZAR)"
             value={amount}
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ""))}
             placeholder="0.00"

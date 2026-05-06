@@ -67,23 +67,57 @@ type FieldProps = {
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   style?: ViewStyle;
   inputStyle?: TextStyle;
+  toggleSecure?: boolean;
+  leftAddon?: React.ReactNode;
 };
 
-export const Field: React.FC<FieldProps> = ({ label, value, onChangeText, placeholder, keyboardType, secureTextEntry, maxLength, testID, autoCapitalize, style, inputStyle }) => (
-  <View style={[{ marginBottom: space.md }, style]}>
-    {label ? <Text style={styles.label}>{label}</Text> : null}
-    <TextInput
-      testID={testID}
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={colors.textDim}
-      keyboardType={keyboardType}
-      secureTextEntry={secureTextEntry}
-      maxLength={maxLength}
-      autoCapitalize={autoCapitalize}
-      style={[styles.input, inputStyle]}
-    />
+export const Field: React.FC<FieldProps> = ({ label, value, onChangeText, placeholder, keyboardType, secureTextEntry, maxLength, testID, autoCapitalize, style, inputStyle, toggleSecure, leftAddon }) => {
+  const [hidden, setHidden] = React.useState(!!secureTextEntry);
+  const isSecure = !!secureTextEntry && hidden;
+  return (
+    <View style={[{ marginBottom: space.md }, style]}>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
+      <View style={styles.inputRow}>
+        {leftAddon}
+        <TextInput
+          testID={testID}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textDim}
+          keyboardType={keyboardType}
+          secureTextEntry={isSecure}
+          maxLength={maxLength}
+          autoCapitalize={autoCapitalize}
+          style={[styles.input, leftAddon ? styles.inputWithAddon : null, toggleSecure ? styles.inputWithRight : null, inputStyle]}
+        />
+        {toggleSecure && secureTextEntry ? (
+          <TouchableOpacity
+            testID={testID ? `${testID}-toggle` : undefined}
+            onPress={() => setHidden((h) => !h)}
+            activeOpacity={0.85}
+            style={styles.eyeBtn}
+          >
+            <Ionicons name={hidden ? "eye-outline" : "eye-off-outline"} size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
+export const CountryChip: React.FC<{ testID?: string }> = ({ testID }) => (
+  <View testID={testID} style={styles.country}>
+    <Text style={styles.countryFlag}>🇿🇦</Text>
+    <Text style={styles.countryCode}>+27</Text>
+  </View>
+);
+
+export const PoweredBy: React.FC<{ light?: boolean; testID?: string }> = ({ light, testID }) => (
+  <View testID={testID} style={styles.poweredBy}>
+    <Text style={[styles.poweredByText, light && { color: colors.textMuted }]}>
+      Powered by <Text style={styles.poweredByBrand}>BukkaPay Technologies</Text>
+    </Text>
   </View>
 );
 
@@ -131,7 +165,9 @@ const styles = StyleSheet.create({
   btnRow: { flexDirection: "row", alignItems: "center" },
   btnText: { fontSize: 16, fontWeight: "700", letterSpacing: 0.3 },
   label: { color: colors.textMuted, fontSize: 13, fontWeight: "600", marginBottom: 6, letterSpacing: 0.4, textTransform: "uppercase" },
+  inputRow: { flexDirection: "row", alignItems: "stretch", position: "relative" },
   input: {
+    flex: 1,
     backgroundColor: colors.bg,
     borderColor: colors.borderStrong,
     borderWidth: 1,
@@ -141,6 +177,15 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
   },
+  inputWithAddon: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeftWidth: 0 },
+  inputWithRight: { paddingRight: 44 },
+  eyeBtn: { position: "absolute", right: 0, top: 0, bottom: 0, width: 44, alignItems: "center", justifyContent: "center" },
+  country: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, backgroundColor: colors.bg2, borderTopLeftRadius: radius.sm + 4, borderBottomLeftRadius: radius.sm + 4, borderWidth: 1, borderColor: colors.borderStrong, gap: 6 },
+  countryFlag: { fontSize: 18 },
+  countryCode: { color: colors.text, fontWeight: "700", fontSize: 15 },
+  poweredBy: { alignItems: "center", marginTop: 16 },
+  poweredByText: { color: colors.textDim, fontSize: 11, letterSpacing: 0.5 },
+  poweredByBrand: { color: colors.cyan, fontWeight: "800", letterSpacing: 0.6 },
   pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, alignSelf: "flex-start" },
   pillText: { fontSize: 11, fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase" },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 20 },

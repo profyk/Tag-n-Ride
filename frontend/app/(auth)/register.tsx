@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Tou
 import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Field, Button } from "../../src/ui";
+import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
 import { colors, radius } from "../../src/theme";
 import { useAuth } from "../../src/AuthContext";
 
@@ -17,18 +17,27 @@ export default function Register() {
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
+  const [plate, setPlate] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const onSubmit = async () => {
     setErr(null);
     if (name.trim().length < 2) return setErr("Enter your full name");
-    if (!phone.trim()) return setErr("Enter your phone number");
+    const localDigits = phone.replace(/\D/g, "").replace(/^0+/, "");
+    if (localDigits.length < 9) return setErr("Enter a valid SA phone number (9 digits)");
     if (pin.length !== 4) return setErr("PIN must be 4 digits");
     if (pin !== pin2) return setErr("PINs don't match");
+    if (role === "driver" && plate.trim().length < 2) return setErr("Enter your vehicle plate number");
     setLoading(true);
     try {
-      await signUp({ phone_number: phone.trim(), full_name: name.trim(), pin, role });
+      await signUp({
+        phone_number: "+27" + localDigits,
+        full_name: name.trim(),
+        pin,
+        role,
+        vehicle_plate: role === "driver" ? plate.trim().toUpperCase() : undefined,
+      });
       router.replace("/(app)");
     } catch (e: any) {
       setErr(e?.message || "Registration failed");
@@ -80,12 +89,23 @@ export default function Register() {
           <Field label="Full name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="register-name-input" autoCapitalize="words" />
           <Field
             label="Phone number"
-            placeholder="+234 801 234 5678"
+            placeholder="82 123 4567"
             value={phone}
-            onChangeText={setPhone}
+            onChangeText={(t) => setPhone(t.replace(/[^0-9 ]/g, "").slice(0, 13))}
             keyboardType="phone-pad"
             testID="register-phone-input"
+            leftAddon={<CountryChip testID="register-country-chip" />}
           />
+          {role === "driver" ? (
+            <Field
+              label="Vehicle plate number"
+              placeholder="ND 123 456"
+              value={plate}
+              onChangeText={(t) => setPlate(t.toUpperCase().slice(0, 12))}
+              testID="register-plate-input"
+              autoCapitalize="characters"
+            />
+          ) : null}
           <Field
             label="Create 4-digit PIN"
             placeholder="••••"
@@ -93,6 +113,7 @@ export default function Register() {
             onChangeText={(t) => setPin(t.replace(/[^0-9]/g, "").slice(0, 4))}
             keyboardType="number-pad"
             secureTextEntry
+            toggleSecure
             maxLength={4}
             testID="register-pin-input"
           />
@@ -103,6 +124,7 @@ export default function Register() {
             onChangeText={(t) => setPin2(t.replace(/[^0-9]/g, "").slice(0, 4))}
             keyboardType="number-pad"
             secureTextEntry
+            toggleSecure
             maxLength={4}
             testID="register-pin2-input"
           />
@@ -118,6 +140,8 @@ export default function Register() {
               <Text style={styles.link}> Sign in</Text>
             </Link>
           </View>
+
+          <PoweredBy testID="register-powered" />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
