@@ -20,10 +20,19 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # ---- Config ----
-POSTGRES_URL = os.environ["POSTGRES_URL"]
-JWT_SECRET = os.environ["JWT_SECRET"]
+import os
+
+POSTGRES_URL = os.getenv("DATABASE_URL")  # Railway standard
+JWT_SECRET = os.getenv("JWT_SECRET")
+
+if not POSTGRES_URL:
+    raise Exception("DATABASE_URL is not set in environment variables")
+
+if not JWT_SECRET:
+    raise Exception("JWT_SECRET is not set in environment variables")
+
 JWT_ALG = "HS256"
-ACCESS_TTL_MIN = 60 * 24 * 7  # 7 days for mobile UX
+ACCESS_TTL_MIN = 60 * 24 * 7  # 7 days
 
 pool: asyncpg.Pool = None
 
