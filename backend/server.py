@@ -20,12 +20,10 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # ---- Config ----
-import os
-
-POSTGRES_URL = os.getenv("DATABASE_URL")  # Railway standard
+DATABASE_URL = os.getenv("DATABASE_URL")  # Railway standard
 JWT_SECRET = os.getenv("JWT_SECRET")
 
-if not POSTGRES_URL:
+if not DATABASE_URL:
     raise Exception("DATABASE_URL is not set in environment variables")
 
 if not JWT_SECRET:
