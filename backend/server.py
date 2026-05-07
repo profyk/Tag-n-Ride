@@ -111,12 +111,21 @@ CREATE TABLE IF NOT EXISTS withdrawal_requests (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global pool
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    async with pool.acquire() as conn:
-        await conn.execute(CREATE_TABLES_SQL)
-    log.info("Database tables ready")
+    try:
+        pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=5
+        )
+        print("DB pool created")
+    except Exception as e:
+        print("DB connection failed:", e)
+        pool = None
+
     yield
-    await pool.close()
+
+    if pool:
+        await pool.close()
 
 
 app = FastAPI(title="Tag n Ride API", lifespan=lifespan)
