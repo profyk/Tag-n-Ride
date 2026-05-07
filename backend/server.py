@@ -8,6 +8,7 @@ import os
 import logging
 import uuid
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal
 
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # ---- Config ----
-DATABASE_URL = os.getenv("DATABASE_URL")  # Railway standard
+DATABASE_URL = os.getenv("DATABASE_URL")
 JWT_SECRET = os.getenv("JWT_SECRET")
 
 if not DATABASE_URL:
@@ -34,16 +35,8 @@ ACCESS_TTL_MIN = 60 * 24 * 7  # 7 days
 
 pool: asyncpg.Pool = None
 
-app = FastAPI(title="Tag n Ride API")
-api = APIRouter(prefix="/api")
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tagnride")
-
-
-# ---- DB helpers ----
-async def get_pool() -> asyncpg.Pool:
-    return pool
 
 
 CREATE_TABLES_SQL = """
@@ -114,6 +107,30 @@ CREATE TABLE IF NOT EXISTS withdrawal_requests (
 """
 
 
+# ---- Lifespan ----
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global pool
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    async with pool.acquire() as conn:
+        await conn.execute(CREATE_TABLES_SQL)
+    log.info("Database tables ready")
+    yield
+    await pool.close()
+
+
+app = FastAPI(title="Tag n Ride API", lifespan=lifespan)
+api = APIRouter(prefix="/api")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 # ---- Helpers ----
 def hash_pin(pin: str) -> str:
     return bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -155,6 +172,8 @@ async def get_current_user(request: Request) -> dict:
         )
     if not row:
         raise HTTPException(status_code=401, detail="User not found")
+    if not row["is_active"]:
+        raise HTTPException(status_code=403, detail="Account disabled")
     return dict(row)
 
 
@@ -230,21 +249,6 @@ class RateIn(BaseModel):
     comment: Optional[str] = None
 
 
-# ---- Startup ----
-@app.on_event("startup")
-async def on_start():
-    global pool
-    pool = await asyncpg.create_pool(POSTGRES_URL, min_size=2, max_size=10)
-    async with pool.acquire() as conn:
-        await conn.execute(CREATE_TABLES_SQL)
-    log.info("Database tables ready")
-
-
-@app.on_event("shutdown")
-async def on_stop():
-    await pool.close()
-
-
 # ---- Routes ----
 @api.get("/")
 async def health():
@@ -255,7 +259,9 @@ async def health():
 @api.post("/auth/register")
 async def register(body: RegisterIn):
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow("SELECT id FROM users WHERE phone_number=$1", body.phone_number)
+        existing = await conn.fetchrow(
+            "SELECT id FROM users WHERE phone_number=$1", body.phone_number
+        )
         if existing:
             raise HTTPException(status_code=400, detail="Phone number already registered")
         user_id = str(uuid.uuid4())
@@ -372,7 +378,7 @@ async def topup(body: TopUpIn, user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.transaction():
             wallet = await conn.fetchrow(
-                "SELECT balance, is_frozen FROM wallets WHERE user_id=$1", user["id"]
+                "SELECT balance, is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
             )
             if not wallet or wallet["is_frozen"]:
                 raise HTTPException(status_code=400, detail="Wallet not available")
@@ -427,7 +433,9 @@ async def transfer(body: TransferIn, user: dict = Depends(get_current_user)):
     if body.driver_user_id == user["id"]:
         raise HTTPException(status_code=400, detail="Cannot pay yourself")
     async with pool.acquire() as conn:
-        drv = await conn.fetchrow("SELECT id FROM drivers WHERE user_id=$1", body.driver_user_id)
+        drv = await conn.fetchrow(
+            "SELECT id FROM drivers WHERE user_id=$1", body.driver_user_id
+        )
         if not drv:
             raise HTTPException(status_code=404, detail="Driver not found")
         async with conn.transaction():
@@ -444,7 +452,8 @@ async def transfer(body: TransferIn, user: dict = Depends(get_current_user)):
                 "UPDATE wallets SET balance=$1 WHERE user_id=$2", new_sender_balance, user["id"]
             )
             await conn.execute(
-                "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2", body.amount, body.driver_user_id
+                "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2",
+                body.amount, body.driver_user_id
             )
             await conn.execute(
                 "UPDATE drivers SET total_earnings=total_earnings+$1 WHERE user_id=$2",
@@ -543,57 +552,4 @@ async def rate(body: RateIn, user: dict = Depends(get_current_user)):
             body.transaction_id, user["id"]
         )
         if not txn:
-            raise HTTPException(status_code=404, detail="Transaction not found")
-        if txn["type"] != "payment" or txn["receiver_id"] != body.driver_user_id:
-            raise HTTPException(status_code=400, detail="Transaction does not match driver")
-        existing = await conn.fetchrow(
-            "SELECT id FROM ratings WHERE transaction_id=$1", body.transaction_id
-        )
-        if existing:
-            raise HTTPException(status_code=400, detail="Already rated")
-        rating_id = str(uuid.uuid4())
-        await conn.execute(
-            """INSERT INTO ratings (id, driver_user_id, passenger_user_id, transaction_id, stars, comment)
-               VALUES ($1,$2,$3,$4,$5,$6)""",
-            rating_id, body.driver_user_id, user["id"], body.transaction_id, body.stars, body.comment
-        )
-        agg = await conn.fetchrow(
-            "SELECT AVG(stars) as avg, COUNT(*) as cnt FROM ratings WHERE driver_user_id=$1",
-            body.driver_user_id
-        )
-        if agg:
-            await conn.execute(
-                "UPDATE drivers SET rating_avg=$1, rating_count=$2 WHERE user_id=$3",
-                round(float(agg["avg"]), 2), agg["cnt"], body.driver_user_id
-            )
-    return {"ok": True}
-
-
-@api.get("/wallet/withdrawals")
-async def withdrawals(user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Only drivers")
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM withdrawal_requests WHERE user_id=$1 ORDER BY created_at DESC",
-            user["id"]
-        )
-    items = []
-    for row in rows:
-        r = dict(row)
-        r["amount"] = float(r["amount"])
-        r["created_at"] = iso(r["created_at"])
-        items.append(r)
-    return items
-
-
-# Mount router
-app.include_router(api)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+            raise HTTPException(status_code=404, de
