@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only the requirements first to leverage Docker layer caching
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 # Install into an isolated prefix so we can copy just the packages later
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
@@ -29,8 +29,8 @@ WORKDIR /app
 # Pull installed packages from builder (keeps final image small)
 COPY --from=builder /install /usr/local
 
-# Copy only the application source from the monorepo backend folder
-COPY backend/app ./app
+# Copy application source (build context is already backend/)
+COPY server.py .
 
 # Railway (and most platforms) inject PORT; fall back to 8080
 ENV PORT=8080 \
@@ -42,7 +42,7 @@ USER appuser
 EXPOSE 8080
 
 # Use shell form so $PORT is expanded at runtime
-CMD uvicorn app.main:app \
+CMD uvicorn server:app \
         --host 0.0.0.0 \
         --port ${PORT} \
         --workers 1 \
