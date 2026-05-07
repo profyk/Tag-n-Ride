@@ -19,7 +19,7 @@ export default function Welcome() {
       <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.top}>
           <Image
-            source={{ uri: "https://customer-assets.emergentagent.com/job_57c62ad7-fa2d-4199-83da-1e64e8a2afac/artifacts/pqg1jmf2_file_000000008b9071fd825a3aae1fed8553.png" }}
+            source={require("../../assets/images/icon.png")}
             style={styles.logo}
             resizeMode="contain"
           />

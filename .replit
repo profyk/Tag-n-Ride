@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["cargo", "libiconv", "libxcrypt", "rustc"]
+packages = ["cargo", "libiconv", "libxcrypt", "postgresql", "rustc"]
 
 [userenv]
 
@@ -12,6 +12,7 @@ packages = ["cargo", "libiconv", "libxcrypt", "rustc"]
 MONGO_URL = "mongomock://"
 DB_NAME = "tagnride"
 EXPO_PUBLIC_BACKEND_URL = "https://8000-697fe63b-cc0c-41d0-b685-365b4065c08c-00-aaz82b03cqzl.spock.replit.dev"
+POSTGRES_URL = "postgresql://postgres:GjMjKIFCdJvieFuCprBBaNNdAOuGGFWR@maglev.proxy.rlwy.net:47368/railway"
 
 [workflows]
 runButton = "Project"
@@ -56,6 +57,14 @@ outputType = "webview"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3000
+
+[[ports]]
+localPort = 5002
+externalPort = 3001
 
 [[ports]]
 localPort = 8000
