@@ -104,6 +104,17 @@ CREATE TABLE IF NOT EXISTS withdrawal_requests (
     status TEXT DEFAULT 'pending',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS payout_accounts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    type TEXT NOT NULL CHECK (type IN ('self', 'owner')),
+    bank_name TEXT NOT NULL,
+    account_number TEXT NOT NULL,
+    account_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, type)
+);
 """
 
 
@@ -118,6 +129,9 @@ async def lifespan(app: FastAPI):
             max_size=5
         )
         print("DB pool created")
+        async with pool.acquire() as conn:
+    await conn.execute(CREATE_TABLES_SQL)
+print("Tables ready")
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
