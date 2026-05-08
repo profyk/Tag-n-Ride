@@ -561,4 +561,4 @@ async def rate(body: RateIn, user: dict = Depends(get_current_user)):
             body.transaction_id, user["id"]
         )
         if not txn:
-            raise HTTPException(status_code=404, de
+            raise HTTPException(status_code=404, detail="Not found")
