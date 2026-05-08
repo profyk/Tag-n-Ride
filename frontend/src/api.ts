@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BASE = "https://tag-n-ride-production.up.railway.app";
+
 const TOKEN_KEY = "tnr_token";
 
 export const tokenStore = {
