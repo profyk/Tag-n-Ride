@@ -128,10 +128,9 @@ async def lifespan(app: FastAPI):
             min_size=1,
             max_size=5
         )
-        print("DB pool created")
         async with pool.acquire() as conn:
-    await conn.execute(CREATE_TABLES_SQL)
-print("Tables ready")
+            await conn.execute(CREATE_TABLES_SQL)
+        print("DB pool created, tables ready")
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
@@ -211,8 +210,56 @@ def gen_ref() -> str:
     return f"PAY-{secrets.token_hex(6).upper()}"
 
 
+async def _do_withdraw(conn, user: dict, amount: float, bank_name: str,
+                       account_number: str, account_name: str) -> dict:
+    async with conn.transaction():
+        wallet = await conn.fetchrow(
+            "SELECT balance, is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE",
+            user["id"]
+        )
+        if not wallet or wallet["is_frozen"]:
+            raise HTTPException(status_code=400, detail="Wallet not available")
+        if float(wallet["balance"]) < amount:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        new_balance = float(wallet["balance"]) - amount
+        await conn.execute(
+            "UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"]
+        )
+        req_id = str(uuid.uuid4())
+        acct_name = account_name or user["full_name"]
+        await conn.execute(
+            """INSERT INTO withdrawal_requests
+               (id, user_id, amount, bank_name, account_number, account_name)
+               VALUES ($1,$2,$3,$4,$5,$6)""",
+            req_id, user["id"], amount, bank_name, account_number, acct_name
+        )
+        txn_id = str(uuid.uuid4())
+        ref = gen_ref()
+        note = f"Withdraw to {bank_name} {account_number}"
+        await conn.execute(
+            """INSERT INTO transactions
+               (id, reference, type, status, amount, sender_id, receiver_id, note)
+               VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
+            txn_id, ref, amount, user["id"], note
+        )
+        req_row = await conn.fetchrow(
+            "SELECT * FROM withdrawal_requests WHERE id=$1", req_id
+        )
+        txn_row = await conn.fetchrow(
+            "SELECT * FROM transactions WHERE id=$1", txn_id
+        )
+    req = dict(req_row)
+    req["amount"] = float(req["amount"])
+    req["created_at"] = iso(req["created_at"])
+    txn = dict(txn_row)
+    txn["amount"] = float(txn["amount"])
+    txn["created_at"] = iso(txn["created_at"])
+    return {"balance": new_balance, "withdrawal": req, "transaction": txn}
+
+
 # ---- Models ----
 Role = Literal["passenger", "driver"]
+PayoutType = Literal["self", "owner"]
 
 
 class RegisterIn(BaseModel):
@@ -259,9 +306,21 @@ class TransferIn(BaseModel):
 
 class WithdrawIn(BaseModel):
     amount: float = Field(gt=0, le=1_000_000)
+    bank_name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    account_number: Optional[str] = Field(default=None, min_length=6, max_length=20)
+    account_name: Optional[str] = None
+
+
+class PayoutAccountIn(BaseModel):
     bank_name: str = Field(min_length=2, max_length=100)
     account_number: str = Field(min_length=6, max_length=20)
     account_name: Optional[str] = None
+    type: PayoutType
+
+
+class CashUpIn(BaseModel):
+    amount: float = Field(gt=0, le=1_000_000)
+    type: PayoutType
 
 
 class RateIn(BaseModel):
@@ -525,170 +584,12 @@ async def transactions(limit: int = 50, user: dict = Depends(get_current_user)):
 async def withdraw(body: WithdrawIn, user: dict = Depends(get_current_user)):
     if user["role"] != "driver":
         raise HTTPException(status_code=403, detail="Only drivers can withdraw")
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            wallet = await conn.fetchrow(
-                "SELECT balance, is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
-            )
-            if not wallet or wallet["is_frozen"]:
-                raise HTTPException(status_code=400, detail="Wallet not available")
-            if float(wallet["balance"]) < body.amount:
-                raise HTTPException(status_code=400, detail="Insufficient balance")
-            new_balance = float(wallet["balance"]) - body.amount
-            await conn.execute(
-                "UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"]
-            )
-            req_id = str(uuid.uuid4())
-            acct_name = body.account_name or user["full_name"]
-            await conn.execute(
-                """INSERT INTO withdrawal_requests (id, user_id, amount, bank_name, account_number, account_name)
-                   VALUES ($1,$2,$3,$4,$5,$6)""",
-                req_id, user["id"], body.amount, body.bank_name, body.account_number, acct_name
-            )
-            txn_id = str(uuid.uuid4())
-            ref = gen_ref()
-            note = f"Withdraw to {body.bank_name} {body.account_number}"
-            await conn.execute(
-                """INSERT INTO transactions (id, reference, type, status, amount, sender_id, receiver_id, note)
-                   VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
-                txn_id, ref, body.amount, user["id"], note
-            )
-            req_row = await conn.fetchrow("SELECT * FROM withdrawal_requests WHERE id=$1", req_id)
-            txn_row = await conn.fetchrow("SELECT * FROM transactions WHERE id=$1", txn_id)
-    req = dict(req_row)
-    req["amount"] = float(req["amount"])
-    req["created_at"] = iso(req["created_at"])
-    txn = dict(txn_row)
-    txn["amount"] = float(txn["amount"])
-    txn["created_at"] = iso(txn["created_at"])
-    return {"balance": new_balance, "withdrawal": req, "transaction": txn}
-
-
-@api.post("/wallet/rate")
-async def rate(body: RateIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "passenger":
-        raise HTTPException(status_code=403, detail="Only passengers can rate")
-    async with pool.acquire() as conn:
-        txn = await conn.fetchrow(
-            "SELECT id, type, receiver_id FROM transactions WHERE id=$1 AND sender_id=$2",
-            body.transaction_id, user["id"]
-        )
-        if not txn:
-            raise HTTPException(status_code=404, detail="Not found")
-app.include_router(api)
-# ============================================================
-# TAG N RIDE — BACKEND EXTENSION
-# Paste each section into server.py at the indicated location
-# ============================================================
-
-
-# ── 1. ADD TO CREATE_TABLES_SQL (append inside the triple-quoted string) ────────
-
-"""
-CREATE TABLE IF NOT EXISTS payout_accounts (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
-    type TEXT NOT NULL CHECK (type IN ('self', 'owner')),
-    bank_name TEXT NOT NULL,
-    account_number TEXT NOT NULL,
-    account_name TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (user_id, type)
-);
-"""
-
-
-# ── 2. NEW PYDANTIC MODELS (add after existing models) ──────────────────────────
-
-PayoutType = Literal["self", "owner"]
-
-
-class PayoutAccountIn(BaseModel):
-    bank_name: str = Field(min_length=2, max_length=100)
-    account_number: str = Field(min_length=6, max_length=20)
-    account_name: Optional[str] = None
-    type: PayoutType
-
-
-class CashUpIn(BaseModel):
-    amount: float = Field(gt=0, le=1_000_000)
-    type: PayoutType
-
-
-# ── 3. INTERNAL HELPER (add after existing helpers) ─────────────────────────────
-
-async def _do_withdraw(conn, user: dict, amount: float, bank_name: str,
-                       account_number: str, account_name: str) -> dict:
-    """
-    Core withdrawal logic — used by both /withdraw and /cashup.
-    Must be called inside an existing asyncpg connection (NOT a pool.acquire block).
-    Handles its own transaction internally.
-    """
-    async with conn.transaction():
-        wallet = await conn.fetchrow(
-            "SELECT balance, is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE",
-            user["id"]
-        )
-        if not wallet or wallet["is_frozen"]:
-            raise HTTPException(status_code=400, detail="Wallet not available")
-        if float(wallet["balance"]) < amount:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-
-        new_balance = float(wallet["balance"]) - amount
-        await conn.execute(
-            "UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"]
-        )
-
-        req_id = str(uuid.uuid4())
-        acct_name = account_name or user["full_name"]
-        await conn.execute(
-            """INSERT INTO withdrawal_requests
-               (id, user_id, amount, bank_name, account_number, account_name)
-               VALUES ($1,$2,$3,$4,$5,$6)""",
-            req_id, user["id"], amount, bank_name, account_number, acct_name
-        )
-
-        txn_id = str(uuid.uuid4())
-        ref = gen_ref()
-        note = f"Withdraw to {bank_name} {account_number}"
-        await conn.execute(
-            """INSERT INTO transactions
-               (id, reference, type, status, amount, sender_id, receiver_id, note)
-               VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
-            txn_id, ref, amount, user["id"], note
-        )
-
-        req_row = await conn.fetchrow(
-            "SELECT * FROM withdrawal_requests WHERE id=$1", req_id
-        )
-        txn_row = await conn.fetchrow(
-            "SELECT * FROM transactions WHERE id=$1", txn_id
-        )
-
-    req = dict(req_row)
-    req["amount"] = float(req["amount"])
-    req["created_at"] = iso(req["created_at"])
-
-    txn = dict(txn_row)
-    txn["amount"] = float(txn["amount"])
-    txn["created_at"] = iso(txn["created_at"])
-
-    return {"balance": new_balance, "withdrawal": req, "transaction": txn}
-
-
-# ── 4. REPLACE EXISTING /wallet/withdraw ENDPOINT ───────────────────────────────
-
-@api.post("/wallet/withdraw")
-async def withdraw(body: WithdrawIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Only drivers can withdraw")
 
     bank_name = body.bank_name
     account_number = body.account_number
     account_name = body.account_name
 
     async with pool.acquire() as conn:
-        # Auto-fetch saved payout account if any field is missing
         if not bank_name or not account_number:
             saved = await conn.fetchrow(
                 "SELECT * FROM payout_accounts WHERE user_id=$1 AND type='self'",
@@ -709,21 +610,17 @@ async def withdraw(body: WithdrawIn, user: dict = Depends(get_current_user)):
     return result
 
 
-# ── 5. NEW ENDPOINTS (add after existing routes) ─────────────────────────────────
-
 @api.post("/wallet/payout-account")
 async def save_payout_account(body: PayoutAccountIn, user: dict = Depends(get_current_user)):
     if user["role"] != "driver":
         raise HTTPException(status_code=403, detail="Drivers only")
 
     async with pool.acquire() as conn:
-        existing_type = await conn.fetchrow(
+        existing = await conn.fetchrow(
             "SELECT id FROM payout_accounts WHERE user_id=$1 AND type=$2",
             user["id"], body.type
         )
-
-        if existing_type:
-            # UPDATE existing account of this type
+        if existing:
             await conn.execute(
                 """UPDATE payout_accounts
                    SET bank_name=$1, account_number=$2, account_name=$3
@@ -733,7 +630,6 @@ async def save_payout_account(body: PayoutAccountIn, user: dict = Depends(get_cu
             )
             log.info("payout_account updated | user=%s type=%s", user["id"], body.type)
         else:
-            # Enforce max 2 accounts
             count = await conn.fetchval(
                 "SELECT COUNT(*) FROM payout_accounts WHERE user_id=$1", user["id"]
             )
@@ -778,7 +674,6 @@ async def get_payout_accounts(user: dict = Depends(get_current_user)):
         r = dict(row)
         r["created_at"] = iso(r["created_at"])
         result.append(r)
-
     return result
 
 
@@ -799,7 +694,6 @@ async def cashup(body: CashUpIn, user: dict = Depends(get_current_user)):
                 status_code=400,
                 detail=f"No '{body.type}' payout account saved. Please add one first."
             )
-
         result = await _do_withdraw(
             conn, user, body.amount,
             account["bank_name"],
@@ -809,4 +703,44 @@ async def cashup(body: CashUpIn, user: dict = Depends(get_current_user)):
 
     log.info("cashup completed | user=%s amount=%.2f type=%s", user["id"], body.amount, body.type)
     return {**result, "payout_type": body.type}
-        
+
+
+@api.post("/wallet/rate")
+async def rate(body: RateIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "passenger":
+        raise HTTPException(status_code=403, detail="Only passengers can rate")
+    async with pool.acquire() as conn:
+        txn = await conn.fetchrow(
+            "SELECT id, type, receiver_id FROM transactions WHERE id=$1 AND sender_id=$2",
+            body.transaction_id, user["id"]
+        )
+        if not txn:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        if txn["type"] != "payment":
+            raise HTTPException(status_code=400, detail="Can only rate ride payments")
+        if txn["receiver_id"] != body.driver_user_id:
+            raise HTTPException(status_code=400, detail="Driver mismatch")
+        existing_rating = await conn.fetchrow(
+            "SELECT id FROM ratings WHERE transaction_id=$1", body.transaction_id
+        )
+        if existing_rating:
+            raise HTTPException(status_code=400, detail="Already rated this transaction")
+        rating_id = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO ratings (id, driver_user_id, passenger_user_id, transaction_id, stars, comment)
+               VALUES ($1,$2,$3,$4,$5,$6)""",
+            rating_id, body.driver_user_id, user["id"], body.transaction_id, body.stars, body.comment
+        )
+        rows = await conn.fetch(
+            "SELECT stars FROM ratings WHERE driver_user_id=$1", body.driver_user_id
+        )
+        all_stars = [r["stars"] for r in rows]
+        new_avg = sum(all_stars) / len(all_stars)
+        await conn.execute(
+            "UPDATE drivers SET rating_avg=$1, rating_count=$2 WHERE user_id=$3",
+            new_avg, len(all_stars), body.driver_user_id
+        )
+    return {"rated": True, "stars": body.stars, "new_avg": round(new_avg, 2)}
+
+
+app.include_router(api)
