@@ -562,3 +562,4 @@ async def rate(body: RateIn, user: dict = Depends(get_current_user)):
         )
         if not txn:
             raise HTTPException(status_code=404, detail="Not found")
+app.include_router(api)
