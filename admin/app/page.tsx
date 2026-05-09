@@ -1,1 +1,2 @@
-// Home Page
+import { redirect } from "next/navigation";
+export default function Root() { redirect("/admin/dashboard"); }
