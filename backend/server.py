@@ -742,5 +742,282 @@ async def rate(body: RateIn, user: dict = Depends(get_current_user)):
         )
     return {"rated": True, "stars": body.stars, "new_avg": round(new_avg, 2)}
 
+# ---- Admin auth guard ----
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+# ---- Admin: Dashboard ----
+@api.get("/admin/dashboard")
+async def admin_dashboard(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role != 'admin'")
+        total_drivers = await conn.fetchval("SELECT COUNT(*) FROM drivers")
+        total_transactions = await conn.fetchval("SELECT COUNT(*) FROM transactions")
+        total_revenue = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed'"
+        )
+        recent = await conn.fetch(
+            "SELECT * FROM transactions ORDER BY created_at DESC LIMIT 10"
+        )
+    return {
+        "total_users": total_users,
+        "total_drivers": total_drivers,
+        "total_transactions": total_transactions,
+        "total_revenue": float(total_revenue),
+        "recent_transactions": [
+            {**dict(r), "amount": float(r["amount"]), "created_at": iso(r["created_at"])}
+            for r in recent
+        ],
+    }
+
+
+# ---- Admin: Users ----
+@api.get("/admin/users")
+async def admin_users(search: Optional[str] = None, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        if search:
+            rows = await conn.fetch(
+                "SELECT id, phone_number, full_name, role, is_active, created_at FROM users WHERE phone_number ILIKE $1 ORDER BY created_at DESC",
+                f"%{search}%"
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT id, phone_number, full_name, role, is_active, created_at FROM users ORDER BY created_at DESC"
+            )
+    return [
+        {**dict(r), "created_at": iso(r["created_at"])}
+        for r in rows
+    ]
+
+
+@api.post("/admin/block/{user_id}")
+async def admin_block(user_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET is_active=FALSE WHERE id=$1", user_id)
+    log.info("admin block | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+@api.post("/admin/unblock/{user_id}")
+async def admin_unblock(user_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET is_active=TRUE WHERE id=$1", user_id)
+    log.info("admin unblock | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+@api.post("/admin/reset-pin/{user_id}")
+async def admin_reset_pin(user_id: str, admin: dict = Depends(require_admin)):
+    # Resets to 0000 — driver must change immediately
+    new_hash = hash_pin("0000")
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET pin_hash=$1 WHERE id=$2", new_hash, user_id)
+    log.info("admin reset-pin | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True, "temporary_pin": "0000"}
+
+
+# ---- Admin: Drivers ----
+@api.get("/admin/drivers")
+async def admin_drivers(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT d.*, u.full_name, u.phone_number
+            FROM drivers d JOIN users u ON u.id = d.user_id
+            ORDER BY d.created_at DESC
+        """)
+    return [
+        {
+            "user_id": r["user_id"],
+            "full_name": r["full_name"],
+            "phone_number": r["phone_number"],
+            "vehicle_plate": r["vehicle_plate"],
+            "total_earnings": float(r["total_earnings"]),
+            "is_verified": r["is_verified"],
+            "rating_avg": float(r["rating_avg"]),
+            "rating_count": r["rating_count"],
+            "qr_code": r["qr_code"],
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+@api.get("/admin/drivers/{user_id}")
+async def admin_driver_detail(user_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT d.*, u.full_name, u.phone_number
+            FROM drivers d JOIN users u ON u.id = d.user_id
+            WHERE d.user_id=$1
+        """, user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    return {
+        "user_id": row["user_id"],
+        "full_name": row["full_name"],
+        "phone_number": row["phone_number"],
+        "vehicle_plate": row["vehicle_plate"],
+        "total_earnings": float(row["total_earnings"]),
+        "is_verified": row["is_verified"],
+        "rating_avg": float(row["rating_avg"]),
+        "rating_count": row["rating_count"],
+        "qr_code": row["qr_code"],
+        "created_at": iso(row["created_at"]),
+    }
+
+
+@api.post("/admin/verify-driver/{user_id}")
+async def admin_verify_driver(user_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE drivers SET is_verified=TRUE WHERE user_id=$1", user_id)
+    log.info("admin verify-driver | by=%s driver=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+# ---- Admin: Transactions ----
+@api.get("/admin/transactions")
+async def admin_transactions(
+    type: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    admin: dict = Depends(require_admin)
+):
+    conditions = []
+    params = []
+    if type:
+        params.append(type)
+        conditions.append(f"t.type=${len(params)}")
+    if from_date:
+        params.append(from_date)
+        conditions.append(f"t.created_at >= ${len(params)}::date")
+    if to_date:
+        params.append(to_date)
+        conditions.append(f"t.created_at < (${len(params)}::date + interval '1 day')")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(f"""
+            SELECT t.*,
+              su.full_name as sender_name,
+              ru.full_name as receiver_name
+            FROM transactions t
+            LEFT JOIN users su ON su.id = t.sender_id
+            LEFT JOIN users ru ON ru.id = t.receiver_id
+            {where}
+            ORDER BY t.created_at DESC
+            LIMIT 500
+        """, *params)
+    return [
+        {
+            **dict(r),
+            "amount": float(r["amount"]),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+# ---- Admin: Withdrawals ----
+@api.get("/admin/withdrawals")
+async def admin_withdrawals(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT w.*, u.full_name as user_name
+            FROM withdrawal_requests w
+            JOIN users u ON u.id = w.user_id
+            ORDER BY w.created_at DESC
+        """)
+    return [
+        {**dict(r), "amount": float(r["amount"]), "created_at": iso(r["created_at"])}
+        for r in rows
+    ]
+
+
+@api.post("/admin/withdraw/{withdrawal_id}/approve")
+async def admin_approve_withdrawal(withdrawal_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE withdrawal_requests SET status='approved' WHERE id=$1", withdrawal_id
+        )
+        await conn.execute(
+            "UPDATE transactions SET status='completed' WHERE note LIKE '%' || (SELECT account_number FROM withdrawal_requests WHERE id=$1) || '%' AND status='pending'",
+            withdrawal_id
+        )
+    log.info("admin approve-withdrawal | by=%s id=%s", admin["id"], withdrawal_id)
+    return {"ok": True}
+
+
+@api.post("/admin/withdraw/{withdrawal_id}/reject")
+async def admin_reject_withdrawal(withdrawal_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow(
+            "SELECT user_id, amount FROM withdrawal_requests WHERE id=$1 AND status='pending'",
+            withdrawal_id
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="Withdrawal not found or already processed")
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE withdrawal_requests SET status='rejected' WHERE id=$1", withdrawal_id
+            )
+            # Refund the balance
+            await conn.execute(
+                "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2",
+                req["amount"], req["user_id"]
+            )
+    log.info("admin reject-withdrawal | by=%s id=%s", admin["id"], withdrawal_id)
+    return {"ok": True}
+
+
+# ---- Admin: Payout Accounts ----
+@api.get("/admin/payout-accounts")
+async def admin_payout_accounts(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT p.*, u.full_name as driver_name
+            FROM payout_accounts p
+            JOIN users u ON u.id = p.user_id
+            ORDER BY p.created_at DESC
+        """)
+    return [
+        {**dict(r), "created_at": iso(r["created_at"])}
+        for r in rows
+    ]
+
+
+# ---- Admin: Analytics ----
+@api.get("/admin/analytics")
+async def admin_analytics(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        daily = await conn.fetch("""
+            SELECT
+                DATE(created_at) as date,
+                SUM(amount) as amount,
+                COUNT(*) as count
+            FROM transactions
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(created_at)
+            ORDER BY date ASC
+        """)
+        leaderboard = await conn.fetch("""
+            SELECT u.full_name as name, d.total_earnings as earnings
+            FROM drivers d JOIN users u ON u.id = d.user_id
+            ORDER BY d.total_earnings DESC
+            LIMIT 10
+        """)
+    return {
+        "daily_volume": [
+            {"date": str(r["date"]), "amount": float(r["amount"]), "count": r["count"]}
+            for r in daily
+        ],
+        "driver_leaderboard": [
+            {"name": r["name"], "earnings": float(r["earnings"])}
+            for r in leaderboard
+        ],
+    }
+    
 
 app.include_router(api)
