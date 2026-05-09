@@ -1,3 +1,42 @@
+tag-n-ride/
+├── backend/          # Node.js + Express API
+│   ├── src/
+│   │   ├── controllers/
+│   │   │   ├── authController.js
+│   │   │   └── walletController.js
+│   │   ├── db/
+│   │   │   ├── pool.js
+│   │   │   └── migrate.js
+│   │   ├── middleware/
+│   │   │   └── auth.js
+│   │   ├── routes/
+│   │   │   ├── auth.js
+│   │   │   └── wallet.js
+│   │   └── index.js
+│   ├── .env.example
+│   └── package.json
+│
+└── frontend/         # React Native (Expo)
+    ├── src/
+    │   ├── components/
+    │   │   └── UI.js
+    │   ├── context/
+    │   │   └── AuthContext.js
+    │   ├── navigation/
+    │   │   └── AppNavigator.js
+    │   ├── screens/
+    │   │   ├── LoginScreen.js
+    │   │   ├── RegisterScreen.js
+    │   │   ├── PassengerDashboard.js
+    │   │   ├── DriverDashboard.js
+    │   │   ├── ScanQRScreen.js
+    │   │   └── TransactionsScreen.js
+    │   └── utils/
+    │       ├── api.js
+    │       └── theme.js
+    ├── App.js
+    ├── app.json
+    └── package.json
 # Tag n Ride — Admin Dashboard
 
 Production-ready Next.js admin panel for the Tag n Ride fintech system.
