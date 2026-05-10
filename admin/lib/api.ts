@@ -66,8 +66,8 @@ export type DashboardStats = {
 };
 
 export const api = {
-  login: (phone_number: string, pin: string) =>
-    client.post<{ token: string; user: User }>("/api/auth/login", { phone_number, pin }),
+  login: (email: string, password: string) =>
+  client.post<{ token: string; user: User }>("/api/auth/admin-login", { email, password }),
   dashboard: () => client.get<DashboardStats>("/api/admin/dashboard"),
   users: (search?: string) =>
     client.get<User[]>("/api/admin/users", { params: search ? { search } : {} }),
