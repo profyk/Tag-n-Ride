@@ -155,3 +155,8 @@ export type PayoutAccount = {
   created_at: string;
 };
       
+changePin: (body: { current_pin: string; new_pin: string }) =>
+  request<{ ok: boolean }>("/api/auth/change-pin", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }),
