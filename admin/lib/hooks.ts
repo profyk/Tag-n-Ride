@@ -67,3 +67,82 @@ export function useWithdrawalAction() {
     onError: (e: Error) => toast.error(e.message),
   });
 }
+
+export const useAdmins = () =>
+  useQuery({ queryKey: ["admins"], queryFn: () => api.listAdmins().then((r) => r.data) });
+
+export function useCreateAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { full_name: string; email: string; password: string }) =>
+      api.createAdmin(body),
+    onSuccess: () => {
+      toast.success("Admin created successfully");
+      qc.invalidateQueries({ queryKey: ["admins"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export function useDeleteAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteAdmin(id),
+    onSuccess: () => {
+      toast.success("Admin deleted");
+      qc.invalidateQueries({ queryKey: ["admins"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteUser(id),
+    onSuccess: () => {
+      toast.success("User deleted");
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export function useFreezeWallet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, freeze }: { id: string; freeze: boolean }) =>
+      freeze ? api.freezeWallet(id) : api.unfreezeWallet(id),
+    onSuccess: (_: unknown, { freeze }: { id: string; freeze: boolean }) => {
+      toast.success(freeze ? "Wallet frozen" : "Wallet unfrozen");
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export function useTransferFunds() {
+  return useMutation({
+    mutationFn: (body: { from_user_id: string; to_user_id: string; amount: number; note?: string }) =>
+      api.transferFunds(body),
+    onSuccess: () => toast.success("Funds transferred successfully"),
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export function useAdjustBalance() {
+  return useMutation({
+    mutationFn: (body: { user_id: string; amount: number; note?: string }) =>
+      api.adjustBalance(body),
+    onSuccess: (r: { data: { new_balance: number } }) =>
+      toast.success(`Balance updated. New balance: R${r.data.new_balance.toFixed(2)}`),
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+export const useUserWallet = (id: string) =>
+  useQuery({
+    queryKey: ["wallet", id],
+    queryFn: () => api.getUserWallet(id).then((r) => r.data),
+    enabled: !!id,
+  });
