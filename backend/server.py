@@ -783,6 +783,29 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
+@api.post("/auth/admin-login")
+async def admin_login(body: AdminLoginIn):
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, email, full_name, role, password_hash, is_active FROM users WHERE email=$1",
+            body.email.strip().lower()
+        )
+    if not user or user["role"] != "admin":
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user["is_active"]:
+        raise HTTPException(status_code=403, detail="Account disabled")
+    if not bcrypt.checkpw(body.password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token(user["id"], user["role"])
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "role": user["role"],
+        },
+    }
 
 # ---- Admin: Dashboard ----
 @api.get("/admin/dashboard")
