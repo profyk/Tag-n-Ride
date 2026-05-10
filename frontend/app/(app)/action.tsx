@@ -53,8 +53,8 @@ function PassengerScan() {
   const submitManual = () => {
     const code = manualCode.trim().toUpperCase();
     if (!code) return;
-    if (!code.startsWith("TNR") || code.length !== 15) {
-      Alert.alert("Invalid code", "Please enter a valid 15-character TNR driver code.");
+    if (!code.startsWith("TNR") || code.length !== 16) {
+      Alert.alert("Invalid code", "Please enter a valid 16-character TNR driver code.");
       return;
     }
     goPay(code);
