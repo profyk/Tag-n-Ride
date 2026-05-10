@@ -9,8 +9,8 @@ import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState("");
-  const [pin, setPin] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { if (isAuthenticated()) router.push("/admin/dashboard"); }, [router]);
@@ -19,7 +19,7 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await api.login(phone, pin);
+      const res = await api.login(email, password);
       if (res.data.user.role !== "admin") {
         toast.error("Access denied — admin only");
         return;
@@ -39,13 +39,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <Image
-              src="/icons/logo.png"
-              alt="Tag n Ride"
-              width={96}
-              height={96}
-              className="rounded-full border-2 border-cyan/30"
-            />
+            <Image src="/icons/logo.png" alt="Tag n Ride" width={96} height={96}
+              className="rounded-full border-2 border-cyan/30" />
           </div>
           <h1 className="text-text font-bold text-2xl">Tag n Ride</h1>
           <p className="text-textMuted text-sm mt-1">Admin Dashboard</p>
@@ -53,34 +48,21 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="bg-bg2 border border-border rounded-xl p-6 space-y-4">
           <div>
             <label className="block text-xs font-bold text-textMuted uppercase tracking-widest mb-1.5">
-              Phone Number
+              Email Address
             </label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+27 800 000 000"
-              required
-              className="w-full bg-bg border border-border rounded-md px-3 py-2.5 text-text text-sm placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors"
-            />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="admin@tagnride.app" required
+              className="w-full bg-bg border border-border rounded-md px-3 py-2.5 text-text text-sm placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors" />
           </div>
           <div>
             <label className="block text-xs font-bold text-textMuted uppercase tracking-widest mb-1.5">
-              PIN
+              Password
             </label>
-            <input
-              type="password"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="••••"
-              maxLength={4}
-              required
-              className="w-full bg-bg border border-border rounded-md px-3 py-2.5 text-text text-sm placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors tracking-widest"
-            />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••" required
+              className="w-full bg-bg border border-border rounded-md px-3 py-2.5 text-text text-sm placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors" />
           </div>
-          <button
-            type="submit"
-            disabled={loading}
+          <button type="submit" disabled={loading}
             className="w-full bg-cyan text-bg font-bold py-2.5 rounded-md text-sm flex items-center justify-center gap-2 hover:bg-cyan/90 transition-colors disabled:opacity-60 mt-2">
             {loading && <Loader2 size={14} className="animate-spin" />}
             Sign in
