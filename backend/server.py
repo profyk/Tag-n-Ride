@@ -811,12 +811,13 @@ async def admin_unblock(user_id: str, admin: dict = Depends(require_admin)):
 
 @api.post("/admin/reset-pin/{user_id}")
 async def admin_reset_pin(user_id: str, admin: dict = Depends(require_admin)):
-    # Resets to 0000 — driver must change immediately
-    new_hash = hash_pin("0000")
+    import random
+    temp_pin = str(random.randint(1000, 9999))
+    new_hash = hash_pin(temp_pin)
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET pin_hash=$1 WHERE id=$2", new_hash, user_id)
     log.info("admin reset-pin | by=%s target=%s", admin["id"], user_id)
-    return {"ok": True, "temporary_pin": "0000"}
+    return {"ok": True, "temporary_pin": temp_pin}
 
 
 # ---- Admin: Drivers ----
