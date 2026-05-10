@@ -357,14 +357,14 @@ async def register(body: RegisterIn):
             wallet_id, user_id
         )
         if body.role == "driver":
-    driver_id = str(uuid.uuid4())
-    plate = (body.vehicle_plate or "").upper().strip()
-    qr_code = "TNR" + "".join(__import__("random").choices(__import__("string").digits, k=13))
-    await conn.execute(
-        """INSERT INTO drivers (id, user_id, qr_code, vehicle_plate)
-           VALUES ($1, $2, $3, $4)""",
-        driver_id, user_id, qr_code, plate
-    )
+            driver_id = str(uuid.uuid4())
+            plate = (body.vehicle_plate or "").upper().strip()
+            qr_code = "TNR" + "".join(random.choices(string.digits, k=13))
+            await conn.execute(
+                """INSERT INTO drivers (id, user_id, qr_code, vehicle_plate)
+                   VALUES ($1, $2, $3, $4)""",
+                driver_id, user_id, qr_code, plate
+       )
     token = create_access_token(user_id, body.role)
     return {
         "token": token,
