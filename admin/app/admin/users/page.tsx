@@ -5,6 +5,7 @@ import { Table, Tr, Td, Badge, Button, Spinner, Input } from "@/components/ui";
 import { useUsers, useBlockUser, useResetPin } from "@/lib/hooks";
 import { formatDate } from "@/lib/utils";
 import { Search } from "lucide-react";
+import toast from "react-hot-toast";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -12,6 +13,15 @@ export default function UsersPage() {
   const { data, isLoading } = useUsers(query || undefined);
   const blockUser = useBlockUser();
   const resetPin = useResetPin();
+
+  async function handleResetPin(id: string, name: string) {
+    try {
+      const result = await resetPin.mutateAsync(id);
+      alert(`PIN reset for ${name}\n\nTemporary PIN: ${result.data.temporary_pin}\n\nGive this to the client and ask them to change it.`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to reset PIN");
+    }
+  }
 
   return (
     <AdminShell title="User Management">
@@ -42,7 +52,8 @@ export default function UsersPage() {
                       onClick={() => blockUser.mutate({ id: u.id, block: u.is_active })}>
                       {u.is_active ? "Block" : "Unblock"}
                     </Button>
-                    <Button variant="ghost" loading={resetPin.isPending} onClick={() => resetPin.mutate(u.id)}>
+                    <Button variant="ghost" loading={resetPin.isPending}
+                      onClick={() => handleResetPin(u.id, u.full_name)}>
                       Reset PIN
                     </Button>
                   </div>
