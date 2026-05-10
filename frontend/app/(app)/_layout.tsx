@@ -66,6 +66,8 @@ export default function AppLayout() {
           tabBarTestID: "tab-profile",
         }}
       />
+      <Tabs.Screen name="topup" options={{ href: null }} />
+      <Tabs.Screen name="withdraw" options={{ href: null }} />
     </Tabs>
   );
 }
