@@ -742,6 +742,31 @@ async def rate(body: RateIn, user: dict = Depends(get_current_user)):
         )
     return {"rated": True, "stars": body.stars, "new_avg": round(new_avg, 2)}
 
+class ChangePinIn(BaseModel):
+    current_pin: str = Field(min_length=4, max_length=4)
+    new_pin: str = Field(min_length=4, max_length=4)
+
+    @field_validator("new_pin")
+    @classmethod
+    def pin_digits(cls, v: str) -> str:
+        if not v.isdigit():
+            raise ValueError("PIN must be 4 digits")
+        return v
+
+@api.post("/auth/change-pin")
+async def change_pin(body: ChangePinIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT pin_hash FROM users WHERE id=$1", user["id"]
+        )
+        if not verify_pin(body.current_pin, row["pin_hash"]):
+            raise HTTPException(status_code=400, detail="Current PIN is incorrect")
+        await conn.execute(
+            "UPDATE users SET pin_hash=$1 WHERE id=$2",
+            hash_pin(body.new_pin), user["id"]
+        )
+    return {"ok": True}
+    
 # ---- Admin auth guard ----
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if user["role"] != "admin":
