@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Field, Button } from "../src/ui";
 import { api, DriverInfo, Txn } from "../src/api";
-import { colors, formatNGN, radius } from "../src/theme";
+import { colors, formatZAR, radius } from "../src/theme";
 
 const QUICKS = [20, 50, 100, 150, 200, 500];
 
@@ -13,8 +13,10 @@ type Stage = "review" | "confirm" | "success";
 
 export default function Pay() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ driver_id?: string }>();
-  const driverId = params.driver_id;
+  const params = useLocalSearchParams<{ qr_code?: string; driver_id?: string }>();
+
+  // Support both new qr_code param and old driver_id param
+  const qrCode = params.qr_code || params.driver_id || "";
 
   const [driver, setDriver] = useState<DriverInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,17 +30,17 @@ export default function Pay() {
   const [rated, setRated] = useState(false);
 
   useEffect(() => {
-    if (!driverId) {
-      setErr("No driver ID");
+    if (!qrCode) {
+      setErr("No driver code provided");
       setLoading(false);
       return;
     }
     api
-      .lookupDriver(driverId)
+      .lookupDriverByQR(qrCode)
       .then(setDriver)
       .catch((e) => setErr(e?.message || "Driver not found"))
       .finally(() => setLoading(false));
-  }, [driverId]);
+  }, [qrCode]);
 
   const submit = async () => {
     if (!driver) return;
@@ -103,7 +105,7 @@ export default function Pay() {
               <Ionicons name="checkmark" size={48} color={colors.bg} />
             </View>
             <Text style={styles.successTitle}>Payment successful</Text>
-            <Text style={styles.successAmt} testID="pay-success-amount">{formatNGN(resultTxn.amount)}</Text>
+            <Text style={styles.successAmt} testID="pay-success-amount">{formatZAR(resultTxn.amount)}</Text>
             <Text style={styles.successSub}>paid to {driver.full_name}</Text>
             <Text style={styles.refText}>Ref · {resultTxn.reference}</Text>
           </View>
@@ -118,14 +120,8 @@ export default function Pay() {
               ))}
             </View>
             {!rated ? (
-              <Button
-                label="Submit rating"
-                onPress={submitRating}
-                disabled={stars === 0}
-                icon="send"
-                testID="rating-submit-btn"
-                style={{ marginTop: 12 }}
-              />
+              <Button label="Submit rating" onPress={submitRating} disabled={stars === 0}
+                icon="send" testID="rating-submit-btn" style={{ marginTop: 12 }} />
             ) : (
               <Text style={styles.thanks}>Thanks for your feedback! ⚡</Text>
             )}
@@ -138,7 +134,6 @@ export default function Pay() {
     );
   }
 
-  // Review / confirm stage
   return (
     <SafeAreaView style={styles.root} testID="pay-review-screen">
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
@@ -164,12 +159,12 @@ export default function Pay() {
                 </View>
               ) : null}
               <View style={styles.driverMeta}>
-                {driver.is_verified ? (
+                {driver.is_verified && (
                   <View style={[styles.metaPill, { borderColor: colors.green, backgroundColor: colors.greenDim }]}>
                     <Ionicons name="checkmark-circle" size={12} color={colors.green} />
                     <Text style={[styles.metaText, { color: colors.green }]}>Verified</Text>
                   </View>
-                ) : null}
+                )}
                 <View style={styles.metaPill}>
                   <Ionicons name="star" size={12} color={colors.yellow} />
                   <Text style={[styles.metaText, { color: colors.yellow }]}>
@@ -193,12 +188,13 @@ export default function Pay() {
           <View style={styles.quickRow}>
             {QUICKS.map((q) => (
               <TouchableOpacity key={q} onPress={() => setAmount(String(q))} style={styles.quick} testID={`pay-quick-${q}`}>
-                <Text style={styles.quickText}>{formatNGN(q).replace(".00", "")}</Text>
+                <Text style={styles.quickText}>R{q}</Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          <Field label="Note (optional)" value={note} onChangeText={setNote} placeholder="Ride from VI to Lekki" testID="pay-note-input" />
+          <Field label="Note (optional)" value={note} onChangeText={setNote}
+            placeholder="Ride from Sandton to Soweto" testID="pay-note-input" />
 
           {err ? <Text style={styles.err} testID="pay-error">{err}</Text> : null}
 
