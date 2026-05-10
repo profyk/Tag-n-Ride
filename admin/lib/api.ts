@@ -88,3 +88,31 @@ export const api = {
     driver_leaderboard: { name: string; earnings: number }[];
   }>("/api/admin/analytics"),
 };
+
+// ── Superadmin ──
+  listAdmins: () => client.get<{
+    id: string; full_name: string; email: string;
+    role: string; is_active: boolean; created_at: string;
+  }[]>("/api/superadmin/admins"),
+
+  createAdmin: (body: { full_name: string; email: string; password: string }) =>
+    client.post<{ ok: boolean; id: string }>("/api/superadmin/create-admin", body),
+
+  deleteAdmin: (id: string) => client.delete(`/api/superadmin/admins/${id}`),
+
+  deleteUser: (id: string) => client.delete(`/api/superadmin/users/${id}`),
+
+  freezeWallet: (id: string) => client.post(`/api/superadmin/freeze-wallet/${id}`),
+
+  unfreezeWallet: (id: string) => client.post(`/api/superadmin/unfreeze-wallet/${id}`),
+
+  transferFunds: (body: { from_user_id: string; to_user_id: string; amount: number; note?: string }) =>
+    client.post<{ ok: boolean; reference: string }>("/api/superadmin/transfer-funds", body),
+
+  adjustBalance: (body: { user_id: string; amount: number; note?: string }) =>
+    client.post<{ ok: boolean; new_balance: number }>("/api/superadmin/adjust-balance", body),
+
+  getUserWallet: (id: string) => client.get<{
+    user: { id: string; full_name: string; phone_number: string; role: string };
+    wallet: { balance: number; is_frozen: boolean; currency: string; created_at: string };
+  }>(`/api/superadmin/wallet/${id}`),
