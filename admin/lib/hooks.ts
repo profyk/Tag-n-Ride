@@ -42,7 +42,6 @@ export function useBlockUser() {
 export function useResetPin() {
   return useMutation({
     mutationFn: (id: string) => api.resetPin(id),
-    onSuccess: () => toast.success("PIN reset successfully"),
     onError: (e: Error) => toast.error(e.message),
   });
 }
