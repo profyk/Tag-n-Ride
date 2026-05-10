@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -8,9 +8,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { api, Wallet } from "../../src/api";
 import { Field, Button } from "../../src/ui";
-import { colors, formatNGN, radius } from "../../src/theme";
+import { colors, radius } from "../../src/theme";
 
-// Single screen that morphs based on role: passenger -> Scan & Pay, driver -> show QR
 export default function ActionScreen() {
   const { state } = useAuth();
   if (state.status !== "authed") return null;
@@ -22,7 +21,7 @@ function PassengerScan() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(true);
-  const [manualId, setManualId] = useState("");
+  const [manualCode, setManualCode] = useState("");
   const [showManual, setShowManual] = useState(false);
   const [busy, setBusy] = useState(false);
   const [torch, setTorch] = useState(false);
@@ -35,24 +34,30 @@ function PassengerScan() {
 
   useFocusEffect(useCallback(() => { setScanning(true); }, []));
 
-  const goPay = (driverId: string) => {
+  const goPay = (qrCode: string) => {
     setScanning(false);
-    router.push({ pathname: "/pay", params: { driver_id: driverId } });
+    router.push({ pathname: "/pay", params: { qr_code: qrCode } });
   };
 
   const onScan = (data: string) => {
     if (!scanning || busy) return;
     setBusy(true);
-    let id = data;
+    // Support both new TNR format and old URL format
+    let code = data.trim();
     const m = data.match(/driver_id=([^&]+)/);
-    if (m) id = m[1];
+    if (m) code = m[1];
     setTimeout(() => setBusy(false), 600);
-    goPay(id);
+    goPay(code);
   };
 
   const submitManual = () => {
-    if (!manualId.trim()) return;
-    goPay(manualId.trim());
+    const code = manualCode.trim().toUpperCase();
+    if (!code) return;
+    if (!code.startsWith("TNR") || code.length !== 15) {
+      Alert.alert("Invalid code", "Please enter a valid 15-character TNR driver code.");
+      return;
+    }
+    goPay(code);
   };
 
   return (
@@ -60,11 +65,12 @@ function PassengerScan() {
       <View style={styles.header}>
         <Text style={styles.title}>Scan & Pay</Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
-          {!showManual ? (
-            <TouchableOpacity onPress={() => setTorch((t) => !t)} testID="torch-btn" style={[styles.iconBtn, torch && { backgroundColor: "#FFD60A33", borderColor: colors.yellow }]}>
+          {!showManual && (
+            <TouchableOpacity onPress={() => setTorch((t) => !t)} testID="torch-btn"
+              style={[styles.iconBtn, torch && { backgroundColor: "#FFD60A33", borderColor: colors.yellow }]}>
               <Ionicons name={torch ? "flashlight" : "flashlight-outline"} size={20} color={torch ? colors.yellow : colors.cyan} />
             </TouchableOpacity>
-          ) : null}
+          )}
           <TouchableOpacity onPress={() => setShowManual((s) => !s)} testID="toggle-manual-btn" style={styles.iconBtn}>
             <Ionicons name={showManual ? "scan" : "keypad-outline"} size={22} color={colors.cyan} />
           </TouchableOpacity>
@@ -73,8 +79,15 @@ function PassengerScan() {
 
       {showManual ? (
         <View style={styles.manualBox} testID="manual-pay-box">
-          <Text style={styles.manualHint}>Enter driver ID manually</Text>
-          <Field label="Driver ID" value={manualId} onChangeText={setManualId} placeholder="Driver UUID" testID="manual-driver-input" autoCapitalize="none" />
+          <Text style={styles.manualHint}>Enter the driver's TNR code manually</Text>
+          <Field
+            label="Driver Code"
+            value={manualCode}
+            onChangeText={(t) => setManualCode(t.toUpperCase())}
+            placeholder="TNR0000000000000"
+            testID="manual-driver-input"
+            autoCapitalize="characters"
+          />
           <Button label="Continue" onPress={submitManual} icon="arrow-forward" testID="manual-continue-btn" />
         </View>
       ) : (
@@ -91,16 +104,15 @@ function PassengerScan() {
             <View style={styles.cameraFallback}>
               <Ionicons name="camera-outline" size={56} color={colors.textDim} />
               <Text style={styles.fallbackTitle}>Camera permission needed</Text>
-              <Text style={styles.fallbackText}>Allow camera access to scan driver QR codes, or enter the driver ID manually.</Text>
+              <Text style={styles.fallbackText}>Allow camera access to scan driver QR codes, or enter the driver code manually.</Text>
               <View style={{ height: 12 }} />
               <Button label="Allow camera" icon="camera" onPress={() => requestPermission()} testID="grant-camera-btn" />
               <View style={{ height: 8 }} />
-              <Button label="Enter Driver ID manually" variant="secondary" icon="keypad-outline" onPress={() => setShowManual(true)} testID="fallback-manual-btn" />
+              <Button label="Enter Driver Code manually" variant="secondary" icon="keypad-outline" onPress={() => setShowManual(true)} testID="fallback-manual-btn" />
             </View>
           )}
 
-          {/* Reticle */}
-          {permission?.granted ? (
+          {permission?.granted && (
             <View pointerEvents="none" style={styles.reticleWrap}>
               <View style={styles.reticle}>
                 <Corner pos="tl" />
@@ -110,13 +122,13 @@ function PassengerScan() {
               </View>
               <Text style={styles.reticleText}>Align QR code within the frame</Text>
             </View>
-          ) : null}
+          )}
 
-          {busy ? (
+          {busy && (
             <View style={styles.scanningOverlay}>
               <ActivityIndicator color={colors.cyan} size="large" />
             </View>
-          ) : null}
+          )}
         </View>
       )}
     </SafeAreaView>
@@ -132,10 +144,11 @@ function DriverQR() {
   }, []));
 
   if (state.status !== "authed") return null;
-  const data = wallet?.qr_code || `app://pay?driver_id=${state.user.id}`;
 
-  const copyId = () => {
-    Alert.alert("Driver ID", state.user.id, [{ text: "OK" }]);
+  const qrCode = wallet?.qr_code || "";
+
+  const showCode = () => {
+    Alert.alert("Your Driver Code", qrCode || "Loading...", [{ text: "OK" }]);
   };
 
   return (
@@ -146,8 +159,13 @@ function DriverQR() {
 
       <View style={styles.qrBox}>
         <View style={styles.qrFrame} testID="driver-qr-display">
-          <QRCode value={data} size={240} color="#000" backgroundColor="#fff" />
+          {qrCode ? (
+            <QRCode value={qrCode} size={240} color="#000" backgroundColor="#fff" />
+          ) : (
+            <ActivityIndicator color={colors.cyan} size="large" style={{ width: 240, height: 240 }} />
+          )}
         </View>
+
         <Text style={styles.driverName}>{state.user.full_name}</Text>
         <Text style={styles.driverPhone}>{state.user.phone_number}</Text>
 
@@ -158,9 +176,10 @@ function DriverQR() {
           </View>
         ) : null}
 
-        <TouchableOpacity onPress={copyId} style={styles.idChip} testID="driver-id-chip">
+        {/* TNR code chip */}
+        <TouchableOpacity onPress={showCode} style={styles.idChip} testID="driver-id-chip">
           <Ionicons name="finger-print" size={14} color={colors.cyan} />
-          <Text style={styles.idChipText}>{state.user.id.slice(0, 8)}…{state.user.id.slice(-4)}</Text>
+          <Text style={styles.idChipText}>{qrCode || "Loading..."}</Text>
         </TouchableOpacity>
 
         <Text style={styles.qrHint}>Show this code to a passenger to receive payment.</Text>
@@ -200,7 +219,7 @@ const styles = StyleSheet.create({
   driverName: { color: colors.text, fontSize: 20, fontWeight: "800", marginTop: 4 },
   driverPhone: { color: colors.textMuted, marginTop: 4 },
   idChip: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.cyanDim, borderRadius: 999, marginTop: 14, borderWidth: 1, borderColor: colors.cyan },
-  idChipText: { color: colors.cyan, fontWeight: "700", fontSize: 12 },
+  idChipText: { color: colors.cyan, fontWeight: "700", fontSize: 12, letterSpacing: 1 },
   qrHint: { color: colors.textMuted, fontSize: 13, marginTop: 18, textAlign: "center", paddingHorizontal: 32 },
   plateBox: { marginTop: 14, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: "#FFD60A", borderRadius: 8, borderWidth: 2, borderColor: "#0A0A0A" },
   plateLabel: { color: "#666", fontSize: 9, fontWeight: "800", letterSpacing: 1.4, textAlign: "center" },
