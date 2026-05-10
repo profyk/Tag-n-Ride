@@ -6,7 +6,7 @@ export function isAuthenticated(): boolean {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     if (payload.exp * 1000 < Date.now()) { clearToken(); return false; }
-    return payload.role === "admin";
+    return payload.role === "admin" || payload.role === "superadmin";
   } catch { return false; }
 }
 
