@@ -481,20 +481,30 @@ async def topup(body: TopUpIn, user: dict = Depends(get_current_user)):
     return {"balance": new_balance, "transaction": txn}
 
 
-@api.get("/wallet/driver/{driver_user_id}")
-async def lookup_driver(driver_user_id: str, _: dict = Depends(get_current_user)):
+@api.get("/wallet/driver/qr/{code}")
+async def lookup_driver_by_qr(code: str, _: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
+        # Try QR code first (TNR format)
         drv = await conn.fetchrow(
-            "SELECT qr_code, vehicle_plate, is_verified, rating_avg, rating_count FROM drivers WHERE user_id=$1",
-            driver_user_id
+            """SELECT d.qr_code, d.vehicle_plate, d.is_verified, d.rating_avg,
+                      d.rating_count, d.user_id
+               FROM drivers d WHERE d.qr_code=$1""",
+            code
         )
+        # Fall back to user_id lookup
+        if not drv:
+            drv = await conn.fetchrow(
+                """SELECT d.qr_code, d.vehicle_plate, d.is_verified, d.rating_avg,
+                          d.rating_count, d.user_id
+                   FROM drivers d WHERE d.user_id=$1""",
+                code
+            )
         if not drv:
             raise HTTPException(status_code=404, detail="Driver not found")
         user = await conn.fetchrow(
-            "SELECT id, full_name, phone_number FROM users WHERE id=$1", driver_user_id
+            "SELECT id, full_name, phone_number FROM users WHERE id=$1",
+            drv["user_id"]
         )
-        if not user:
-            raise HTTPException(status_code=404, detail="Driver user not found")
     return {
         "user_id": user["id"],
         "full_name": user["full_name"],
