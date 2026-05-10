@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Users, Car, ArrowLeftRight, Wallet, BarChart3, CreditCard, LogOut } from "lucide-react";
 import { clearToken } from "@/lib/api";
@@ -19,11 +20,9 @@ export function Sidebar() {
   const path = usePathname();
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-bg2 border-r border-border flex flex-col z-40">
-      <div className="px-6 py-6 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-cyan flex items-center justify-center">
-            <span className="text-bg font-mono font-bold text-sm">T</span>
-          </div>
+      <div className="px-4 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <Image src="/icons/logo.png" alt="Tag n Ride" width={40} height={40} className="rounded-full" />
           <div>
             <p className="text-text font-bold text-sm leading-none">Tag n Ride</p>
             <p className="text-textMuted text-xs mt-0.5">Admin Panel</p>
