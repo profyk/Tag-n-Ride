@@ -89,7 +89,10 @@ export const api = {
     }),
 
   lookupDriver: (driverId: string) =>
-    request<DriverInfo>(`/api/wallet/driver/${driverId}`),
+  request<DriverInfo>(`/api/wallet/driver/${driverId}`),
+
+lookupDriverByQR: (qrCode: string) =>
+  request<DriverInfo>(`/api/wallet/driver/qr/${qrCode}`),
 
   transfer: (driver_user_id: string, amount: number, note?: string) =>
     request<{ balance: number; transaction: Txn }>("/api/wallet/transfer", {
