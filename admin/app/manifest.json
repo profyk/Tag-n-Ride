@@ -1,0 +1,24 @@
+{
+  "name": "Tag n Ride Admin",
+  "short_name": "TNR Admin",
+  "description": "Tag n Ride Fintech Admin Dashboard",
+  "start_url": "/admin/dashboard",
+  "display": "standalone",
+  "background_color": "#0A0A0F",
+  "theme_color": "#00D4FF",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
