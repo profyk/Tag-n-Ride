@@ -335,6 +335,25 @@ class AdminLoginIn(BaseModel):
     password: str
 
 
+class CreateAdminIn(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+    email: str = Field(min_length=5, max_length=100)
+    password: str = Field(min_length=8, max_length=100)
+
+
+class TransferFundsIn(BaseModel):
+    from_user_id: str
+    to_user_id: str
+    amount: float = Field(gt=0, le=1_000_000)
+    note: Optional[str] = None
+
+
+class AdjustBalanceIn(BaseModel):
+    user_id: str
+    amount: float
+    note: Optional[str] = None
+
+
 # ---- Routes ----
 @api.get("/")
 async def health():
@@ -809,8 +828,14 @@ async def change_pin(body: ChangePinIn, user: dict = Depends(get_current_user)):
     
 # ---- Admin auth guard ----
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user["role"] != "admin":
+    if user["role"] not in ("admin", "superadmin"):
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+async def require_superadmin(user: dict = Depends(get_current_user)) -> dict:
+    if user["role"] != "superadmin":
+        raise HTTPException(status_code=403, detail="Superadmin access required")
     return user
 
 
@@ -1084,6 +1109,183 @@ async def admin_analytics(admin: dict = Depends(require_admin)):
             for r in leaderboard
         ],
     }
-    
+
+
+# ---- Superadmin: Create Admin ----
+@api.post("/superadmin/create-admin")
+async def superadmin_create_admin(body: CreateAdminIn, admin: dict = Depends(require_superadmin)):
+    hashed_password = bcrypt.hashpw(body.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT id FROM users WHERE email=$1", body.email.lower())
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        user_id = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO users (id, phone_number, full_name, role, pin_hash, email, password_hash)
+               VALUES ($1,$2,$3,'admin',$4,$5,$6)""",
+            user_id, f"admin_{user_id[:8]}", body.full_name,
+            hash_pin("0000"), body.email.lower(), hashed_password
+        )
+    log.info("superadmin create-admin | by=%s email=%s", admin["id"], body.email)
+    return {"ok": True, "id": user_id}
+
+
+# ---- Superadmin: List Admins ----
+@api.get("/superadmin/admins")
+async def superadmin_list_admins(admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, full_name, email, role, is_active, created_at
+               FROM users WHERE role IN ('admin', 'superadmin')
+               ORDER BY created_at DESC"""
+        )
+    return [
+        {**dict(r), "created_at": iso(r["created_at"])}
+        for r in rows
+    ]
+
+
+# ---- Superadmin: Delete Admin ----
+@api.delete("/superadmin/admins/{user_id}")
+async def superadmin_delete_admin(user_id: str, admin: dict = Depends(require_superadmin)):
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    async with pool.acquire() as conn:
+        target = await conn.fetchrow("SELECT role FROM users WHERE id=$1", user_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if target["role"] == "superadmin":
+            raise HTTPException(status_code=403, detail="Cannot delete superadmin")
+        await conn.execute("DELETE FROM users WHERE id=$1 AND role='admin'", user_id)
+    log.info("superadmin delete-admin | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+# ---- Superadmin: Delete Any User ----
+@api.delete("/superadmin/users/{user_id}")
+async def superadmin_delete_user(user_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        target = await conn.fetchrow("SELECT role FROM users WHERE id=$1", user_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if target["role"] in ("admin", "superadmin"):
+            raise HTTPException(status_code=403, detail="Cannot delete admin accounts from here")
+        async with conn.transaction():
+            await conn.execute("DELETE FROM ratings WHERE driver_user_id=$1 OR passenger_user_id=$1", user_id)
+            await conn.execute("DELETE FROM withdrawal_requests WHERE user_id=$1", user_id)
+            await conn.execute("DELETE FROM payout_accounts WHERE user_id=$1", user_id)
+            await conn.execute("UPDATE transactions SET sender_id=NULL WHERE sender_id=$1", user_id)
+            await conn.execute("UPDATE transactions SET receiver_id=NULL WHERE receiver_id=$1", user_id)
+            await conn.execute("DELETE FROM drivers WHERE user_id=$1", user_id)
+            await conn.execute("DELETE FROM wallets WHERE user_id=$1", user_id)
+            await conn.execute("DELETE FROM users WHERE id=$1", user_id)
+    log.info("superadmin delete-user | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+# ---- Superadmin: Freeze / Unfreeze Wallet ----
+@api.post("/superadmin/freeze-wallet/{user_id}")
+async def superadmin_freeze_wallet(user_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE wallets SET is_frozen=TRUE WHERE user_id=$1", user_id)
+    log.info("superadmin freeze-wallet | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+@api.post("/superadmin/unfreeze-wallet/{user_id}")
+async def superadmin_unfreeze_wallet(user_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE wallets SET is_frozen=FALSE WHERE user_id=$1", user_id)
+    log.info("superadmin unfreeze-wallet | by=%s target=%s", admin["id"], user_id)
+    return {"ok": True}
+
+
+# ---- Superadmin: Transfer Funds Between Users ----
+@api.post("/superadmin/transfer-funds")
+async def superadmin_transfer_funds(body: TransferFundsIn, admin: dict = Depends(require_superadmin)):
+    if body.from_user_id == body.to_user_id:
+        raise HTTPException(status_code=400, detail="Cannot transfer to same account")
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            sender_w = await conn.fetchrow(
+                "SELECT balance, is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE",
+                body.from_user_id
+            )
+            if not sender_w:
+                raise HTTPException(status_code=404, detail="Sender wallet not found")
+            if float(sender_w["balance"]) < body.amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+            await conn.execute(
+                "UPDATE wallets SET balance=balance-$1 WHERE user_id=$2",
+                body.amount, body.from_user_id
+            )
+            await conn.execute(
+                "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2",
+                body.amount, body.to_user_id
+            )
+            txn_id = str(uuid.uuid4())
+            ref = gen_ref()
+            await conn.execute(
+                """INSERT INTO transactions (id, reference, type, status, amount, sender_id, receiver_id, note)
+                   VALUES ($1,$2,'payment','completed',$3,$4,$5,$6)""",
+                txn_id, ref, body.amount, body.from_user_id, body.to_user_id,
+                body.note or "Admin fund transfer"
+            )
+    log.info("superadmin transfer-funds | by=%s from=%s to=%s amount=%.2f",
+             admin["id"], body.from_user_id, body.to_user_id, body.amount)
+    return {"ok": True, "reference": ref}
+
+
+# ---- Superadmin: Adjust Balance (credit or debit) ----
+@api.post("/superadmin/adjust-balance")
+async def superadmin_adjust_balance(body: AdjustBalanceIn, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            wallet = await conn.fetchrow(
+                "SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE", body.user_id
+            )
+            if not wallet:
+                raise HTTPException(status_code=404, detail="Wallet not found")
+            new_balance = float(wallet["balance"]) + body.amount
+            if new_balance < 0:
+                raise HTTPException(status_code=400, detail="Balance cannot go below zero")
+            await conn.execute(
+                "UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, body.user_id
+            )
+            txn_id = str(uuid.uuid4())
+            ref = gen_ref()
+            txn_type = "topup" if body.amount > 0 else "withdrawal"
+            await conn.execute(
+                """INSERT INTO transactions (id, reference, type, status, amount, sender_id, receiver_id, note)
+                   VALUES ($1,$2,$3,'completed',$4,NULL,$5,$6)""",
+                txn_id, ref, txn_type, abs(body.amount), body.user_id,
+                body.note or f"Admin balance adjustment ({'+' if body.amount > 0 else ''}{body.amount})"
+            )
+    log.info("superadmin adjust-balance | by=%s user=%s amount=%.2f",
+             admin["id"], body.user_id, body.amount)
+    return {"ok": True, "new_balance": new_balance}
+
+
+# ---- Superadmin: Get Wallet Details ----
+@api.get("/superadmin/wallet/{user_id}")
+async def superadmin_get_wallet(user_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        wallet = await conn.fetchrow(
+            "SELECT * FROM wallets WHERE user_id=$1", user_id
+        )
+        user = await conn.fetchrow(
+            "SELECT id, full_name, phone_number, role FROM users WHERE id=$1", user_id
+        )
+        if not wallet or not user:
+            raise HTTPException(status_code=404, detail="User or wallet not found")
+    return {
+        "user": dict(user),
+        "wallet": {
+            **dict(wallet),
+            "balance": float(wallet["balance"]),
+            "created_at": iso(wallet["created_at"]),
+        }
+}
+
 
 app.include_router(api)
