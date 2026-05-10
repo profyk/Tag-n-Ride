@@ -330,6 +330,11 @@ class RateIn(BaseModel):
     comment: Optional[str] = None
 
 
+class AdminLoginIn(BaseModel):
+    email: str
+    password: str
+
+
 # ---- Routes ----
 @api.get("/")
 async def health():
