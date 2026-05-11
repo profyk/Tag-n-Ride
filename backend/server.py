@@ -368,7 +368,7 @@ async def admin_login(body: AdminLoginIn):
             "SELECT id, email, full_name, role, password_hash, is_active FROM users WHERE email=$1",
             body.email.strip().lower()
         )
-    if not user or user["role"] != "admin":
+    if not user or user["role"] not in ("admin", "superadmin"):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not user["is_active"]:
         raise HTTPException(status_code=403, detail="Account disabled")
