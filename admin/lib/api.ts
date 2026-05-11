@@ -32,19 +32,17 @@ client.interceptors.response.use(
       : typeof detail === "string"
       ? detail
       : error.message;
-
     return Promise.reject(new Error(msg));
   }
 );
 
 export default client;
 
-// ── Types ──
 export type User = {
   id: string;
   phone_number: string;
   full_name: string;
-  role: "passenger" | "driver" | "admin";
+  role: "passenger" | "driver" | "admin" | "superadmin";
   is_active: boolean;
   created_at: string;
 };
@@ -108,9 +106,7 @@ export type DashboardStats = {
   recent_transactions: Transaction[];
 };
 
-// ── API ──
 export const api = {
-  // Admin
   login: (email: string, password: string) =>
     client.post<{ token: string; user: User }>("/api/auth/admin-login", { email, password }),
 
@@ -142,18 +138,15 @@ export const api = {
       driver_leaderboard: { name: string; earnings: number }[];
     }>("/api/admin/analytics"),
 
-  // ── Superadmin ──
   listAdmins: () =>
-    client.get<
-      {
-        id: string;
-        full_name: string;
-        email: string;
-        role: string;
-        is_active: boolean;
-        created_at: string;
-      }[]
-    >("/api/superadmin/admins"),
+    client.get<{
+      id: string;
+      full_name: string;
+      email: string;
+      role: string;
+      is_active: boolean;
+      created_at: string;
+    }[]>("/api/superadmin/admins"),
 
   createAdmin: (body: { full_name: string; email: string; password: string }) =>
     client.post<{ ok: boolean; id: string }>("/api/superadmin/create-admin", body),
@@ -164,22 +157,11 @@ export const api = {
   freezeWallet: (id: string) => client.post(`/api/superadmin/freeze-wallet/${id}`),
   unfreezeWallet: (id: string) => client.post(`/api/superadmin/unfreeze-wallet/${id}`),
 
-  transferFunds: (body: {
-    from_user_id: string;
-    to_user_id: string;
-    amount: number;
-    note?: string;
-  }) =>
-    client.post<{ ok: boolean; reference: string }>(
-      "/api/superadmin/transfer-funds",
-      body
-    ),
+  transferFunds: (body: { from_user_id: string; to_user_id: string; amount: number; note?: string }) =>
+    client.post<{ ok: boolean; reference: string }>("/api/superadmin/transfer-funds", body),
 
   adjustBalance: (body: { user_id: string; amount: number; note?: string }) =>
-    client.post<{ ok: boolean; new_balance: number }>(
-      "/api/superadmin/adjust-balance",
-      body
-    ),
+    client.post<{ ok: boolean; new_balance: number }>("/api/superadmin/adjust-balance", body),
 
   getUserWallet: (id: string) =>
     client.get<{
