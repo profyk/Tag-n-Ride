@@ -20,12 +20,13 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.login(email, password);
-      if (res.data.user.role !== "admin") {
+      const role = res.data.user.role;
+      if (role !== "admin" && role !== "superadmin") {
         toast.error("Access denied — admin only");
         return;
       }
       setToken(res.data.token);
-      toast.success("Welcome back");
+      toast.success(`Welcome back${role === "superadmin" ? ", Superadmin" : ""}`);
       router.push("/admin/dashboard");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Login failed");
