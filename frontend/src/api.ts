@@ -212,3 +212,80 @@ export type PayoutAccount = {
   account_name?: string;
   created_at: string;
 };
+
+// ── Owner App ──
+  ownerDashboard: () =>
+    request<{
+      total_earnings: number;
+      today_revenue: number;
+      driver_count: number;
+      drivers: {
+        user_id: string; full_name: string; phone_number: string;
+        vehicle_plate: string; total_earnings: number; qr_code: string;
+        rating_avg: number; rating_count: number; is_verified: boolean;
+      }[];
+    }>("/api/owner/dashboard"),
+
+  ownerLinkDriver: (driver_code: string) =>
+    request<{
+      ok: boolean;
+      driver: {
+        user_id: string; full_name: string; phone_number: string;
+        vehicle_plate: string; qr_code: string;
+      };
+    }>("/api/owner/drivers/link", {
+      method: "POST",
+      body: JSON.stringify({ driver_code }),
+    }),
+
+  ownerUnlinkDriver: (driver_user_id: string) =>
+    request<{ ok: boolean }>(`/api/owner/drivers/${driver_user_id}`, {
+      method: "DELETE",
+    }),
+
+  ownerDriverEarnings: (driver_user_id: string) =>
+    request<{
+      driver: {
+        user_id: string; full_name: string; phone_number: string;
+        vehicle_plate: string; total_earnings: number; qr_code: string;
+        rating_avg: number; rating_count: number;
+      };
+      today_total: number;
+      today_trip_count: number;
+      today_trips: {
+        reference: string; amount: number; driver_net: number;
+        passenger: string; created_at: string;
+      }[];
+      all_trips: {
+        reference: string; amount: number; driver_net: number;
+        passenger: string; created_at: string;
+      }[];
+    }>(`/api/owner/drivers/${driver_user_id}/earnings`),
+
+  ownerTransactions: () =>
+    request<{
+      id: string; reference: string; driver_name: string;
+      vehicle_plate: string; passenger: string;
+      gross_amount: number; driver_net: number; platform_fee: number;
+      created_at: string;
+    }[]>("/api/owner/transactions"),
+
+  // ── KYC ──
+  kycSubmit: (selfie: { uri: string; type: string; name: string },
+              licenceFront: { uri: string; type: string; name: string }) => {
+    const formData = new FormData();
+    formData.append("selfie", selfie as any);
+    formData.append("licence_front", licenceFront as any);
+    return request<{ ok: boolean; status: string }>("/api/kyc/submit", {
+      method: "POST",
+      headers: {},
+      body: formData,
+    });
+  },
+
+  kycStatus: () =>
+    request<{
+      status: "not_submitted" | "pending" | "approved" | "rejected";
+      rejection_reason?: string;
+      submitted_at?: string;
+    }>("/api/kyc/status"),
