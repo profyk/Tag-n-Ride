@@ -1350,6 +1350,7 @@ async def require_owner(user: dict = Depends(get_current_user)) -> dict:
         raise HTTPException(status_code=403, detail="Account suspended")
     return user
 
+
 async def get_owner_record(conn, user_id: str):
     owner = await conn.fetchrow(
         "SELECT * FROM fleet_owners WHERE user_id=$1", user_id
@@ -1358,12 +1359,14 @@ async def get_owner_record(conn, user_id: str):
         raise HTTPException(status_code=404, detail="Owner account not found")
     return owner
 
-# Dashboard
+
+# ── DASHBOARD ───────────────────────────────────────────────
+
 @api.get("/owner/dashboard")
 async def owner_dashboard(user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
-        # Get all linked drivers
+
         drivers = await conn.fetch(
             """SELECT od.driver_user_id, u.full_name, u.phone_number,
                       d.qr_code, d.vehicle_plate, d.total_earnings,
@@ -1374,26 +1377,31 @@ async def owner_dashboard(user: dict = Depends(require_owner)):
                WHERE od.owner_id=$1""",
             owner["id"]
         )
+
         driver_ids = [d["driver_user_id"] for d in drivers]
 
-        total_earnings = 0.0
-        today_revenue = 0.0
+        total_earnings = 0
+        today_revenue = 0
 
         if driver_ids:
             total_earnings = await conn.fetchval(
-                "SELECT COALESCE(SUM(total_earnings),0) FROM drivers WHERE user_id=ANY($1)",
+                "SELECT COALESCE(SUM(total_earnings),0) FROM drivers WHERE user_id = ANY($1::text[])",
                 driver_ids
             )
+
             today_revenue = await conn.fetchval(
-                """SELECT COALESCE(SUM(amount),0) FROM transactions
-                   WHERE receiver_id=ANY($1) AND type='payment'
-                   AND status='completed' AND DATE(created_at)=CURRENT_DATE""",
+                """SELECT COALESCE(SUM(amount),0)
+                   FROM transactions
+                   WHERE receiver_id = ANY($1::text[])
+                   AND type='payment'
+                   AND status='completed'
+                   AND DATE(created_at)=CURRENT_DATE""",
                 driver_ids
             )
 
     return {
-        "total_earnings": float(total_earnings),
-        "today_revenue": float(today_revenue),
+        "total_earnings": float(total_earnings or 0),
+        "today_revenue": float(today_revenue or 0),
         "driver_count": len(drivers),
         "drivers": [{
             "user_id": d["driver_user_id"],
@@ -1401,107 +1409,123 @@ async def owner_dashboard(user: dict = Depends(require_owner)):
             "phone_number": d["phone_number"],
             "qr_code": d["qr_code"],
             "vehicle_plate": d["vehicle_plate"],
-            "total_earnings": float(d["total_earnings"]),
-            "rating_avg": float(d["rating_avg"]),
-            "rating_count": d["rating_count"],
+            "total_earnings": float(d["total_earnings"] or 0),
+            "rating_avg": float(d["rating_avg"] or 0),
+            "rating_count": d["rating_count"] or 0,
             "is_verified": d["is_verified"],
         } for d in drivers]
     }
 
-# Link driver by QR/TNR code
+
+# ── LINK DRIVER ─────────────────────────────────────────────
+
 class LinkDriverIn(BaseModel):
     driver_code: str = Field(min_length=3, max_length=20)
+
 
 @api.post("/owner/drivers/link")
 async def owner_link_driver(body: LinkDriverIn, user: dict = Depends(require_owner)):
     code = body.driver_code.strip().upper()
+
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
-        # Look up by QR code or user_id
+
         drv = await conn.fetchrow(
-            """SELECT d.user_id, u.full_name, u.phone_number, d.vehicle_plate, d.qr_code
-               FROM drivers d JOIN users u ON u.id=d.user_id
+            """SELECT d.user_id, u.full_name, u.phone_number,
+                      d.vehicle_plate, d.qr_code
+               FROM drivers d
+               JOIN users u ON u.id=d.user_id
                WHERE d.qr_code=$1 OR d.user_id=$1""",
             code
         )
+
         if not drv:
-            raise HTTPException(status_code=404, detail="Driver not found with that code")
-        # Check not already linked
+            raise HTTPException(status_code=404, detail="Driver not found")
+
         existing = await conn.fetchrow(
             "SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
             owner["id"], drv["user_id"]
         )
+
         if existing:
-            raise HTTPException(status_code=400, detail="Driver already linked to your fleet")
+            raise HTTPException(status_code=400, detail="Driver already linked")
+
         link_id = str(uuid.uuid4())
+
         await conn.execute(
             "INSERT INTO owner_drivers (id, owner_id, driver_user_id) VALUES ($1,$2,$3)",
             link_id, owner["id"], drv["user_id"]
         )
-    return {
-        "ok": True,
-        "driver": {
-            "user_id": drv["user_id"],
-            "full_name": drv["full_name"],
-            "phone_number": drv["phone_number"],
-            "vehicle_plate": drv["vehicle_plate"],
-            "qr_code": drv["qr_code"],
-        }
-    }
 
-# Unlink driver
+    return {"ok": True, "driver": dict(drv)}
+
+
+# ── UNLINK DRIVER ───────────────────────────────────────────
+
 @api.delete("/owner/drivers/{driver_user_id}")
 async def owner_unlink_driver(driver_user_id: str, user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
+
         await conn.execute(
             "DELETE FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
             owner["id"], driver_user_id
         )
+
     return {"ok": True}
 
-# Driver earnings detail
+
+# ── DRIVER EARNINGS ─────────────────────────────────────────
+
 @api.get("/owner/drivers/{driver_user_id}/earnings")
 async def owner_driver_earnings(driver_user_id: str, user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
-        # Verify this driver belongs to owner
+
         link = await conn.fetchrow(
             "SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
             owner["id"], driver_user_id
         )
+
         if not link:
-            raise HTTPException(status_code=403, detail="Driver not in your fleet")
+            raise HTTPException(status_code=403, detail="Driver not in fleet")
+
         driver = await conn.fetchrow(
             """SELECT d.*, u.full_name, u.phone_number
-               FROM drivers d JOIN users u ON u.id=d.user_id
+               FROM drivers d
+               JOIN users u ON u.id=d.user_id
                WHERE d.user_id=$1""",
             driver_user_id
         )
+
         if not driver:
             raise HTTPException(status_code=404, detail="Driver not found")
-        # Today's trips
+
         today_trips = await conn.fetch(
             """SELECT t.reference, t.amount, t.driver_net, t.created_at,
                       su.full_name as passenger_name
                FROM transactions t
                LEFT JOIN users su ON su.id=t.sender_id
-               WHERE t.receiver_id=$1 AND t.type='payment'
+               WHERE t.receiver_id=$1
+               AND t.type='payment'
                AND DATE(t.created_at)=CURRENT_DATE
                ORDER BY t.created_at DESC""",
             driver_user_id
         )
-        # All transactions
+
         all_trips = await conn.fetch(
             """SELECT t.reference, t.amount, t.driver_net, t.created_at,
                       su.full_name as passenger_name
                FROM transactions t
                LEFT JOIN users su ON su.id=t.sender_id
-               WHERE t.receiver_id=$1 AND t.type='payment'
-               ORDER BY t.created_at DESC LIMIT 50""",
+               WHERE t.receiver_id=$1
+               AND t.type='payment'
+               ORDER BY t.created_at DESC
+               LIMIT 50""",
             driver_user_id
         )
-        today_total = sum(float(t["driver_net"] or t["amount"]) for t in today_trips)
+
+        today_total = sum(float(t["driver_net"] or t["amount"] or 0) for t in today_trips)
 
     return {
         "driver": {
@@ -1509,62 +1533,82 @@ async def owner_driver_earnings(driver_user_id: str, user: dict = Depends(requir
             "full_name": driver["full_name"],
             "phone_number": driver["phone_number"],
             "vehicle_plate": driver["vehicle_plate"],
-            "total_earnings": float(driver["total_earnings"]),
+            "total_earnings": float(driver["total_earnings"] or 0),
             "qr_code": driver["qr_code"],
-            "rating_avg": float(driver["rating_avg"]),
-            "rating_count": driver["rating_count"],
+            "rating_avg": float(driver["rating_avg"] or 0),
+            "rating_count": driver["rating_count"] or 0,
         },
         "today_total": today_total,
         "today_trip_count": len(today_trips),
-        "today_trips": [{
-            "reference": t["reference"],
-            "amount": float(t["amount"]),
-            "driver_net": float(t["driver_net"] or t["amount"]),
-            "passenger": t["passenger_name"] or "Passenger",
-            "created_at": iso(t["created_at"]),
-        } for t in today_trips],
-        "all_trips": [{
-            "reference": t["reference"],
-            "amount": float(t["amount"]),
-            "driver_net": float(t["driver_net"] or t["amount"]),
-            "passenger": t["passenger_name"] or "Passenger",
-            "created_at": iso(t["created_at"]),
-        } for t in all_trips],
+        "today_trips": [
+            {
+                "reference": t["reference"],
+                "amount": float(t["amount"]),
+                "driver_net": float(t["driver_net"] or t["amount"]),
+                "passenger": t["passenger_name"] or "Passenger",
+                "created_at": iso(t["created_at"]),
+            }
+            for t in today_trips
+        ],
+        "all_trips": [
+            {
+                "reference": t["reference"],
+                "amount": float(t["amount"]),
+                "driver_net": float(t["driver_net"] or t["amount"]),
+                "passenger": t["passenger_name"] or "Passenger",
+                "created_at": iso(t["created_at"]),
+            }
+            for t in all_trips
+        ],
     }
 
-# Fleet transactions overview
+
+# ── OWNER TRANSACTIONS ──────────────────────────────────────
+
 @api.get("/owner/transactions")
 async def owner_transactions(user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
+
         driver_ids = await conn.fetch(
-            "SELECT driver_user_id FROM owner_drivers WHERE owner_id=$1", owner["id"]
+            "SELECT driver_user_id FROM owner_drivers WHERE owner_id=$1",
+            owner["id"]
         )
+
         ids = [d["driver_user_id"] for d in driver_ids]
+
         if not ids:
-            return []
+            return {"transactions": []}
+
         rows = await conn.fetch(
             """SELECT t.*, u.full_name as driver_name, d.vehicle_plate,
                       su.full_name as passenger_name
                FROM transactions t
-               JOIN users u ON u.id=t.receiver_id
-               JOIN drivers d ON d.user_id=t.receiver_id
-               LEFT JOIN users su ON su.id=t.sender_id
-               WHERE t.receiver_id=ANY($1) AND t.type='payment'
-               ORDER BY t.created_at DESC LIMIT 100""",
+               JOIN drivers d ON d.user_id = t.receiver_id
+               LEFT JOIN users u ON u.id = d.user_id
+               LEFT JOIN users su ON su.id = t.sender_id
+               WHERE t.receiver_id = ANY($1::text[])
+               AND t.type='payment'
+               ORDER BY t.created_at DESC
+               LIMIT 100""",
             ids
         )
-    return [{
-        "id": r["id"],
-        "reference": r["reference"],
-        "driver_name": r["driver_name"],
-        "vehicle_plate": r["vehicle_plate"],
-        "passenger": r["passenger_name"] or "Passenger",
-        "gross_amount": float(r["amount"]),
-        "driver_net": float(r["driver_net"] or r["amount"]),
-        "platform_fee": float(r["platform_fee"] or 0),
-        "created_at": iso(r["created_at"]),
-    } for r in rows]
 
+    return {
+        "transactions": [
+            {
+                "id": r["id"],
+                "reference": r["reference"],
+                "driver_name": r["driver_name"],
+                "vehicle_plate": r["vehicle_plate"],
+                "passenger": r["passenger_name"] or "Passenger",
+                "gross_amount": float(r["amount"] or 0),
+                "driver_net": float(r["driver_net"] or r["amount"] or 0),
+                "platform_fee": float(r["platform_fee"] or 0),
+                "created_at": iso(r["created_at"]),
+            }
+            for r in rows
+        ]
+            }
 
 app.include_router(api)
