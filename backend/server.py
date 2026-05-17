@@ -427,12 +427,9 @@ async def register(body: RegisterIn):
         )
         if body.role == "owner":
     owner_id = str(uuid.uuid4())
-    user_id = user["id"]
-
     await conn.execute(
         "INSERT INTO fleet_owners (id, user_id) VALUES ($1, $2)",
-        owner_id,
-        user_id
+        owner_id, user_id
     )
         if body.role == "driver":
             driver_id = str(uuid.uuid4())
