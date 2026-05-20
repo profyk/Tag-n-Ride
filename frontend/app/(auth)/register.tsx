@@ -7,7 +7,7 @@ import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
 import { colors, radius } from "../../src/theme";
 import { useAuth } from "../../src/AuthContext";
 
-type Role = "passenger" | "driver";
+type Role = "passenger" | "driver" | "owner";
 
 export default function Register() {
   const router = useRouter();
@@ -29,6 +29,13 @@ export default function Register() {
     if (pin.length !== 4) return setErr("PIN must be 4 digits");
     if (pin !== pin2) return setErr("PINs don't match");
     if (role === "driver" && plate.trim().length < 2) return setErr("Enter your vehicle plate number");
+
+    // Owner goes to dedicated onboarding flow
+    if (role === "owner") {
+      router.push("/(auth)/owner-register");
+      return;
+    }
+
     setLoading(true);
     try {
       await signUp({
@@ -65,6 +72,7 @@ export default function Register() {
 
           <View style={{ height: 20 }} />
 
+          {/* Role selection — 3 options */}
           <View style={styles.roleRow}>
             <RoleChip
               active={role === "passenger"}
@@ -84,55 +92,111 @@ export default function Register() {
             />
           </View>
 
+          {/* Owner option below — full width */}
+          <TouchableOpacity
+            testID="role-owner"
+            onPress={() => setRole("owner")}
+            activeOpacity={0.85}
+            style={[styles.ownerRole, role === "owner" && styles.ownerRoleActive]}>
+            <View style={styles.ownerRoleLeft}>
+              <View style={[styles.ownerIcon, role === "owner" && { backgroundColor: colors.cyanDim, borderColor: colors.cyan }]}>
+                <Ionicons name="business-outline" size={22} color={role === "owner" ? colors.cyan : colors.textMuted} />
+              </View>
+              <View>
+                <Text style={[styles.ownerLabel, role === "owner" && { color: colors.cyan }]}>
+                  Fleet Owner
+                </Text>
+                <Text style={styles.ownerHint}>Manage drivers & view fleet earnings</Text>
+              </View>
+            </View>
+            {role === "owner" && (
+              <Ionicons name="checkmark-circle" size={22} color={colors.cyan} />
+            )}
+          </TouchableOpacity>
+
           <View style={{ height: 12 }} />
 
-          <Field label="Full name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="register-name-input" autoCapitalize="words" />
-          <Field
-            label="Phone number"
-            placeholder="82 123 4567"
-            value={phone}
-            onChangeText={(t) => setPhone(t.replace(/[^0-9 ]/g, "").slice(0, 13))}
-            keyboardType="phone-pad"
-            testID="register-phone-input"
-            leftAddon={<CountryChip testID="register-country-chip" />}
-          />
-          {role === "driver" ? (
-            <Field
-              label="Vehicle plate number"
-              placeholder="ND 123 456"
-              value={plate}
-              onChangeText={(t) => setPlate(t.toUpperCase().slice(0, 12))}
-              testID="register-plate-input"
-              autoCapitalize="characters"
-            />
-          ) : null}
-          <Field
-            label="Create 4-digit PIN"
-            placeholder="••••"
-            value={pin}
-            onChangeText={(t) => setPin(t.replace(/[^0-9]/g, "").slice(0, 4))}
-            keyboardType="number-pad"
-            secureTextEntry
-            toggleSecure
-            maxLength={4}
-            testID="register-pin-input"
-          />
-          <Field
-            label="Confirm PIN"
-            placeholder="••••"
-            value={pin2}
-            onChangeText={(t) => setPin2(t.replace(/[^0-9]/g, "").slice(0, 4))}
-            keyboardType="number-pad"
-            secureTextEntry
-            toggleSecure
-            maxLength={4}
-            testID="register-pin2-input"
-          />
+          {/* Only show form fields for passenger and driver */}
+          {role !== "owner" && (
+            <>
+              <Field
+                label="Full name"
+                placeholder="Jane Doe"
+                value={name}
+                onChangeText={setName}
+                testID="register-name-input"
+                autoCapitalize="words"
+              />
+              <Field
+                label="Phone number"
+                placeholder="82 123 4567"
+                value={phone}
+                onChangeText={(t) => setPhone(t.replace(/[^0-9 ]/g, "").slice(0, 13))}
+                keyboardType="phone-pad"
+                testID="register-phone-input"
+                leftAddon={<CountryChip testID="register-country-chip" />}
+              />
+              {role === "driver" && (
+                <Field
+                  label="Vehicle plate number"
+                  placeholder="ND 123 456"
+                  value={plate}
+                  onChangeText={(t) => setPlate(t.toUpperCase().slice(0, 12))}
+                  testID="register-plate-input"
+                  autoCapitalize="characters"
+                />
+              )}
+              <Field
+                label="Create 4-digit PIN"
+                placeholder="••••"
+                value={pin}
+                onChangeText={(t) => setPin(t.replace(/[^0-9]/g, "").slice(0, 4))}
+                keyboardType="number-pad"
+                secureTextEntry
+                toggleSecure
+                maxLength={4}
+                testID="register-pin-input"
+              />
+              <Field
+                label="Confirm PIN"
+                placeholder="••••"
+                value={pin2}
+                onChangeText={(t) => setPin2(t.replace(/[^0-9]/g, "").slice(0, 4))}
+                keyboardType="number-pad"
+                secureTextEntry
+                toggleSecure
+                maxLength={4}
+                testID="register-pin2-input"
+              />
+              {err ? <Text style={styles.err} testID="register-error">{err}</Text> : null}
+              <View style={{ height: 8 }} />
+              <Button
+                label="Create account"
+                onPress={onSubmit}
+                loading={loading}
+                testID="register-submit-btn"
+                icon="rocket-outline"
+              />
+            </>
+          )}
 
-          {err ? <Text style={styles.err} testID="register-error">{err}</Text> : null}
-
-          <View style={{ height: 8 }} />
-          <Button label="Create account" onPress={onSubmit} loading={loading} testID="register-submit-btn" icon="rocket-outline" />
+          {/* Owner CTA — goes to dedicated onboarding */}
+          {role === "owner" && (
+            <View>
+              <View style={styles.ownerInfoCard}>
+                <Ionicons name="information-circle-outline" size={20} color={colors.cyan} />
+                <Text style={styles.ownerInfoText}>
+                  Fleet owner setup takes a few extra steps — you'll set up your business details, PIN, optional driver mode with KYC, and add your first driver.
+                </Text>
+              </View>
+              <Button
+                label="Start Fleet Owner Setup"
+                onPress={() => router.push("/(auth)/owner-register")}
+                icon="arrow-forward-outline"
+                testID="register-owner-btn"
+              />
+            </View>
+          )}
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account?</Text>
@@ -160,8 +224,7 @@ const RoleChip: React.FC<{
     testID={testID}
     onPress={onPress}
     activeOpacity={0.85}
-    style={[styles.role, active && { borderColor: colors.cyan, backgroundColor: colors.cyanDim }]}
-  >
+    style={[styles.role, active && { borderColor: colors.cyan, backgroundColor: colors.cyanDim }]}>
     <Ionicons name={icon} size={26} color={active ? colors.cyan : colors.text} />
     <Text style={[styles.roleLabel, active && { color: colors.cyan }]}>{label}</Text>
     <Text style={styles.roleHint}>{hint}</Text>
@@ -179,6 +242,26 @@ const styles = StyleSheet.create({
   role: { flex: 1, borderWidth: 1, borderColor: colors.border, padding: 16, borderRadius: radius.md, backgroundColor: colors.bg2 },
   roleLabel: { color: colors.text, fontSize: 16, fontWeight: "700", marginTop: 8 },
   roleHint: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  ownerRole: {
+    marginTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    borderWidth: 1, borderColor: colors.border, padding: 16,
+    borderRadius: radius.md, backgroundColor: colors.bg2,
+  },
+  ownerRoleActive: { borderColor: colors.cyan, backgroundColor: colors.cyanDim },
+  ownerRoleLeft: { flexDirection: "row", alignItems: "center", gap: 14 },
+  ownerIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.bg3, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", justifyContent: "center",
+  },
+  ownerLabel: { color: colors.text, fontSize: 16, fontWeight: "700" },
+  ownerHint: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  ownerInfoCard: {
+    flexDirection: "row", gap: 10, alignItems: "flex-start",
+    backgroundColor: colors.cyanDim, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.cyan, padding: 14, marginBottom: 16,
+  },
+  ownerInfoText: { color: colors.text, fontSize: 13, lineHeight: 18, flex: 1 },
   err: { color: colors.red, fontSize: 13, marginTop: 4 },
   footer: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
   footerText: { color: colors.textMuted },
