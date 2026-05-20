@@ -1,92 +1,171 @@
 "use client";
+import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner } from "@/components/ui";
-import { useAnalytics } from "@/lib/hooks";
+import { Card, Spinner, StatCard } from "@/components/ui";
+import { api } from "@/lib/api";
 import { formatZAR } from "@/lib/utils";
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 
-const tooltipStyle = {
+const TT = {
   contentStyle: {
-    background: "#1A1A24",
-    border: "1px solid #2A2A3E",
-    borderRadius: 8,
-    color: "#F0F0FF",
-    fontFamily: "Syne, sans-serif",
-    fontSize: 12,
+    background: "#0D0D16", border: "1px solid #1A1A2E",
+    borderRadius: 8, color: "#F0F0FF", fontSize: 12,
   },
 };
+const PIE_COLORS = ["#00D4FF", "#00E676", "#A064FF", "#FFD60A"];
 
 export default function AnalyticsPage() {
-  const { data, isLoading } = useAnalytics();
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  if (isLoading) {
-    return <AdminShell title="Analytics"><Spinner /></AdminShell>;
-  }
+  useEffect(() => {
+    api.analytics().then((r) => setData(r.data)).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <AdminShell title="Analytics"><Spinner /></AdminShell>;
 
   return (
     <AdminShell title="Analytics">
       <div className="space-y-6">
+
+        {data?.transactions_by_type?.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {data.transactions_by_type.map((t: any) => (
+              <StatCard key={t.type}
+                label={`${t.type} transactions`}
+                value={formatZAR(t.total)}
+                sub={`${t.count} total`}
+                tone={t.type === "topup" ? "cyan" : t.type === "payment" ? "green" : "purple"}
+              />
+            ))}
+          </div>
+        )}
+
         <Card>
           <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
-            Daily Transaction Volume
+            Daily Volume (30 days)
           </h2>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={data?.daily_volume ?? []}>
               <defs>
-                <linearGradient id="gradCyan" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="gC" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#00D4FF" stopOpacity={0.2} />
                   <stop offset="95%" stopColor="#00D4FF" stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="gradGreen" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00E676" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#00E676" stopOpacity={0} />
-                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#1E1E2E" />
-              <XAxis dataKey="date" stroke="#444466" tick={{ fontSize: 11, fill: "#8888AA" }} />
-              <YAxis stroke="#444466" tick={{ fontSize: 11, fill: "#8888AA" }}
-                tickFormatter={(v: number) => `R${(v / 1000).toFixed(0)}k`} />
-              <Tooltip {...tooltipStyle}
-                formatter={(v: number, n: string) => [
-                  n === "amount" ? formatZAR(v) : v,
-                  n === "amount" ? "Revenue" : "Count",
-                ]} />
-              <Legend
-                formatter={(v: string) => v === "amount" ? "Revenue" : "Count"}
-                wrapperStyle={{ color: "#8888AA", fontSize: 12 }} />
-              <Area type="monotone" dataKey="amount" stroke="#00D4FF"
-                fill="url(#gradCyan)" strokeWidth={2} dot={false} />
-              <Area type="monotone" dataKey="count" stroke="#00E676"
-                fill="url(#gradGreen)" strokeWidth={2} dot={false} />
+              <XAxis dataKey="date" stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }} />
+              <YAxis stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }}
+                tickFormatter={(v) => `R${(v / 1000).toFixed(0)}k`} />
+              <Tooltip {...TT} formatter={(v: number, n: string) => [
+                n === "amount" ? formatZAR(v) : v,
+                n === "amount" ? "Revenue" : "Count"
+              ]} />
+              <Legend wrapperStyle={{ color: "#8888AA", fontSize: 12 }} />
+              <Area type="monotone" dataKey="amount" stroke="#00D4FF" fill="url(#gC)"
+                strokeWidth={2} dot={false} name="Revenue" />
+              <Area type="monotone" dataKey="count" stroke="#00E676" fill="none"
+                strokeWidth={2} dot={false} name="Count" />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
 
-        <Card>
-          <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
-            Driver Earnings Leaderboard
-          </h2>
-          {data?.driver_leaderboard?.length ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={data.driver_leaderboard} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#1E1E2E" horizontal={false} />
-                <XAxis type="number" stroke="#444466" tick={{ fontSize: 11, fill: "#8888AA" }}
-                  tickFormatter={(v: number) => `R${(v / 1000).toFixed(0)}k`} />
-                <YAxis type="category" dataKey="name" stroke="#444466"
-                  tick={{ fontSize: 11, fill: "#8888AA" }} width={100} />
-                <Tooltip {...tooltipStyle}
-                  formatter={(v: number) => [formatZAR(v), "Earnings"]} />
-                <Bar dataKey="earnings" fill="#00D4FF" radius={[0, 4, 4, 0]} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
+              Weekly Revenue
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data?.weekly_revenue ?? []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1E1E2E" />
+                <XAxis dataKey="week" stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }} />
+                <YAxis stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }}
+                  tickFormatter={(v) => `R${(v / 1000).toFixed(0)}k`} />
+                <Tooltip {...TT} formatter={(v: number) => [formatZAR(v), "Revenue"]} />
+                <Bar dataKey="amount" fill="#00D4FF" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          ) : (
-            <p className="text-textMuted text-sm text-center py-8">No driver data yet</p>
-          )}
+          </Card>
+
+          <Card>
+            <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
+              Transaction Types
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={data?.transactions_by_type ?? []} dataKey="count" nameKey="type"
+                  cx="50%" cy="50%" outerRadius={70}
+                  label={({ type, percent }: any) => `${type} ${(percent * 100).toFixed(0)}%`}>
+                  {(data?.transactions_by_type ?? []).map((_: any, i: number) => (
+                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip {...TT} />
+              </PieChart>
+            </ResponsiveContainer>
+          </Card>
+
+          <Card>
+            <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
+              Driver Earnings Leaderboard
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data?.driver_leaderboard ?? []} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#1E1E2E" horizontal={false} />
+                <XAxis type="number" stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }}
+                  tickFormatter={(v) => `R${(v / 1000).toFixed(0)}k`} />
+                <YAxis type="category" dataKey="name" stroke="#444466"
+                  tick={{ fontSize: 10, fill: "#8888AA" }} width={80} />
+                <Tooltip {...TT} formatter={(v: number) => [formatZAR(v), "Earnings"]} />
+                <Bar dataKey="earnings" fill="#00E676" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+
+          <Card>
+            <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
+              Top Passengers by Spend
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data?.top_passengers ?? []} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#1E1E2E" horizontal={false} />
+                <XAxis type="number" stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }}
+                  tickFormatter={(v) => `R${(v / 1000).toFixed(0)}k`} />
+                <YAxis type="category" dataKey="name" stroke="#444466"
+                  tick={{ fontSize: 10, fill: "#8888AA" }} width={80} />
+                <Tooltip {...TT} formatter={(v: number) => [formatZAR(v), "Spent"]} />
+                <Bar dataKey="total_spent" fill="#A064FF" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+
+        <Card>
+          <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">
+            Withdrawal Trend (30 days)
+          </h2>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={data?.withdrawal_trend ?? []}>
+              <defs>
+                <linearGradient id="gR" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#A064FF" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#A064FF" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1E1E2E" />
+              <XAxis dataKey="date" stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }} />
+              <YAxis stroke="#444466" tick={{ fontSize: 10, fill: "#8888AA" }}
+                tickFormatter={(v) => `R${(v / 1000).toFixed(0)}k`} />
+              <Tooltip {...TT} formatter={(v: number) => [formatZAR(v), "Withdrawals"]} />
+              <Area type="monotone" dataKey="amount" stroke="#A064FF" fill="url(#gR)"
+                strokeWidth={2} dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
         </Card>
       </div>
     </AdminShell>
   );
-}
+      }
