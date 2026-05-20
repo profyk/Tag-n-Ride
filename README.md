@@ -1,3 +1,37 @@
+tagnride-admin/
+├── package.json
+├── next.config.js
+├── tailwind.config.ts
+├── tsconfig.json
+├── postcss.config.js
+├── app/
+│   ├── globals.css
+│   ├── layout.tsx
+│   ├── page.tsx (redirects to /login)
+│   └── login/page.tsx
+│   └── admin/
+│       ├── dashboard/page.tsx
+│       ├── users/page.tsx
+│       ├── drivers/page.tsx
+│       ├── transactions/page.tsx
+│       ├── withdrawals/page.tsx
+│       ├── kyc/page.tsx
+│       ├── analytics/page.tsx
+│       ├── audit/page.tsx
+│       ├── support/page.tsx
+│       ├── admins/page.tsx (superadmin only)
+│       ├── sessions/page.tsx (superadmin only)
+│       └── superadmin/page.tsx (superadmin only)
+├── lib/
+│   ├── api.ts
+│   ├── utils.ts
+│   └── auth.ts
+└── components/
+    ├── ui/index.tsx
+    └── layout/
+        ├── Sidebar.tsx
+        └── AdminShell.tsx
+
 tag-n-ride/
 ├── backend/          # Node.js + Express API
 │   ├── src/
