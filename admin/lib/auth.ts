@@ -1,4 +1,4 @@
-import { getToken, clearToken } from "./api";
+import { getToken, clearToken, getRole } from "./api";
 
 export function isAuthenticated(): boolean {
   const token = getToken();
@@ -6,11 +6,15 @@ export function isAuthenticated(): boolean {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     if (payload.exp * 1000 < Date.now()) { clearToken(); return false; }
-    return payload.role === "admin" || payload.role === "superadmin";
+    return ["admin", "superadmin", "finance", "support", "ceo", "cto", "cfo"].includes(payload.role);
   } catch { return false; }
 }
 
-export function requireAdmin() {
+export function requireAuth() {
   if (typeof window === "undefined") return;
   if (!isAuthenticated()) window.location.href = "/login";
+}
+
+export function isSuperAdmin(): boolean {
+  return ["superadmin", "ceo"].includes(getRole() || "");
 }
