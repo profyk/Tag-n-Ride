@@ -1,87 +1,161 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { useParams } from "next/navigation";
-import QRCode from "qrcode";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Badge, Button, Spinner } from "@/components/ui";
-import { useDriverDetail } from "@/lib/hooks";
-import { formatZAR } from "@/lib/utils";
-import { Download, Printer } from "lucide-react";
+import { Card, Badge, Button, Spinner, Table, Tr, Td } from "@/components/ui";
+import { api, Driver, Transaction } from "@/lib/api";
+import { formatZAR, formatDate } from "@/lib/utils";
+import { ArrowLeft, CheckCircle, Star } from "lucide-react";
+import toast from "react-hot-toast";
 
 export default function DriverDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: driver, isLoading } = useDriverDetail(id);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const router = useRouter();
+  const [driver, setDriver] = useState<Driver | null>(null);
+  const [txns, setTxns] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (driver?.qr_code && canvasRef.current) {
-      QRCode.toCanvas(canvasRef.current, driver.qr_code, {
-        width: 240, margin: 2,
-        color: { dark: "#0A0A0F", light: "#F0F0FF" },
-      });
-    }
-  }, [driver]);
+    if (!id) return;
+    Promise.all([
+      api.drivers().then((r) => r.data.find((d) => d.user_id === id)),
+      api.transactions({ search: id }),
+    ]).then(([d, t]) => {
+      setDriver(d || null);
+      setTxns(t.data.filter((tx) =>
+        tx.sender_id === id || tx.receiver_id === id
+      ));
+    }).finally(() => setLoading(false));
+  }, [id]);
 
-  function downloadQR() {
-    if (!canvasRef.current) return;
-    const link = document.createElement("a");
-    link.download = `qr-${driver?.full_name?.replace(/\s/g, "-")}.png`;
-    link.href = canvasRef.current.toDataURL("image/png");
-    link.click();
-  }
+  const handleVerify = async () => {
+    if (!driver) return;
+    try {
+      await api.verifyDriver(driver.user_id);
+      toast.success("Driver verified");
+      setDriver({ ...driver, is_verified: true });
+    } catch (e: any) { toast.error(e.message); }
+  };
 
-  function printQR() {
-    if (!canvasRef.current) return;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(`<html><body style="display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-      <div style="text-align:center;">
-        <img src="${canvasRef.current.toDataURL()}" width="240"/>
-        <p style="font-family:sans-serif;margin-top:12px;">${driver?.full_name}</p>
-      </div></body></html>`);
-    win.print();
-  }
-
-  if (isLoading) return <AdminShell title="Driver Detail"><Spinner /></AdminShell>;
-  if (!driver) return <AdminShell title="Driver Detail"><p className="text-textMuted">Driver not found.</p></AdminShell>;
+  if (loading) return <AdminShell title="Driver Detail"><Spinner /></AdminShell>;
+  if (!driver) return (
+    <AdminShell title="Driver Detail">
+      <p className="text-textMuted">Driver not found.</p>
+    </AdminShell>
+  );
 
   return (
-    <AdminShell title={`Driver - ${driver.full_name}`}>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <h2 className="text-xs font-bold text-textMuted uppercase tracking-widest mb-4">Driver Info</h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              {([
-                ["Full Name", driver.full_name],
-                ["Phone", driver.phone_number],
-                ["Vehicle Plate", driver.vehicle_plate || "Not set"],
-                ["Total Earnings", formatZAR(driver.total_earnings)],
-                ["Rating", driver.rating_count ? `${driver.rating_avg.toFixed(1)} (${driver.rating_count})` : "No ratings"],
-                ["Status", driver.is_verified ? "Verified" : "Pending"],
-              ] as [string, string][]).map(([label, val]) => (
-                <div key={label}>
-                  <p className="text-textMuted text-xs">{label}</p>
-                  <p className="text-text font-semibold mt-0.5">{val}</p>
-                </div>
-              ))}
+    <AdminShell title="Driver Detail">
+      <div className="space-y-6 max-w-4xl">
+
+        {/* Back */}
+        <button onClick={() => router.back()}
+          className="flex items-center gap-2 text-textMuted hover:text-text text-sm transition-colors">
+          <ArrowLeft size={16} /> Back to Drivers
+        </button>
+
+        {/* Driver card */}
+        <Card>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-text font-extrabold text-xl">{driver.full_name}</h2>
+              <p className="text-textMuted font-mono text-sm mt-1">{driver.phone_number}</p>
+              {driver.vehicle_plate && (
+                <span className="inline-block mt-2 font-mono text-sm bg-yellow/10 text-yellow px-3 py-1 rounded border border-yellow/20">
+                  {driver.vehicle_plate}
+                </span>
+              )}
             </div>
-          </Card>
-          <Card>
-            <h2 className="text-xs font-bold text-textMuted uppercase tracking-widest mb-2">QR Code Value</h2>
-            <p className="font-mono text-xs text-cyan break-all">{driver.qr_code}</p>
-          </Card>
-        </div>
-        <Card className="flex flex-col items-center gap-4">
-          <h2 className="text-xs font-bold text-textMuted uppercase tracking-widest self-start">QR Code</h2>
-          <div className="bg-white p-3 rounded-lg"><canvas ref={canvasRef} /></div>
-          <div className="flex gap-2 w-full">
-            <Button variant="secondary" className="flex-1" onClick={downloadQR}><Download size={14} /> Download</Button>
-            <Button variant="secondary" className="flex-1" onClick={printQR}><Printer size={14} /> Print</Button>
+            <div className="flex flex-col items-end gap-2">
+              <Badge
+                label={driver.is_verified ? "Verified" : "Pending"}
+                tone={driver.is_verified ? "green" : "yellow"}
+              />
+              <Badge
+                label={driver.kyc_status || "No KYC"}
+                tone={
+                  driver.kyc_status === "approved" ? "green"
+                  : driver.kyc_status === "pending" ? "yellow"
+                  : driver.kyc_status === "rejected" ? "red"
+                  : "muted"
+                }
+              />
+            </div>
           </div>
-          <Badge label={driver.is_verified ? "Verified Driver" : "Pending Verification"} tone={driver.is_verified ? "green" : "yellow"} />
+
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-border">
+            <div>
+              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">
+                Total Earnings
+              </p>
+              <p className="text-xl font-extrabold text-green">{formatZAR(driver.total_earnings)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">
+                Rating
+              </p>
+              {driver.rating_count > 0 ? (
+                <p className="text-xl font-extrabold text-yellow flex items-center gap-1">
+                  <Star size={16} fill="currentColor" />
+                  {driver.rating_avg.toFixed(1)}
+                  <span className="text-textMuted text-xs font-normal">({driver.rating_count})</span>
+                </p>
+              ) : (
+                <p className="text-textMuted text-sm">No ratings yet</p>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">
+                TNR Code
+              </p>
+              <p className="font-mono text-sm text-cyan">{driver.qr_code}</p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          {!driver.is_verified && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <Button onClick={handleVerify}>
+                <CheckCircle size={13} /> Verify Driver
+              </Button>
+            </div>
+          )}
+        </Card>
+
+        {/* Transaction history */}
+        <Card>
+          <h3 className="text-text font-bold mb-4">Transaction History</h3>
+          <Table
+            headers={["Reference", "Type", "Amount", "Net", "From", "To", "Status", "Date"]}
+            empty={!txns.length}>
+            {txns.map((t) => (
+              <Tr key={t.id}>
+                <Td><span className="font-mono text-[11px] text-textMuted">{t.reference}</span></Td>
+                <Td>
+                  <Badge
+                    label={t.type}
+                    tone={t.type === "topup" ? "cyan" : t.type === "payment" ? "green" : "purple"}
+                  />
+                </Td>
+                <Td className="font-bold">{formatZAR(t.amount)}</Td>
+                <Td className="text-green text-xs font-semibold">
+                  {t.driver_net ? formatZAR(t.driver_net) : "—"}
+                </Td>
+                <Td className="text-textMuted text-xs">{t.sender_name || "—"}</Td>
+                <Td className="text-textMuted text-xs">{t.receiver_name || "—"}</Td>
+                <Td>
+                  <Badge
+                    label={t.status}
+                    tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"}
+                  />
+                </Td>
+                <Td className="text-textMuted text-xs">{formatDate(t.created_at)}</Td>
+              </Tr>
+            ))}
+          </Table>
         </Card>
       </div>
     </AdminShell>
   );
-}
+                }
