@@ -1,61 +1,120 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Input } from "@/components/ui";
-import { useUsers, useBlockUser, useResetPin } from "@/lib/hooks";
-import { formatDate } from "@/lib/utils";
-import { Search } from "lucide-react";
+import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal } from "@/components/ui";
+import { api, User } from "@/lib/api";
+import { formatDate, roleBadgeColor } from "@/lib/utils";
+import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import { isSuperAdmin } from "@/lib/api";
 
 export default function UsersPage() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const { data, isLoading } = useUsers(query || undefined);
-  const blockUser = useBlockUser();
-  const resetPin = useResetPin();
+  const [flagModal, setFlagModal] = useState<User | null>(null);
+  const [flagReason, setFlagReason] = useState("");
+  const [pinModal, setPinModal] = useState<{ name: string; pin: string } | null>(null);
+  const superAdmin = isSuperAdmin();
 
-  async function handleResetPin(id: string, name: string) {
+  const load = (q?: string) => {
+    setLoading(true);
+    api.users(q).then((r) => setUsers(r.data)).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleBlock = async (u: User) => {
     try {
-      const result = await resetPin.mutateAsync(id);
-      alert(`PIN reset for ${name}\n\nTemporary PIN: ${result.data.temporary_pin}\n\nGive this to the client and ask them to change it.`);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to reset PIN");
-    }
-  }
+      if (u.is_active) { await api.blockUser(u.id); toast.success(`${u.full_name} blocked`); }
+      else { await api.unblockUser(u.id); toast.success(`${u.full_name} unblocked`); }
+      load(query);
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleResetPin = async (u: User) => {
+    try {
+      const res = await api.resetPin(u.id);
+      setPinModal({ name: u.full_name, pin: res.data.temporary_pin });
+      load(query);
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleFlag = async () => {
+    if (!flagModal || !flagReason.trim()) return;
+    try {
+      await api.flagUser(flagModal.id, flagReason.trim());
+      toast.success(`${flagModal.full_name} flagged`);
+      setFlagModal(null); setFlagReason("");
+      load(query);
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleUnflag = async (u: User) => {
+    try { await api.unflagUser(u.id); toast.success("Account unflagged"); load(query); }
+    catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleDelete = async (u: User) => {
+    if (!confirm(`Delete ${u.full_name}? This cannot be undone.`)) return;
+    try { await api.deleteUser(u.id); toast.success("User deleted"); load(query); }
+    catch (e: any) { toast.error(e.message); }
+  };
 
   return (
     <AdminShell title="User Management">
       <div className="space-y-4">
         <div className="flex gap-3">
-          <div className="relative flex-1 max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
-            <Input placeholder="Search by phone..." value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && setQuery(search)}
-              className="pl-9" />
-          </div>
-          <Button variant="secondary" onClick={() => setQuery(search)}>Search</Button>
-          {query && <Button variant="ghost" onClick={() => { setQuery(""); setSearch(""); }}>Clear</Button>}
+          <Input placeholder="Search by phone or name..." value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { setQuery(search); load(search); } }} />
+          <Button onClick={() => { setQuery(search); load(search); }}>
+            <Search size={13} /> Search
+          </Button>
         </div>
-        {isLoading ? <Spinner /> : (
-          <Table headers={["Name", "Phone", "Role", "Status", "Joined", "Actions"]} empty={!data?.length}>
-            {data?.map((u) => (
+
+        {loading ? <Spinner /> : (
+          <Table headers={["Name", "Phone", "Role", "Status", "Joined", "Actions"]} empty={!users.length}>
+            {users.map((u) => (
               <Tr key={u.id}>
-                <Td className="font-semibold">{u.full_name}</Td>
+                <Td>
+                  <div className="font-semibold">{u.full_name}</div>
+                  {u.flagged && <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>}
+                </Td>
                 <Td className="font-mono text-xs text-textMuted">{u.phone_number}</Td>
-                <Td><Badge label={u.role} tone={u.role === "admin" ? "purple" : u.role === "driver" ? "cyan" : "muted"} /></Td>
-                <Td><Badge label={u.is_active ? "Active" : "Blocked"} tone={u.is_active ? "green" : "red"} /></Td>
+                <Td>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(u.role)}`}>
+                    {u.role}
+                  </span>
+                </Td>
+                <Td>
+                  <Badge label={u.is_active ? "Active" : "Blocked"} tone={u.is_active ? "green" : "red"} />
+                </Td>
                 <Td className="text-textMuted text-xs">{formatDate(u.created_at)}</Td>
                 <Td>
-                  <div className="flex items-center gap-2">
-                    <Button variant={u.is_active ? "danger" : "secondary"} loading={blockUser.isPending}
-                      onClick={() => blockUser.mutate({ id: u.id, block: u.is_active })}>
+                  <div className="flex items-center gap-1.5">
+                    <Button variant={u.is_active ? "danger" : "secondary"} onClick={() => handleBlock(u)}>
+                      {u.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
                       {u.is_active ? "Block" : "Unblock"}
                     </Button>
-                    <Button variant="ghost" loading={resetPin.isPending}
-                      onClick={() => handleResetPin(u.id, u.full_name)}>
-                      Reset PIN
+                    <Button variant="secondary" onClick={() => handleResetPin(u)}>
+                      <Key size={12} /> PIN
                     </Button>
+                    {u.flagged ? (
+                      <Button variant="ghost" onClick={() => handleUnflag(u)}>
+                        <Flag size={12} /> Unflag
+                      </Button>
+                    ) : (
+                      <Button variant="ghost" onClick={() => setFlagModal(u)}>
+                        <Flag size={12} /> Flag
+                      </Button>
+                    )}
+                    {superAdmin && (
+                      <Button variant="danger" onClick={() => handleDelete(u)}>
+                        <Trash2 size={12} />
+                      </Button>
+                    )}
                   </div>
                 </Td>
               </Tr>
@@ -63,6 +122,33 @@ export default function UsersPage() {
           </Table>
         )}
       </div>
+
+      <Modal open={!!flagModal} onClose={() => { setFlagModal(null); setFlagReason(""); }}
+        title={`Flag ${flagModal?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">Provide a reason for flagging this account.</p>
+          <Input placeholder="Reason for flagging..." value={flagReason}
+            onChange={(e) => setFlagReason(e.target.value)} />
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => { setFlagModal(null); setFlagReason(""); }}>Cancel</Button>
+            <Button variant="danger" onClick={handleFlag}>Flag Account</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={!!pinModal} onClose={() => setPinModal(null)} title="Temporary PIN">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            Share this temporary PIN with <strong className="text-text">{pinModal?.name}</strong>.
+            They should change it immediately.
+          </p>
+          <div className="bg-bg border border-border rounded-lg p-4 text-center">
+            <span className="text-cyan font-mono text-3xl font-black tracking-widest">{pinModal?.pin}</span>
+          </div>
+          <p className="text-xs text-red text-center">This PIN is shown once. Save it now.</p>
+          <Button className="w-full justify-center" onClick={() => setPinModal(null)}>Done</Button>
+        </div>
+      </Modal>
     </AdminShell>
   );
-}
+          }
