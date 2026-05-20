@@ -1,9 +1,8 @@
-import React from "react";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../src/theme";
 
-export default function OwnerLayout() {
+export default function OwnerTabLayout() {
   return (
     <Tabs
       screenOptions={{
@@ -37,6 +36,16 @@ export default function OwnerLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen name="driver-mode" options={{ href: null }} />
     </Tabs>
   );
 }
