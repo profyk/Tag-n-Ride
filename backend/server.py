@@ -1611,4 +1611,146 @@ async def owner_transactions(user: dict = Depends(require_owner)):
         ]
             }
 
+# ============================================================
+# TAG N RIDE — OWNER ONBOARDING BACKEND ADDITIONS
+# Add/update these in server.py
+# ============================================================
+
+# ── 1. UPDATE RegisterIn ─────────────────────────────────────
+class RegisterIn(BaseModel):
+    phone_number: str = Field(min_length=10, max_length=15)
+    full_name: str = Field(min_length=2, max_length=100)
+    pin: str = Field(min_length=4, max_length=4)
+    role: str = Field(default="passenger")
+    vehicle_plate: Optional[str] = None
+    business_name: Optional[str] = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in ("passenger", "driver", "owner"):
+            raise ValueError("Role must be passenger, driver, or owner")
+        return v
+
+# ── 2. UPDATE register endpoint ──────────────────────────────
+@api.post("/auth/register")
+async def register(body: RegisterIn):
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM users WHERE phone_number=$1", body.phone_number
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="Phone number already registered")
+
+        user_id = str(uuid.uuid4())
+        hashed_pin = hash_pin(body.pin)
+
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO users (id, phone_number, full_name, role, pin_hash)
+                   VALUES ($1,$2,$3,$4,$5)""",
+                user_id, body.phone_number, body.full_name, body.role, hashed_pin
+            )
+            wallet_id = str(uuid.uuid4())
+            await conn.execute(
+                "INSERT INTO wallets (id, user_id) VALUES ($1,$2)",
+                wallet_id, user_id
+            )
+            # Driver record
+            if body.role == "driver":
+                qr_code = generate_qr_code()
+                plate = (body.vehicle_plate or "").upper().strip()
+                await conn.execute(
+                    """INSERT INTO drivers (id, user_id, qr_code, vehicle_plate)
+                       VALUES ($1,$2,$3,$4)""",
+                    str(uuid.uuid4()), user_id, qr_code, plate
+                )
+            # Owner record
+            if body.role == "owner":
+                owner_id = str(uuid.uuid4())
+                await conn.execute(
+                    "INSERT INTO fleet_owners (id, user_id, business_name) VALUES ($1,$2,$3)",
+                    owner_id, user_id, body.business_name
+                )
+
+    log.info("register | id=%s role=%s", user_id, body.role)
+    return {"ok": True, "user_id": user_id}
+
+# ── 3. ADD wallets driver_mode_active column ─────────────────
+"""
+Run in Railway → Postgres → Query:
+ALTER TABLE wallets ADD COLUMN IF NOT EXISTS driver_mode_active BOOLEAN DEFAULT FALSE;
+"""
+
+# ── 4. TOGGLE DRIVER MODE ────────────────────────────────────
+@api.post("/owner/toggle-driver-mode")
+async def owner_toggle_driver_mode(body: dict, user: dict = Depends(require_owner)):
+    active = body.get("active", False)
+    async with pool.acquire() as conn:
+        if active:
+            # Must have approved KYC
+            kyc = await conn.fetchrow(
+                "SELECT status FROM kyc_documents WHERE user_id=$1", user["id"]
+            )
+            if not kyc or kyc["status"] != "approved":
+                raise HTTPException(
+                    status_code=403,
+                    detail="KYC approval required to activate driver mode"
+                )
+            # Create driver record if not exists
+            existing_driver = await conn.fetchrow(
+                "SELECT id FROM drivers WHERE user_id=$1", user["id"]
+            )
+            if not existing_driver:
+                qr_code = generate_qr_code()
+                await conn.execute(
+                    """INSERT INTO drivers (id, user_id, qr_code, vehicle_plate, is_verified)
+                       VALUES ($1,$2,$3,$4,TRUE)""",
+                    str(uuid.uuid4()), user["id"], qr_code, ""
+                )
+        # Update wallet driver_mode_active flag
+        await conn.execute(
+            "UPDATE wallets SET driver_mode_active=$1 WHERE user_id=$2",
+            active, user["id"]
+        )
+    log.info("owner toggle-driver-mode | user=%s active=%s", user["id"], active)
+    return {"ok": True, "driver_mode_active": active}
+
+# ── 5. UPDATED WALLET ENDPOINT (include driver_mode_active) ──
+@api.get("/wallet")
+async def get_wallet(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        wallet = await conn.fetchrow(
+            "SELECT * FROM wallets WHERE user_id=$1", user["id"]
+        )
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        driver = None
+        if user["role"] in ("driver", "owner"):
+            driver = await conn.fetchrow(
+                "SELECT qr_code, vehicle_plate, total_earnings, is_verified, rating_avg, rating_count FROM drivers WHERE user_id=$1",
+                user["id"]
+            )
+    result = {
+        "balance": float(wallet["balance"]),
+        "currency": wallet.get("currency", "ZAR"),
+        "is_frozen": wallet["is_frozen"],
+        "driver_mode_active": wallet.get("driver_mode_active", False),
+        "created_at": iso(wallet["created_at"]),
+    }
+    if driver:
+        result["qr_code"] = driver["qr_code"]
+        result["vehicle_plate"] = driver["vehicle_plate"]
+        result["total_earnings"] = float(driver["total_earnings"])
+        result["is_verified"] = driver["is_verified"]
+        result["rating_avg"] = float(driver["rating_avg"])
+        result["rating_count"] = driver["rating_count"]
+    return result
+
+# ── 6. OWNER: PASSENGER PAYMENT (driver mode) ────────────────
+# When owner has driver_mode_active=True, they should appear
+# in driver lookups. The existing transfer endpoint handles this
+# automatically since it looks up by drivers table.
+# Just make sure driver record exists (handled in toggle above).
+
 app.include_router(api)
