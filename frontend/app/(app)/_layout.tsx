@@ -43,15 +43,15 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
-        name="action"
-        options={{
-          title: isDriver ? "My QR" : "Scan & Pay",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name={isDriver ? "qr-code" : "scan"} size={size} color={color} />
-          ),
-          tabBarTestID: "tab-action",
-        }}
-      />
+  name="action"
+  options={{
+    title: isDriver ? "My QR" : "Scan & Pay",
+    tabBarIcon: ({ color, size }) => (
+      <Ionicons name={isDriver ? "qr-code" : "scan"} size={size} color={color} />
+    ),
+    tabBarTestID: "tab-action",
+  }}
+/>
       <Tabs.Screen
         name="transactions"
         options={{
