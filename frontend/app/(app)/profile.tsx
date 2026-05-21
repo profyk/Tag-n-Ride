@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, Alert, TextInput, Modal, ActivityIndicator, Platform,
+  Image, Alert, TextInput, Modal, ActivityIndicator,
+  Platform, Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -19,7 +20,8 @@ type PayoutAccount = {
   account_name?: string;
 };
 
-export default function Profile() {
+const WHATSAPP_NUMBER = "27832789333";
+const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent("Hi Tag n Ride support, I need help with my account.")}`;export default function Profile() {
   const router = useRouter();
   const { state, signOut, refresh } = useAuth();
 
@@ -42,10 +44,22 @@ export default function Profile() {
   const [payoutAccounts, setPayoutAccounts] = useState<PayoutAccount[]>([]);
   const [loadingPayouts, setLoadingPayouts] = useState(false);
 
+  const [kycStatus, setKycStatus] = useState<
+    "not_submitted" | "pending" | "approved" | "rejected" | null
+  >(null);
+
+  const [faqModal, setFaqModal] = useState(false);
+  const [privacyModal, setPrivacyModal] = useState(false);
+
   useEffect(() => {
-    if (state.status === "authed" && state.user.role === "driver") {
-      setPlate(state.user.vehicle_plate || "");
-      loadPayoutAccounts();
+    if (state.status === "authed") {
+      if (state.user.role === "driver") {
+        setPlate(state.user.vehicle_plate || "");
+        loadPayoutAccounts();
+      }
+      if (state.user.role === "driver" || state.user.role === "owner") {
+        loadKycStatus();
+      }
     }
   }, [state]);
 
@@ -56,8 +70,8 @@ export default function Profile() {
   if (state.status !== "authed") return null;
   const u = state.user;
   const isDriver = u.role === "driver";
-
-  const loadPayoutAccounts = async () => {
+  const isOwner = u.role === "owner";
+  const showKyc = isDriver || isOwner;const loadPayoutAccounts = async () => {
     setLoadingPayouts(true);
     try {
       const accounts = await api.getPayoutAccounts();
@@ -65,6 +79,15 @@ export default function Profile() {
     } catch {
     } finally {
       setLoadingPayouts(false);
+    }
+  };
+
+  const loadKycStatus = async () => {
+    try {
+      const res = await api.kycStatus();
+      setKycStatus(res.status);
+    } catch {
+      setKycStatus("not_submitted");
     }
   };
 
@@ -106,9 +129,7 @@ export default function Profile() {
     try {
       await api.changePin({ current_pin: currentPin, new_pin: newPin });
       setPinModal(false);
-      setCurrentPin("");
-      setNewPin("");
-      setConfirmPin("");
+      setCurrentPin(""); setNewPin(""); setConfirmPin("");
       Alert.alert("Success", "Your PIN has been changed successfully.");
     } catch (e: any) {
       Alert.alert("Failed", e?.message || "Could not change PIN.");
@@ -136,13 +157,8 @@ export default function Profile() {
       });
       await loadPayoutAccounts();
       setPayoutModal(false);
-      setPayoutBank("");
-      setPayoutAccount("");
-      setPayoutName("");
-      Alert.alert(
-        "Saved",
-        `${payoutType === "self" ? "My Account" : "Owner Account"} saved successfully.`
-      );
+      setPayoutBank(""); setPayoutAccount(""); setPayoutName("");
+      Alert.alert("Saved", `${payoutType === "self" ? "My Account" : "Owner Account"} saved successfully.`);
     } catch (e: any) {
       Alert.alert("Failed", e?.message || "Could not save account.");
     } finally {
@@ -160,34 +176,68 @@ export default function Profile() {
   };
 
   const confirmLogout = () => {
-  const confirmLogout = () => {
-  Alert.alert(
-    "Sign out?",
-    "You will need to sign back in to use Tag n Ride.",
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign out",
-        style: "destructive",
-        onPress: async () => {
-          await signOut();
-          if (Platform.OS === "web") {
-            window.location.href = "/";
-          } else {
-            router.replace("/(auth)/welcome");
-          }
+    Alert.alert(
+      "Sign out?",
+      "You will need to sign back in to use Tag n Ride.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: async () => {
+            await signOut();
+            if (Platform.OS === "web") {
+              window.location.href = "/";
+            } else {
+              router.replace("/(auth)/welcome");
+            }
+          },
         },
-      },
-    ]
-  );
-};
+      ]
+    );
+  };
+
+  const openWhatsApp = () => {
+    Linking.openURL(WHATSAPP_URL).catch(() => {
+      Alert.alert(
+        "WhatsApp not available",
+        "Please contact us at support@tagnride.app or call 083 278 9333"
+      );
+    });
+  };
+
+  const kycColor = () => {
+    switch (kycStatus) {
+      case "approved": return colors.green;
+      case "pending": return "#FFD60A";
+      case "rejected": return colors.red;
+      default: return colors.textMuted;
+    }
+  };
+
+  const kycLabel = () => {
+    switch (kycStatus) {
+      case "approved": return "Verified ✓";
+      case "pending": return "Under Review";
+      case "rejected": return "Rejected — Resubmit";
+      default: return "Not Submitted";
+    }
+  };
+
+  const kycIcon = (): any => {
+    switch (kycStatus) {
+      case "approved": return "shield-checkmark";
+      case "pending": return "time-outline";
+      case "rejected": return "close-circle-outline";
+      default: return "finger-print-outline";
+    }
+  };
 
   const selfAccount = payoutAccounts.find((p) => p.type === "self");
-  const ownerAccount = payoutAccounts.find((p) => p.type === "owner");
-
-  return (
+  const ownerAccount = payoutAccounts.find((p) => p.type === "owner");return (
     <SafeAreaView style={styles.root} edges={["top"]} testID="profile-screen">
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+
         <View style={styles.header}>
           <Image
             source={require("../../assets/images/icon.png")}
@@ -199,24 +249,57 @@ export default function Profile() {
         <View style={styles.card}>
           <View style={styles.avatar}>
             <Ionicons
-              name={isDriver ? "car-sport" : "person"}
-              size={32}
-              color={colors.cyan}
+              name={isDriver ? "car-sport" : isOwner ? "business" : "person"}
+              size={32} color={colors.cyan}
             />
           </View>
           <Text style={styles.name} testID="profile-name">{u.full_name}</Text>
           <Text style={styles.phone}>{u.phone_number}</Text>
           <View style={styles.rolePill}>
             <Ionicons
-              name={isDriver ? "shield-checkmark" : "person-circle"}
-              size={13}
-              color={colors.cyan}
+              name={isDriver ? "shield-checkmark" : isOwner ? "briefcase" : "person-circle"}
+              size={13} color={colors.cyan}
             />
             <Text style={styles.rolePillText}>{u.role.toUpperCase()}</Text>
           </View>
         </View>
 
-        {isDriver ? (
+        {/* KYC — drivers and owners only */}
+        {showKyc && (
+          <>
+            <Text style={styles.section}>IDENTITY VERIFICATION</Text>
+            <TouchableOpacity
+              style={[styles.kycRow, { borderColor: kycColor() }]}
+              onPress={() => router.push("/(app)/kyc")}
+              testID="kyc-btn"
+              disabled={kycStatus === "approved"}>
+              <View style={[styles.kycIconWrap, { backgroundColor: `${kycColor()}22` }]}>
+                <Ionicons name={kycIcon()} size={22} color={kycColor()} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.kycTitle}>KYC Verification</Text>
+                <Text style={[styles.kycStatusText, { color: kycColor() }]}>
+                  {kycLabel()}
+                </Text>
+                {kycStatus !== "approved" && (
+                  <Text style={styles.kycHintText}>
+                    {kycStatus === "pending"
+                      ? "Your documents are being reviewed — usually 24 hrs"
+                      : kycStatus === "rejected"
+                      ? "Tap to resubmit your documents"
+                      : "Required to receive payments · Tap to verify"}
+                  </Text>
+                )}
+              </View>
+              {kycStatus !== "approved" && (
+                <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+              )}
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Vehicle plate — drivers only */}
+        {isDriver && (
           <View style={styles.plateCard} testID="profile-plate-card">
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={styles.plateLabel}>VEHICLE PLATE</Text>
@@ -243,127 +326,88 @@ export default function Profile() {
                 />
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
                   <View style={{ flex: 1 }}>
-                    <Button
-                      label="Cancel"
-                      variant="secondary"
-                      onPress={() => {
-                        setPlate(u.vehicle_plate || "");
-                        setEditingPlate(false);
-                      }}
-                    />
+                    <Button label="Cancel" variant="secondary"
+                      onPress={() => { setPlate(u.vehicle_plate || ""); setEditingPlate(false); }} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Button
-                      label="Save"
-                      onPress={savePlate}
-                      loading={savingPlate}
-                      testID="save-plate-btn"
-                    />
+                    <Button label="Save" onPress={savePlate} loading={savingPlate} testID="save-plate-btn" />
                   </View>
                 </View>
               </View>
             )}
           </View>
-        ) : null}
+        )}
 
-        {isDriver ? (
+        {/* Payout accounts — drivers only */}
+        {isDriver && (
           <>
             <Text style={styles.section}>PAYOUT ACCOUNTS</Text>
             {loadingPayouts ? (
               <ActivityIndicator color={colors.cyan} style={{ marginVertical: 12 }} />
             ) : (
               <>
-                <TouchableOpacity
-                  style={styles.payoutRow}
-                  onPress={() => openPayoutModal("self")}
-                  testID="payout-self-btn">
+                <TouchableOpacity style={styles.payoutRow} onPress={() => openPayoutModal("self")} testID="payout-self-btn">
                   <View style={[styles.payoutIcon, { backgroundColor: colors.cyanDim }]}>
                     <Ionicons name="person-outline" size={18} color={colors.cyan} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.payoutLabel}>My Account</Text>
                     {selfAccount ? (
-                      <Text style={styles.payoutSub}>
-                        {selfAccount.bank_name} · ****{selfAccount.account_number.slice(-4)}
-                      </Text>
+                      <Text style={styles.payoutSub}>{selfAccount.bank_name} · ****{selfAccount.account_number.slice(-4)}</Text>
                     ) : (
                       <Text style={styles.payoutEmpty}>Not set — tap to add</Text>
                     )}
                   </View>
-                  <Ionicons
-                    name={selfAccount ? "create-outline" : "add-circle-outline"}
-                    size={18}
-                    color={colors.cyan}
-                  />
+                  <Ionicons name={selfAccount ? "create-outline" : "add-circle-outline"} size={18} color={colors.cyan} />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.payoutRow}
-                  onPress={() => openPayoutModal("owner")}
-                  testID="payout-owner-btn">
+                <TouchableOpacity style={styles.payoutRow} onPress={() => openPayoutModal("owner")} testID="payout-owner-btn">
                   <View style={[styles.payoutIcon, { backgroundColor: "rgba(160,100,255,0.15)" }]}>
                     <Ionicons name="car-outline" size={18} color="#A064FF" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.payoutLabel}>Owner Account</Text>
                     {ownerAccount ? (
-                      <Text style={styles.payoutSub}>
-                        {ownerAccount.bank_name} · ****{ownerAccount.account_number.slice(-4)}
-                      </Text>
+                      <Text style={styles.payoutSub}>{ownerAccount.bank_name} · ****{ownerAccount.account_number.slice(-4)}</Text>
                     ) : (
                       <Text style={styles.payoutEmpty}>Not set — tap to add</Text>
                     )}
                   </View>
-                  <Ionicons
-                    name={ownerAccount ? "create-outline" : "add-circle-outline"}
-                    size={18}
-                    color="#A064FF"
-                  />
+                  <Ionicons name={ownerAccount ? "create-outline" : "add-circle-outline"} size={18} color="#A064FF" />
                 </TouchableOpacity>
               </>
             )}
           </>
-        ) : null}
+        )}
 
         <Text style={styles.section}>ACCOUNT</Text>
-        <Row
-          icon="card-outline"
-          label={isDriver ? "Withdrawal requests" : "Top up wallet"}
+        <Row icon="card-outline" label={isDriver ? "Withdrawal requests" : "Top up wallet"}
           onPress={() => router.push(isDriver ? "/withdraw" : "/topup")}
-          testID={isDriver ? "row-withdraw" : "row-topup"}
-        />
-        <Row
-          icon="receipt-outline"
-          label="Transaction history"
-          onPress={() => router.push("/(app)/transactions")}
-          testID="row-history"
-        />
-        <Row
-          icon="lock-closed-outline"
-          label="Change PIN"
-          onPress={() => setPinModal(true)}
-          testID="row-change-pin"
-        />
+          testID={isDriver ? "row-withdraw" : "row-topup"} />
+        <Row icon="receipt-outline" label="Transaction history"
+          onPress={() => router.push("/(app)/transactions")} testID="row-history" />
+        <Row icon="lock-closed-outline" label="Change PIN"
+          onPress={() => setPinModal(true)} testID="row-change-pin" />
 
         <Text style={styles.section}>SUPPORT</Text>
-        <Row
-          icon="help-circle-outline"
-          label="Help & FAQs"
-          onPress={() => Alert.alert("Help", "support@tagnride.app")}
-        />
-        <Row
-          icon="shield-outline"
-          label="Privacy & Security"
-          onPress={() =>
-            Alert.alert("Privacy", "Your PIN is bcrypt-hashed and never stored in plaintext.")
-          }
-        />
+
+        {/* WhatsApp */}
+        <TouchableOpacity style={styles.whatsappRow} onPress={openWhatsApp} testID="row-whatsapp">
+          <View style={styles.whatsappIcon}>
+            <Text style={styles.whatsappEmoji}>💬</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.whatsappLabel}>WhatsApp Support</Text>
+            <Text style={styles.whatsappSub}>Chat with us · 083 278 9333 · Usually replies in minutes</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
+
+        <Row icon="help-circle-outline" label="Help & FAQs" onPress={() => setFaqModal(true)} testID="row-faq" />
+        <Row icon="shield-checkmark-outline" label="Privacy & Security" onPress={() => setPrivacyModal(true)} testID="row-privacy" />
 
         <View style={{ height: 16 }} />
-        <TouchableOpacity
-          onPress={confirmLogout}
-          style={styles.signout}
-          testID="signout-btn">
+        <TouchableOpacity onPress={confirmLogout} style={styles.signout} testID="signout-btn">
           <Ionicons name="log-out-outline" size={18} color={colors.red} />
           <Text style={styles.signoutText}>Sign out</Text>
         </TouchableOpacity>
@@ -373,11 +417,7 @@ export default function Profile() {
       </ScrollView>
 
       {/* Change PIN Modal */}
-      <Modal
-        visible={pinModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPinModal(false)}>
+      <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -385,157 +425,154 @@ export default function Profile() {
               <Ionicons name="lock-closed-outline" size={26} color={colors.cyan} />
             </View>
             <Text style={styles.modalTitle}>Change PIN</Text>
-            <Text style={styles.modalSub}>
-              Enter your current PIN and choose a new 4-digit PIN.
-            </Text>
-
+            <Text style={styles.modalSub}>Enter your current PIN and choose a new 4-digit PIN.</Text>
             <Text style={styles.inputLabel}>CURRENT PIN</Text>
-            <TextInput
-              style={styles.pinInput}
-              value={currentPin}
+            <TextInput style={styles.pinInput} value={currentPin}
               onChangeText={(t) => setCurrentPin(t.replace(/\D/g, "").slice(0, 4))}
-              keyboardType="number-pad"
-              secureTextEntry
-              placeholder="••••"
-              placeholderTextColor={colors.textDim}
-              maxLength={4}
-              testID="current-pin-input"
-            />
-
+              keyboardType="number-pad" secureTextEntry placeholder="••••"
+              placeholderTextColor={colors.textDim} maxLength={4} testID="current-pin-input" />
             <Text style={styles.inputLabel}>NEW PIN</Text>
-            <TextInput
-              style={styles.pinInput}
-              value={newPin}
+            <TextInput style={styles.pinInput} value={newPin}
               onChangeText={(t) => setNewPin(t.replace(/\D/g, "").slice(0, 4))}
-              keyboardType="number-pad"
-              secureTextEntry
-              placeholder="••••"
-              placeholderTextColor={colors.textDim}
-              maxLength={4}
-              testID="new-pin-input"
-            />
-
+              keyboardType="number-pad" secureTextEntry placeholder="••••"
+              placeholderTextColor={colors.textDim} maxLength={4} testID="new-pin-input" />
             <Text style={styles.inputLabel}>CONFIRM NEW PIN</Text>
-            <TextInput
-              style={styles.pinInput}
-              value={confirmPin}
+            <TextInput style={styles.pinInput} value={confirmPin}
               onChangeText={(t) => setConfirmPin(t.replace(/\D/g, "").slice(0, 4))}
-              keyboardType="number-pad"
-              secureTextEntry
-              placeholder="••••"
-              placeholderTextColor={colors.textDim}
-              maxLength={4}
-              testID="confirm-pin-input"
-            />
-
+              keyboardType="number-pad" secureTextEntry placeholder="••••"
+              placeholderTextColor={colors.textDim} maxLength={4} testID="confirm-pin-input" />
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
               <View style={{ flex: 1 }}>
-                <Button
-                  label="Cancel"
-                  variant="secondary"
-                  onPress={() => {
-                    setPinModal(false);
-                    setCurrentPin("");
-                    setNewPin("");
-                    setConfirmPin("");
-                  }}
-                />
+                <Button label="Cancel" variant="secondary" onPress={() => {
+                  setPinModal(false); setCurrentPin(""); setNewPin(""); setConfirmPin("");
+                }} />
               </View>
               <View style={{ flex: 1 }}>
-                <Button
-                  label="Change PIN"
-                  onPress={handleChangePin}
-                  loading={savingPin}
-                  testID="save-pin-btn"
-                />
+                <Button label="Change PIN" onPress={handleChangePin} loading={savingPin} testID="save-pin-btn" />
               </View>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Payout Account Modal */}
-      <Modal
-        visible={payoutModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPayoutModal(false)}>
+      {/* Payout Modal */}
+      <Modal visible={payoutModal} transparent animationType="slide" onRequestClose={() => setPayoutModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
-            <View style={[
-              styles.modalIconWrap,
-              { backgroundColor: payoutType === "self" ? colors.cyanDim : "rgba(160,100,255,0.15)" }
-            ]}>
-              <Ionicons
-                name={payoutType === "self" ? "person-outline" : "car-outline"}
-                size={26}
-                color={payoutType === "self" ? colors.cyan : "#A064FF"}
-              />
+            <View style={[styles.modalIconWrap, { backgroundColor: payoutType === "self" ? colors.cyanDim : "rgba(160,100,255,0.15)" }]}>
+              <Ionicons name={payoutType === "self" ? "person-outline" : "car-outline"} size={26}
+                color={payoutType === "self" ? colors.cyan : "#A064FF"} />
             </View>
-            <Text style={styles.modalTitle}>
-              {payoutType === "self" ? "My Account" : "Owner Account"}
-            </Text>
+            <Text style={styles.modalTitle}>{payoutType === "self" ? "My Account" : "Owner Account"}</Text>
             <Text style={styles.modalSub}>
               {payoutType === "self"
-                ? "Your personal payout account for Pay Fuel and CashUp."
+                ? "Your personal payout account for withdrawals and CashUp."
                 : "Vehicle owner's account for CashUp payments."}
             </Text>
-
             <Text style={styles.inputLabel}>BANK NAME</Text>
-            <TextInput
-              style={styles.textInput}
-              value={payoutBank}
-              onChangeText={setPayoutBank}
-              placeholder="e.g. FNB, Capitec, Standard Bank"
-              placeholderTextColor={colors.textDim}
-              testID="payout-bank-input"
-            />
-
+            <TextInput style={styles.textInput} value={payoutBank} onChangeText={setPayoutBank}
+              placeholder="e.g. FNB, Capitec, Standard Bank" placeholderTextColor={colors.textDim} testID="payout-bank-input" />
             <Text style={styles.inputLabel}>ACCOUNT NUMBER</Text>
-            <TextInput
-              style={styles.textInput}
-              value={payoutAccount}
+            <TextInput style={styles.textInput} value={payoutAccount}
               onChangeText={(t) => setPayoutAccount(t.replace(/\D/g, ""))}
-              placeholder="e.g. 1234567890"
-              placeholderTextColor={colors.textDim}
-              keyboardType="number-pad"
-              testID="payout-account-input"
-            />
-
+              placeholder="e.g. 1234567890" placeholderTextColor={colors.textDim}
+              keyboardType="number-pad" testID="payout-account-input" />
             <Text style={styles.inputLabel}>ACCOUNT NAME (optional)</Text>
-            <TextInput
-              style={styles.textInput}
-              value={payoutName}
-              onChangeText={setPayoutName}
-              placeholder="e.g. John Doe"
-              placeholderTextColor={colors.textDim}
-              testID="payout-name-input"
-            />
-
+            <TextInput style={styles.textInput} value={payoutName} onChangeText={setPayoutName}
+              placeholder="e.g. John Doe" placeholderTextColor={colors.textDim} testID="payout-name-input" />
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
               <View style={{ flex: 1 }}>
-                <Button
-                  label="Cancel"
-                  variant="secondary"
-                  onPress={() => setPayoutModal(false)}
-                />
+                <Button label="Cancel" variant="secondary" onPress={() => setPayoutModal(false)} />
               </View>
               <View style={{ flex: 1 }}>
-                <Button
-                  label="Save"
-                  onPress={handleSavePayout}
-                  loading={savingPayout}
-                  testID="save-payout-btn"
-                />
+                <Button label="Save" onPress={handleSavePayout} loading={savingPayout} testID="save-payout-btn" />
               </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* FAQ Modal */}
+      <Modal visible={faqModal} transparent animationType="slide" onRequestClose={() => setFaqModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: "85%" }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="help-circle-outline" size={26} color={colors.cyan} />
+            </View>
+            <Text style={styles.modalTitle}>Help & FAQs</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {FAQS.map((faq, i) => (
+                <View key={i} style={styles.faqItem}>
+                  <Text style={styles.faqQ}>{faq.q}</Text>
+                  <Text style={styles.faqA}>{faq.a}</Text>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.whatsappRowModal} onPress={openWhatsApp}>
+                <Text style={styles.whatsappEmoji}>💬</Text>
+                <Text style={styles.whatsappModalText}>Still need help? Chat with us on WhatsApp</Text>
+              </TouchableOpacity>
+            </ScrollView>
+            <View style={{ marginTop: 16 }}>
+              <Button label="Close" variant="secondary" onPress={() => setFaqModal(false)} />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Privacy Modal */}
+      <Modal visible={privacyModal} transparent animationType="slide" onRequestClose={() => setPrivacyModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: "85%" }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="shield-checkmark-outline" size={26} color={colors.cyan} />
+            </View>
+            <Text style={styles.modalTitle}>Privacy & Security</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {PRIVACY.map((item, i) => (
+                <View key={i} style={styles.privacyItem}>
+                  <View style={styles.privacyIconWrap}>
+                    <Ionicons name={item.icon as any} size={18} color={colors.cyan} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.privacyTitle}>{item.title}</Text>
+                    <Text style={styles.privacyText}>{item.text}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={{ marginTop: 16 }}>
+              <Button label="Close" variant="secondary" onPress={() => setPrivacyModal(false)} />
             </View>
           </View>
         </View>
       </Modal>
     </SafeAreaView>
   );
-}
+        }const FAQS = [
+  { q: "How do I top up my wallet?", a: "Go to the Home screen and tap 'Top Up Wallet'. Enter the amount and confirm. Funds reflect instantly." },
+  { q: "How do I pay a driver?", a: "Scan the driver's QR code using the Scan & Pay tab, or enter their TNR code manually. Enter the fare amount and confirm with your PIN." },
+  { q: "How long do withdrawals take?", a: "Withdrawal requests are reviewed by our team within 1–2 business days. Funds are transferred to your saved bank account once approved." },
+  { q: "What is KYC verification?", a: "KYC (Know Your Customer) is required for drivers to receive payments. You'll need to submit a selfie and a photo of your driver's licence. Review takes up to 24 hours." },
+  { q: "What is the platform fee?", a: "Tag n Ride charges a 3% platform fee on each ride payment. For example, a R100 ride results in R97 to the driver and R3 to Tag n Ride." },
+  { q: "What is CashUp?", a: "CashUp lets drivers instantly request a payout to their saved bank account without waiting for admin approval." },
+  { q: "How do I change my PIN?", a: "Go to Profile → Change PIN. You'll need your current PIN to set a new one. PINs must be exactly 4 digits." },
+  { q: "I forgot my PIN — what do I do?", a: "Contact our support team via WhatsApp or email support@tagnride.app. An admin will reset your PIN and send you a temporary one." },
+  { q: "Can I link multiple drivers as an owner?", a: "Yes! Fleet owners can link any number of drivers by entering their TNR code. You can view all driver earnings from your dashboard." },
+  { q: "Is my money safe?", a: "Yes. Wallet balances are stored securely in our database. All transactions are logged and traceable. Wallets can be frozen by our compliance team if suspicious activity is detected." },
+];
+
+const PRIVACY = [
+  { icon: "lock-closed-outline", title: "PIN Security", text: "Your 4-digit PIN is hashed using bcrypt before storage. We never store your actual PIN in plaintext anywhere in our system." },
+  { icon: "finger-print-outline", title: "KYC Documents", text: "Selfie and licence photos are stored securely and only accessible by authorised Tag n Ride compliance staff. They are never shared with third parties." },
+  { icon: "card-outline", title: "Bank Details", text: "Your bank account number is stored securely and only used for approved withdrawals. We never process payments without your explicit request." },
+  { icon: "shield-checkmark-outline", title: "Transaction Security", text: "All transactions require PIN confirmation. Every payment is logged with a unique reference number for dispute resolution." },
+  { icon: "eye-off-outline", title: "Data Privacy", text: "Your personal data is never sold to advertisers or third parties. We collect only what is necessary to operate the Tag n Ride platform." },
+  { icon: "alert-circle-outline", title: "Suspicious Activity", text: "Our system automatically flags unusual transactions over R5,000. Accounts may be temporarily frozen pending review to protect you." },
+  { icon: "mail-outline", title: "Contact Us", text: "For privacy concerns or data deletion requests, email privacy@tagnride.app or WhatsApp 083 278 9333." },
+];
 
 const Row: React.FC<{
   icon: keyof typeof Ionicons.glyphMap;
@@ -543,30 +580,23 @@ const Row: React.FC<{
   onPress: () => void;
   testID?: string;
 }> = ({ icon, label, onPress, testID }) => (
-  <TouchableOpacity
-    testID={testID}
-    onPress={onPress}
-    activeOpacity={0.85}
-    style={styles.row}>
+  <TouchableOpacity testID={testID} onPress={onPress} activeOpacity={0.85} style={styles.row}>
     <Ionicons name={icon} size={20} color={colors.cyan} />
     <Text style={styles.rowText}>{label}</Text>
     <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
   </TouchableOpacity>
-);
-
-const styles = StyleSheet.create({
+);const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { alignItems: "center", marginBottom: 8 },
   logo: { width: 80, height: 80 },
   card: {
     backgroundColor: colors.bg2, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: colors.border,
-    padding: 24, alignItems: "center",
+    borderWidth: 1, borderColor: colors.border, padding: 24, alignItems: "center",
   },
   avatar: {
-    width: 72, height: 72, borderRadius: 36,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan,
+    width: 72, height: 72, borderRadius: 36, alignItems: "center",
+    justifyContent: "center", backgroundColor: colors.cyanDim,
+    borderWidth: 1, borderColor: colors.cyan,
   },
   name: { color: colors.text, fontSize: 22, fontWeight: "800", marginTop: 12 },
   phone: { color: colors.textMuted, fontSize: 14, marginTop: 4 },
@@ -581,23 +611,15 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: 12, fontWeight: "700",
     letterSpacing: 1.4, marginTop: 24, marginBottom: 10,
   },
-  row: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    padding: 16, backgroundColor: colors.bg2,
-    borderRadius: radius.md, borderWidth: 1,
-    borderColor: colors.border, marginBottom: 8,
+  kycRow: {
+    flexDirection: "row", alignItems: "center", gap: 12, padding: 14,
+    backgroundColor: colors.bg2, borderRadius: radius.md,
+    borderWidth: 1.5, marginBottom: 8,
   },
-  rowText: { color: colors.text, fontSize: 15, fontWeight: "600", flex: 1 },
-  signout: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, padding: 16, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.red, backgroundColor: colors.redDim,
-  },
-  signoutText: { color: colors.red, fontWeight: "700", fontSize: 15 },
-  brand: {
-    color: colors.textDim, textAlign: "center",
-    marginTop: 32, fontSize: 12, letterSpacing: 1,
-  },
+  kycIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  kycTitle: { color: colors.text, fontSize: 14, fontWeight: "700" },
+  kycStatusText: { fontSize: 12, fontWeight: "800", marginTop: 2 },
+  kycHintText: { color: colors.textMuted, fontSize: 11, marginTop: 3, lineHeight: 15 },
   plateCard: {
     marginTop: 16, padding: 16, backgroundColor: colors.bg2,
     borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
@@ -608,71 +630,94 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFD60A", borderRadius: 8,
     borderWidth: 2, borderColor: "#0A0A0A", alignItems: "center",
   },
-  plateValue: {
-    color: "#0A0A0A", fontSize: 22, fontWeight: "900",
-    letterSpacing: 2, fontFamily: "monospace",
-  },
+  plateValue: { color: "#0A0A0A", fontSize: 22, fontWeight: "900", letterSpacing: 2 },
   plateInput: {
-    marginTop: 10, backgroundColor: colors.bg,
-    borderColor: colors.border, borderWidth: 1,
-    borderRadius: radius.sm + 4, paddingHorizontal: 14,
-    paddingVertical: 14, color: colors.text,
-    fontSize: 18, fontWeight: "800", letterSpacing: 2,
+    marginTop: 10, backgroundColor: colors.bg, borderColor: colors.border,
+    borderWidth: 1, borderRadius: radius.sm + 4, paddingHorizontal: 14,
+    paddingVertical: 14, color: colors.text, fontSize: 18,
+    fontWeight: "800", letterSpacing: 2,
   },
   payoutRow: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    padding: 14, backgroundColor: colors.bg2,
-    borderRadius: radius.md, borderWidth: 1,
-    borderColor: colors.border, marginBottom: 8,
+    flexDirection: "row", alignItems: "center", gap: 12, padding: 14,
+    backgroundColor: colors.bg2, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border, marginBottom: 8,
   },
-  payoutIcon: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center",
-  },
+  payoutIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   payoutLabel: { color: colors.text, fontSize: 14, fontWeight: "700" },
   payoutSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   payoutEmpty: { color: colors.textDim, fontSize: 12, marginTop: 2 },
-  modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "flex-end",
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 12, padding: 16,
+    backgroundColor: colors.bg2, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border, marginBottom: 8,
   },
+  rowText: { color: colors.text, fontSize: 15, fontWeight: "600", flex: 1 },
+  whatsappRow: {
+    flexDirection: "row", alignItems: "center", gap: 12, padding: 16,
+    backgroundColor: "#0A2F1A", borderRadius: radius.md,
+    borderWidth: 1, borderColor: "#25D366", marginBottom: 8,
+  },
+  whatsappIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: "#25D366", alignItems: "center", justifyContent: "center",
+  },
+  whatsappEmoji: { fontSize: 20 },
+  whatsappLabel: { color: "#25D366", fontSize: 15, fontWeight: "700" },
+  whatsappSub: { color: "#4CAF50", fontSize: 12, marginTop: 2 },
+  whatsappRowModal: {
+    flexDirection: "row", alignItems: "center", gap: 10, padding: 14,
+    backgroundColor: "#0A2F1A", borderRadius: radius.md,
+    borderWidth: 1, borderColor: "#25D366", marginTop: 8,
+  },
+  whatsappModalText: { color: "#25D366", fontSize: 13, fontWeight: "700", flex: 1 },
+  signout: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, padding: 16, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.red, backgroundColor: colors.redDim,
+  },
+  signoutText: { color: colors.red, fontWeight: "700", fontSize: 15 },
+  brand: { color: colors.textDim, textAlign: "center", marginTop: 32, fontSize: 12, letterSpacing: 1 },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
   modalSheet: {
-    backgroundColor: colors.bg2, borderTopLeftRadius: 24,
-    borderTopRightRadius: 24, padding: 24, paddingBottom: 40,
-    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 40, borderWidth: 1, borderColor: colors.border,
   },
   modalHandle: {
     width: 40, height: 4, borderRadius: 2,
     backgroundColor: colors.border, alignSelf: "center", marginBottom: 20,
   },
   modalIconWrap: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: colors.cyanDim, alignItems: "center",
-    justifyContent: "center", alignSelf: "center", marginBottom: 12,
+    width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cyanDim,
+    alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 12,
   },
-  modalTitle: {
-    color: colors.text, fontSize: 20, fontWeight: "800",
-    textAlign: "center", marginBottom: 6,
-  },
-  modalSub: {
-    color: colors.textMuted, fontSize: 13,
-    textAlign: "center", marginBottom: 20, lineHeight: 20,
-  },
+  modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center", marginBottom: 6 },
+  modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 20, lineHeight: 20 },
   inputLabel: {
     color: colors.textMuted, fontSize: 10, fontWeight: "700",
     letterSpacing: 1.4, marginBottom: 6, marginTop: 12,
   },
   pinInput: {
-    backgroundColor: colors.bg, borderColor: colors.border,
-    borderWidth: 1, borderRadius: radius.md,
-    paddingHorizontal: 14, paddingVertical: 14,
-    color: colors.text, fontSize: 22,
-    fontWeight: "800", letterSpacing: 8, textAlign: "center",
+    backgroundColor: colors.bg, borderColor: colors.border, borderWidth: 1,
+    borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14,
+    color: colors.text, fontSize: 22, fontWeight: "800", letterSpacing: 8, textAlign: "center",
   },
   textInput: {
-    backgroundColor: colors.bg, borderColor: colors.border,
-    borderWidth: 1, borderRadius: radius.md,
-    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: colors.bg, borderColor: colors.border, borderWidth: 1,
+    borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 12,
     color: colors.text, fontSize: 14,
   },
+  faqItem: { marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  faqQ: { color: colors.text, fontSize: 14, fontWeight: "700", marginBottom: 6 },
+  faqA: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
+  privacyItem: {
+    flexDirection: "row", gap: 12, alignItems: "flex-start",
+    marginBottom: 16, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  privacyIconWrap: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.cyanDim,
+    alignItems: "center", justifyContent: "center", flexShrink: 0,
+  },
+  privacyTitle: { color: colors.text, fontSize: 14, fontWeight: "700", marginBottom: 4 },
+  privacyText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
 });
