@@ -187,7 +187,7 @@ const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent
           onPress: async () => {
             await signOut();
             if (Platform.OS === "web") {
-              window.location.href = "/";
+              window.location.href = "/login";
             } else {
               router.replace("/(auth)/welcome");
             }
