@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, StyleSheet, KeyboardAvoidingView, Platform,
   ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator,
@@ -15,6 +15,191 @@ import { api } from "../../src/api";
 type Role = "passenger" | "driver" | "owner";
 type Step = "form" | "kyc";
 
+// ── Web Camera Component ─────────────────────────────────────
+function WebCamera({
+  visible, onCapture, onClose, title = "Take Photo", aspectRatio = "1:1",
+}: {
+  visible: boolean;
+  onCapture: (base64: string, uri: string) => void;
+  onClose: () => void;
+  title?: string;
+  aspectRatio?: "1:1" | "4:3";
+}) {
+  const videoRef = useRef<any>(null);
+  const canvasRef = useRef<any>(null);
+  const streamRef = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("environment");
+  const [flashOn, setFlashOn] = useState(false);
+  const [flashSupported, setFlashSupported] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visible) startCamera();
+    return () => stopCamera();
+  }, [visible, facingMode]);
+
+  const startCamera = async () => {
+    setReady(false);
+    setError(null);
+    stopCamera();
+    try {
+      const stream = await (navigator as any).mediaDevices.getUserMedia({
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setReady(true);
+      }
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities?.();
+      setFlashSupported(!!caps?.torch);
+    } catch {
+      setError("Camera access denied. Please allow camera access in your browser settings.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t: any) => t.stop());
+      streamRef.current = null;
+    }
+    setReady(false);
+    setFlashOn(false);
+  };
+
+  const toggleFlash = async () => {
+    if (!streamRef.current || !flashSupported) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    const newFlash = !flashOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: newFlash }] });
+      setFlashOn(newFlash);
+    } catch {}
+  };
+
+  const capture = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const isSquare = aspectRatio === "1:1";
+    const size = Math.min(video.videoWidth, video.videoHeight);
+    canvas.width = isSquare ? size : video.videoWidth;
+    canvas.height = isSquare ? size : video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (isSquare) {
+      const offsetX = (video.videoWidth - size) / 2;
+      const offsetY = (video.videoHeight - size) / 2;
+      ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size);
+    } else {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const base64 = dataUrl.split(",")[1];
+    stopCamera();
+    onCapture(base64, dataUrl);
+  };
+
+  const handleClose = () => { stopCamera(); onClose(); };
+
+  if (!visible) return null;
+
+  return (
+    <View style={camStyles.overlay}>
+      <View style={camStyles.container}>
+
+        {/* Header */}
+        <View style={camStyles.header}>
+          <TouchableOpacity onPress={handleClose} style={camStyles.headerBtn}>
+            <Ionicons name="close" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={camStyles.headerTitle}>{title}</Text>
+          <View style={camStyles.headerRight}>
+            {flashSupported && (
+              <TouchableOpacity onPress={toggleFlash} style={camStyles.headerBtn}>
+                <Ionicons
+                  name={flashOn ? "flash" : "flash-off"}
+                  size={22}
+                  color={flashOn ? "#FFD60A" : colors.textMuted}
+                />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => setFacingMode(f => f === "user" ? "environment" : "user")}
+              style={camStyles.headerBtn}>
+              <Ionicons name="camera-reverse-outline" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Video */}
+        <View style={[camStyles.videoWrap, aspectRatio === "1:1" ? camStyles.square : camStyles.landscape]}>
+          {error ? (
+            <View style={camStyles.errorWrap}>
+              <Ionicons name="camera-off-outline" size={48} color={colors.red} />
+              <Text style={camStyles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={startCamera} style={camStyles.retryBtn}>
+                <Text style={camStyles.retryText}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* @ts-ignore */}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  width: "100%", height: "100%", objectFit: "cover",
+                  transform: facingMode === "user" ? "scaleX(-1)" : "none",
+                  borderRadius: 12,
+                }}
+              />
+              {!ready && (
+                <View style={camStyles.loadingOverlay}>
+                  <ActivityIndicator color={colors.cyan} size="large" />
+                  <Text style={camStyles.loadingText}>Starting camera...</Text>
+                </View>
+              )}
+              {/* Corner guides */}
+              <View style={[camStyles.corner, camStyles.cTL]} />
+              <View style={[camStyles.corner, camStyles.cTR]} />
+              <View style={[camStyles.corner, camStyles.cBL]} />
+              <View style={[camStyles.corner, camStyles.cBR]} />
+            </>
+          )}
+        </View>
+
+        {/* @ts-ignore */}
+        <canvas ref={canvasRef} style={{ display: "none" }} />
+
+        {/* Capture button */}
+        {!error && (
+          <View style={camStyles.captureRow}>
+            <TouchableOpacity
+              onPress={capture}
+              disabled={!ready}
+              style={[camStyles.captureBtn, !ready && { opacity: 0.4 }]}>
+              <View style={camStyles.captureBtnInner} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <Text style={camStyles.hint}>
+          {aspectRatio === "1:1"
+            ? "Centre your face in the frame"
+            : "Ensure all licence text is readable"}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ── Main Register Screen ─────────────────────────────────────
 export default function Register() {
   const router = useRouter();
   const { signUp } = useAuth();
@@ -36,7 +221,10 @@ export default function Register() {
   const [licence, setLicence] = useState<{ uri: string; base64: string } | null>(null);
   const [uploadingKyc, setUploadingKyc] = useState(false);
 
-  // ── Validate form ────────────────────────────────────────
+  // Web camera
+  const [cameraVisible, setCameraVisible] = useState(false);
+  const [cameraTarget, setCameraTarget] = useState<"selfie" | "licence">("selfie");
+
   const validateForm = () => {
     setErr(null);
     if (name.trim().length < 2) { setErr("Enter your full name"); return false; }
@@ -48,26 +236,15 @@ export default function Register() {
     return true;
   };
 
-  // ── Next button (form → kyc for driver, submit for passenger) ──
   const onNext = async () => {
     if (!validateForm()) return;
-    if (role === "owner") {
-      router.push("/(auth)/owner-register");
-      return;
-    }
-    if (role === "driver") {
-      setStep("kyc");
-      return;
-    }
-    // Passenger — submit directly
+    if (role === "owner") { router.push("/(auth)/owner-register"); return; }
+    if (role === "driver") { setStep("kyc"); return; }
     await submitRegistration();
   };
 
-  // ── Pick image ───────────────────────────────────────────
-  const pickImage = async (
-    type: "selfie" | "licence",
-    camera: boolean
-  ) => {
+  // Native image picker (iOS/Android only)
+  const pickImage = async (type: "selfie" | "licence", camera: boolean) => {
     try {
       const { status } = camera
         ? await ImagePicker.requestCameraPermissionsAsync()
@@ -76,21 +253,16 @@ export default function Register() {
         Alert.alert("Permission required", `Please allow ${camera ? "camera" : "gallery"} access.`);
         return;
       }
+      const opts = {
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7 as any,
+        base64: true,
+        allowsEditing: true,
+        aspect: type === "selfie" ? [1, 1] as [number, number] : [4, 3] as [number, number],
+      };
       const result = camera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            quality: 0.7,
-            base64: true,
-            allowsEditing: true,
-            aspect: type === "selfie" ? [1, 1] : [4, 3],
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            quality: 0.7,
-            base64: true,
-            allowsEditing: true,
-            aspect: type === "selfie" ? [1, 1] : [4, 3],
-          });
+        ? await ImagePicker.launchCameraAsync(opts)
+        : await ImagePicker.launchImageLibraryAsync(opts);
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         const data = { uri: asset.uri, base64: asset.base64 || "" };
@@ -103,6 +275,11 @@ export default function Register() {
   };
 
   const showImageOptions = (type: "selfie" | "licence") => {
+    if (Platform.OS === "web") {
+      setCameraTarget(type);
+      setCameraVisible(true);
+      return;
+    }
     Alert.alert(
       type === "selfie" ? "Take Selfie" : "Licence Photo",
       "Choose source",
@@ -114,12 +291,11 @@ export default function Register() {
     );
   };
 
-  // ── Submit registration + KYC ────────────────────────────
   const submitRegistration = async () => {
     setLoading(true);
     try {
       const localDigits = phone.replace(/\D/g, "").replace(/^0+/, "");
-      const user = await signUp({
+      await signUp({
         phone_number: "+27" + localDigits,
         full_name: name.trim(),
         pin,
@@ -141,7 +317,6 @@ export default function Register() {
     setUploadingKyc(true);
     try {
       const localDigits = phone.replace(/\D/g, "").replace(/^0+/, "");
-      // Register first
       await signUp({
         phone_number: "+27" + localDigits,
         full_name: name.trim(),
@@ -149,7 +324,6 @@ export default function Register() {
         role,
         vehicle_plate: plate.trim().toUpperCase(),
       });
-      // Submit KYC
       try {
         await api.submitKyc(selfie.base64, licence.base64);
       } catch {
@@ -164,12 +338,17 @@ export default function Register() {
     }
   };
 
-  // ── KYC Step ─────────────────────────────────────────────
+  // ── KYC Step ───────────────────────────────────────────────
   if (step === "kyc") {
     return (
       <SafeAreaView style={styles.root}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}>
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled">
+
             <TouchableOpacity onPress={() => setStep("form")} style={styles.back}>
               <Ionicons name="chevron-back" size={26} color={colors.text} />
             </TouchableOpacity>
@@ -186,7 +365,8 @@ export default function Register() {
             <View style={styles.kycInfoCard}>
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.cyan} />
               <Text style={styles.kycInfoText}>
-                Your documents are encrypted and used only for verification. This helps keep Tag n Ride safe for everyone.
+                Your documents are encrypted and used only for verification.
+                This helps keep Tag n Ride safe for everyone.
               </Text>
             </View>
 
@@ -226,7 +406,10 @@ export default function Register() {
               testID="licence-btn">
               {licence ? (
                 <View style={styles.kycPreviewWrap}>
-                  <Image source={{ uri: licence.uri }} style={[styles.kycPreview, { aspectRatio: 4 / 3 }]} />
+                  <Image
+                    source={{ uri: licence.uri }}
+                    style={[styles.kycPreview, { aspectRatio: 4 / 3 }]}
+                  />
                   <View style={styles.kycDoneBadge}>
                     <Ionicons name="checkmark-circle" size={28} color={colors.green} />
                   </View>
@@ -242,9 +425,9 @@ export default function Register() {
 
             <View style={{ height: 8 }} />
 
-            {/* Skip option */}
+            {/* Skip */}
             <TouchableOpacity
-              onPress={() => {
+              onPress={() =>
                 Alert.alert(
                   "Skip KYC?",
                   "You can still create your account but you won't be able to receive payments until KYC is approved. You can submit it later from your profile.",
@@ -252,8 +435,8 @@ export default function Register() {
                     { text: "Cancel", style: "cancel" },
                     { text: "Skip for now", onPress: submitRegistration },
                   ]
-                );
-              }}
+                )
+              }
               style={styles.skipBtn}>
               <Text style={styles.skipText}>Skip for now — submit later</Text>
             </TouchableOpacity>
@@ -263,7 +446,9 @@ export default function Register() {
             {uploadingKyc ? (
               <View style={styles.loadingRow}>
                 <ActivityIndicator color={colors.cyan} />
-                <Text style={styles.loadingText}>Creating account & uploading documents...</Text>
+                <Text style={styles.loadingText}>
+                  Creating account & uploading documents...
+                </Text>
               </View>
             ) : (
               <Button
@@ -277,16 +462,40 @@ export default function Register() {
             <PoweredBy />
           </ScrollView>
         </KeyboardAvoidingView>
+
+        {/* Web Camera — overlays the whole screen */}
+        {Platform.OS === "web" && (
+          <WebCamera
+            visible={cameraVisible}
+            title={cameraTarget === "selfie" ? "Take Selfie" : "Photograph Licence"}
+            aspectRatio={cameraTarget === "selfie" ? "1:1" : "4:3"}
+            onCapture={(base64, uri) => {
+              const data = { uri, base64 };
+              if (cameraTarget === "selfie") setSelfie(data);
+              else setLicence(data);
+              setCameraVisible(false);
+            }}
+            onClose={() => setCameraVisible(false)}
+          />
+        )}
       </SafeAreaView>
     );
   }
 
-  // ── Form Step ─────────────────────────────────────────────
+  // ── Form Step ──────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.root} testID="register-screen">
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} style={styles.back} testID="register-back-btn">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled">
+
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.back}
+            testID="register-back-btn">
             <Ionicons name="chevron-back" size={26} color={colors.text} />
           </TouchableOpacity>
 
@@ -328,9 +537,10 @@ export default function Register() {
             activeOpacity={0.85}
             style={[styles.ownerRole, role === "owner" && styles.ownerRoleActive]}>
             <View style={styles.ownerRoleLeft}>
-              <View style={[styles.ownerIcon, role === "owner" && {
-                backgroundColor: colors.cyanDim, borderColor: colors.cyan
-              }]}>
+              <View style={[
+                styles.ownerIcon,
+                role === "owner" && { backgroundColor: colors.cyanDim, borderColor: colors.cyan }
+              ]}>
                 <Ionicons
                   name="business-outline"
                   size={22}
@@ -356,12 +566,13 @@ export default function Register() {
             <View style={styles.driverNotice}>
               <Ionicons name="information-circle-outline" size={18} color={colors.cyan} />
               <Text style={styles.driverNoticeText}>
-                Drivers need to verify their identity with a selfie and licence photo. You'll do this in the next step.
+                Drivers need to verify their identity with a selfie and licence photo.
+                You'll do this in the next step.
               </Text>
             </View>
           )}
 
-          {/* Form fields for passenger and driver */}
+          {/* Form fields */}
           {role !== "owner" && (
             <>
               <Field
@@ -413,7 +624,9 @@ export default function Register() {
                 maxLength={4}
                 testID="register-pin2-input"
               />
-              {err ? <Text style={styles.err} testID="register-error">{err}</Text> : null}
+              {err ? (
+                <Text style={styles.err} testID="register-error">{err}</Text>
+              ) : null}
               <View style={{ height: 8 }} />
               <Button
                 label={role === "driver" ? "Next — Verify Identity" : "Create account"}
@@ -431,7 +644,8 @@ export default function Register() {
               <View style={styles.ownerInfoCard}>
                 <Ionicons name="information-circle-outline" size={20} color={colors.cyan} />
                 <Text style={styles.ownerInfoText}>
-                  Fleet owner setup takes a few extra steps — you'll set up your business details, PIN, optional driver mode with KYC, and add your first driver.
+                  Fleet owner setup takes a few extra steps — you'll set up your business
+                  details, PIN, optional driver mode with KYC, and add your first driver.
                 </Text>
               </View>
               <Button
@@ -457,6 +671,7 @@ export default function Register() {
   );
 }
 
+// ── Role Chip ────────────────────────────────────────────────
 const RoleChip: React.FC<{
   active: boolean;
   icon: keyof typeof Ionicons.glyphMap;
@@ -476,6 +691,7 @@ const RoleChip: React.FC<{
   </TouchableOpacity>
 );
 
+// ── Styles ───────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 24, paddingBottom: 40 },
@@ -517,8 +733,7 @@ const styles = StyleSheet.create({
   driverNotice: {
     flexDirection: "row", gap: 10, alignItems: "flex-start",
     backgroundColor: colors.cyanDim, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.cyan,
-    padding: 12, marginBottom: 4,
+    borderWidth: 1, borderColor: colors.cyan, padding: 12, marginBottom: 4,
   },
   driverNoticeText: { color: colors.text, fontSize: 12, lineHeight: 18, flex: 1 },
   err: { color: colors.red, fontSize: 13, marginTop: 4 },
@@ -526,7 +741,7 @@ const styles = StyleSheet.create({
   footerText: { color: colors.textMuted },
   link: { color: colors.cyan, fontWeight: "700" },
 
-  // KYC styles
+  // KYC
   kycInfoCard: {
     flexDirection: "row", gap: 10, alignItems: "flex-start",
     backgroundColor: colors.cyanDim, borderRadius: radius.md,
@@ -547,14 +762,10 @@ const styles = StyleSheet.create({
   kycLicence: { minHeight: 140 },
   kycUploadDone: { borderColor: colors.green, borderStyle: "solid" },
   kycPreviewWrap: { width: "100%", position: "relative" },
-  kycPreview: {
-    width: "100%", aspectRatio: 1,
-    borderRadius: radius.md,
-  },
+  kycPreview: { width: "100%", aspectRatio: 1, borderRadius: radius.md },
   kycDoneBadge: {
     position: "absolute", bottom: 8, right: 8,
-    backgroundColor: colors.bg,
-    borderRadius: 999, padding: 2,
+    backgroundColor: colors.bg, borderRadius: 999, padding: 2,
   },
   kycPlaceholder: { alignItems: "center", padding: 24, gap: 8 },
   kycPlaceholderText: { color: colors.textMuted, fontSize: 15, fontWeight: "700" },
@@ -566,4 +777,74 @@ const styles = StyleSheet.create({
     justifyContent: "center", padding: 16,
   },
   loadingText: { color: colors.textMuted, fontSize: 13 },
+});
+
+// ── Web Camera Styles ────────────────────────────────────────
+const camStyles = StyleSheet.create({
+  overlay: {
+    position: "absolute" as any,
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.97)",
+    zIndex: 9999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  container: {
+    width: "100%",
+    maxWidth: 480,
+    padding: 20,
+  },
+  header: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 16,
+  },
+  headerBtn: {
+    width: 40, height: 40, alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.bg2, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  headerTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
+  headerRight: { flexDirection: "row", gap: 8 },
+  videoWrap: {
+    width: "100%", borderRadius: 12,
+    overflow: "hidden", backgroundColor: colors.bg3,
+    position: "relative",
+  },
+  square: { aspectRatio: 1 },
+  landscape: { aspectRatio: 4 / 3 },
+  loadingOverlay: {
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.bg3, gap: 12,
+  },
+  loadingText: { color: colors.textMuted, fontSize: 14 },
+  errorWrap: {
+    alignItems: "center", justifyContent: "center",
+    padding: 32, gap: 12,
+  },
+  errorText: {
+    color: colors.red, fontSize: 14,
+    textAlign: "center", lineHeight: 20,
+  },
+  retryBtn: {
+    paddingHorizontal: 20, paddingVertical: 10,
+    backgroundColor: colors.bg2, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  retryText: { color: colors.cyan, fontWeight: "700" },
+  corner: { position: "absolute", width: 24, height: 24, borderColor: colors.cyan },
+  cTL: { top: 12, left: 12, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 4 },
+  cTR: { top: 12, right: 12, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 4 },
+  cBL: { bottom: 12, left: 12, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 4 },
+  cBR: { bottom: 12, right: 12, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 4 },
+  captureRow: { alignItems: "center", marginTop: 24, marginBottom: 8 },
+  captureBtn: {
+    width: 72, height: 72, borderRadius: 36,
+    borderWidth: 4, borderColor: colors.cyan,
+    alignItems: "center", justifyContent: "center",
+  },
+  captureBtnInner: {
+    width: 54, height: 54, borderRadius: 27, backgroundColor: colors.cyan,
+  },
+  hint: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 8 },
 });
