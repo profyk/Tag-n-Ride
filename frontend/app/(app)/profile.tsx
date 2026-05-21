@@ -176,26 +176,29 @@ const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent
   };
 
   const confirmLogout = () => {
-    Alert.alert(
-      "Sign out?",
-      "You will need to sign back in to use Tag n Ride.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Sign out",
-          style: "destructive",
-          onPress: async () => {
-            await signOut();
-            if (Platform.OS === "web") {
-              window.location.href = "/login";
-            } else {
-              router.replace("/(auth)/welcome");
-            }
-          },
+  // On web, Alert.alert doesn't work — sign out directly
+  if (Platform.OS === "web") {
+    signOut().then(() => {
+      window.location.href = "/login";
+    });
+    return;
+  }
+  Alert.alert(
+    "Sign out?",
+    "You will need to sign back in to use Tag n Ride.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign out",
+        style: "destructive",
+        onPress: async () => {
+          await signOut();
+          router.replace("/(auth)/welcome");
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
   const openWhatsApp = () => {
     Linking.openURL(WHATSAPP_URL).catch(() => {
@@ -393,15 +396,15 @@ const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent
 
         {/* WhatsApp */}
         <TouchableOpacity style={styles.whatsappRow} onPress={openWhatsApp} testID="row-whatsapp">
-          <View style={styles.whatsappIcon}>
-            <Text style={styles.whatsappEmoji}>💬</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.whatsappLabel}>WhatsApp Support</Text>
-            <Text style={styles.whatsappSub}>Chat with us · 083 278 9333 · Usually replies in minutes</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-        </TouchableOpacity>
+  <View style={styles.whatsappIcon}>
+    <Ionicons name="logo-whatsapp" size={22} color="#fff" />
+  </View>
+  <View style={{ flex: 1 }}>
+    <Text style={styles.whatsappLabel}>WhatsApp Support</Text>
+    <Text style={styles.whatsappSub}>Chat with us · 083 278 9333 · Usually replies in minutes</Text>
+  </View>
+  <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+</TouchableOpacity>
 
         <Row icon="help-circle-outline" label="Help & FAQs" onPress={() => setFaqModal(true)} testID="row-faq" />
         <Row icon="shield-checkmark-outline" label="Privacy & Security" onPress={() => setPrivacyModal(true)} testID="row-privacy" />
@@ -658,9 +661,10 @@ const Row: React.FC<{
     borderWidth: 1, borderColor: "#25D366", marginBottom: 8,
   },
   whatsappIcon: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#25D366", alignItems: "center", justifyContent: "center",
-  },
+  width: 40, height: 40, borderRadius: 20,
+  backgroundColor: "#25D366",
+  alignItems: "center", justifyContent: "center",
+},
   whatsappEmoji: { fontSize: 20 },
   whatsappLabel: { color: "#25D366", fontSize: 15, fontWeight: "700" },
   whatsappSub: { color: "#4CAF50", fontSize: 12, marginTop: 2 },
