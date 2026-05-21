@@ -36,7 +36,9 @@ export default function AppLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home" size={size} color={color} />
+          ),
           tabBarTestID: "tab-home",
         }}
       />
@@ -54,7 +56,9 @@ export default function AppLayout() {
         name="transactions"
         options={{
           title: "History",
-          tabBarIcon: ({ color, size }) => <Ionicons name="receipt-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="receipt-outline" size={size} color={color} />
+          ),
           tabBarTestID: "tab-history",
         }}
       />
@@ -62,12 +66,16 @@ export default function AppLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person-circle-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle-outline" size={size} color={color} />
+          ),
           tabBarTestID: "tab-profile",
         }}
       />
+      {/* Hidden screens — no tab bar entry */}
       <Tabs.Screen name="topup" options={{ href: null }} />
       <Tabs.Screen name="withdraw" options={{ href: null }} />
+      <Tabs.Screen name="kyc" options={{ href: null }} />
     </Tabs>
   );
 }
