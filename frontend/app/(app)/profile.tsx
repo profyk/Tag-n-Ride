@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, Alert, TextInput, Modal, ActivityIndicator,
+  Image, Alert, TextInput, Modal, ActivityIndicator, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -160,22 +160,27 @@ export default function Profile() {
   };
 
   const confirmLogout = () => {
-    Alert.alert(
-      "Sign out?",
-      "You will need to sign back in to use Tag n Ride.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Sign out",
-          style: "destructive",
-          onPress: async () => {
-            await signOut();
+  const confirmLogout = () => {
+  Alert.alert(
+    "Sign out?",
+    "You will need to sign back in to use Tag n Ride.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign out",
+        style: "destructive",
+        onPress: async () => {
+          await signOut();
+          if (Platform.OS === "web") {
+            window.location.href = "/";
+          } else {
             router.replace("/(auth)/welcome");
-          },
+          }
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
   const selfAccount = payoutAccounts.find((p) => p.type === "self");
   const ownerAccount = payoutAccounts.find((p) => p.type === "owner");
