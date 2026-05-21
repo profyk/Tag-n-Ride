@@ -4,9 +4,11 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, Car, ArrowLeftRight, Wallet,
   BarChart3, CreditCard, LogOut, Shield, ShieldCheck,
-  FileText, HelpCircle, Fingerprint, Monitor,
+  FileText, HelpCircle, Fingerprint, Monitor, Bell,
+  AlertTriangle, TrendingUp, Activity, Settings, UserCheck,
+  Users2, Truck, Scale,
 } from "lucide-react";
-import { clearToken, getRole, isSuperAdmin } from "@/lib/api";
+import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -15,21 +17,33 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const nav = [
-  { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
-  { label: "Users", href: "/admin/users", icon: Users },
-  { label: "Drivers", href: "/admin/drivers", icon: Car },
-  { label: "Transactions", href: "/admin/transactions", icon: ArrowLeftRight },
-  { label: "Withdrawals", href: "/admin/withdrawals", icon: Wallet },
-  { label: "KYC Review", href: "/admin/kyc", icon: Fingerprint },
-  { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
-  { label: "Payouts", href: "/admin/payouts", icon: CreditCard },
-  { label: "Audit Log", href: "/admin/audit", icon: FileText },
-  { label: "Support", href: "/admin/support", icon: HelpCircle },
+  { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard, permission: null },
+  { label: "Users", href: "/admin/users", icon: Users, permission: "manage_users" },
+  { label: "Drivers", href: "/admin/drivers", icon: Car, permission: "manage_drivers" },
+  { label: "Transactions", href: "/admin/transactions", icon: ArrowLeftRight, permission: null },
+  { label: "Withdrawals", href: "/admin/withdrawals", icon: Wallet, permission: "approve_withdrawals" },
+  { label: "KYC Review", href: "/admin/kyc", icon: Fingerprint, permission: "review_kyc" },
+  { label: "Analytics", href: "/admin/analytics", icon: BarChart3, permission: "view_analytics" },
+  { label: "Payouts", href: "/admin/payouts", icon: CreditCard, permission: "approve_withdrawals" },
+  { label: "Audit Log", href: "/admin/audit", icon: FileText, permission: "view_audit" },
+  { label: "Support", href: "/admin/support", icon: HelpCircle, permission: "reset_pin" },
+];
+
+const advancedNav = [
+  { label: "Compliance & Risk", href: "/admin/compliance", icon: AlertTriangle, permission: "view_audit" },
+  { label: "Financial Reports", href: "/admin/reports", icon: TrendingUp, permission: "view_analytics" },
+  { label: "Disputes", href: "/admin/disputes", icon: Scale, permission: "manage_users" },
+  { label: "Notifications", href: "/admin/notifications", icon: Bell, permission: "manage_users" },
+  { label: "System Health", href: "/admin/health", icon: Activity, permission: "view_audit" },
+  { label: "Passenger Analytics", href: "/admin/passengers", icon: Users2, permission: "view_analytics" },
+  { label: "Fleet Reports", href: "/admin/fleet", icon: Truck, permission: "view_analytics" },
+  { label: "Onboarding Pipeline", href: "/admin/onboarding", icon: UserCheck, permission: "manage_drivers" },
 ];
 
 const superAdminNav = [
   { label: "Admin Accounts", href: "/admin/admins", icon: Shield },
   { label: "Sessions", href: "/admin/sessions", icon: Monitor },
+  { label: "Settings", href: "/admin/settings", icon: Settings },
   { label: "Superadmin", href: "/admin/superadmin", icon: ShieldCheck },
 ];
 
@@ -54,8 +68,42 @@ export function Sidebar() {
     window.location.href = "/login";
   };
 
+  const visibleNav = nav.filter(({ permission }) => {
+    if (permission === null) return true;
+    return hasPermission(permission);
+  });
+
+  const visibleAdvanced = advancedNav.filter(({ permission }) => {
+    return hasPermission(permission);
+  });
+
+  const NavLink = ({ href, icon: Icon, label, purple = false }: {
+    href: string;
+    icon: any;
+    label: string;
+    purple?: boolean;
+  }) => {
+    const active = path === href || path.startsWith(href + "/");
+    return (
+      <Link
+        href={href}
+        className={cn(
+          "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+          active
+            ? purple
+              ? "bg-purple/10 text-purple border border-purple/20"
+              : "bg-cyanDim text-cyan border border-cyan/20"
+            : "text-textMuted hover:text-text hover:bg-bg3"
+        )}>
+        <Icon size={15} />
+        {label}
+      </Link>
+    );
+  };
+
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-bg2 border-r border-border flex flex-col z-40">
+      {/* Logo */}
       <div className="px-4 py-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-cyanDim border border-cyan/30 flex items-center justify-center">
@@ -70,23 +118,29 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* Nav */}
       <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-        {nav.map(({ label, href, icon: Icon }) => {
-          const active = path === href || path.startsWith(href + "/");
-          return (
-            <Link key={href} href={href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-                active
-                  ? "bg-cyanDim text-cyan border border-cyan/20"
-                  : "text-textMuted hover:text-text hover:bg-bg3"
-              )}>
-              <Icon size={15} />
-              {label}
-            </Link>
-          );
-        })}
 
+        {/* Core pages */}
+        {visibleNav.map(({ label, href, icon }) => (
+          <NavLink key={href} href={href} icon={icon} label={label} />
+        ))}
+
+        {/* Advanced section */}
+        {visibleAdvanced.length > 0 && (
+          <>
+            <div className="pt-4 pb-1.5">
+              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">
+                Advanced
+              </p>
+            </div>
+            {visibleAdvanced.map(({ label, href, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={label} />
+            ))}
+          </>
+        )}
+
+        {/* Superadmin section */}
         {superAdmin && (
           <>
             <div className="pt-4 pb-1.5">
@@ -94,27 +148,17 @@ export function Sidebar() {
                 Superadmin
               </p>
             </div>
-            {superAdminNav.map(({ label, href, icon: Icon }) => {
-              const active = path === href || path.startsWith(href + "/");
-              return (
-                <Link key={href} href={href}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-                    active
-                      ? "bg-purple/10 text-purple border border-purple/20"
-                      : "text-textMuted hover:text-text hover:bg-bg3"
-                  )}>
-                  <Icon size={15} />
-                  {label}
-                </Link>
-              );
-            })}
+            {superAdminNav.map(({ label, href, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={label} purple />
+            ))}
           </>
         )}
       </nav>
 
+      {/* Sign out */}
       <div className="px-3 py-3 border-t border-border">
-        <button onClick={handleSignOut}
+        <button
+          onClick={handleSignOut}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-textMuted hover:text-red hover:bg-red/10 w-full transition-all">
           <LogOut size={15} />
           Sign out
@@ -122,4 +166,4 @@ export function Sidebar() {
       </div>
     </aside>
   );
-}
+      }
