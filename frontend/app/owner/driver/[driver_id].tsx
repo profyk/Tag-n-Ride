@@ -6,8 +6,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "../../src/api";
-import { colors, formatZAR, formatDate, radius } from "../../src/theme";
+import { api } from "../../../src/api";
+import { colors, formatZAR, formatDate, radius } from "../../../src/theme";
 
 export default function OwnerDriverDetail() {
   const { driver_id } = useLocalSearchParams<{ driver_id: string }>();
@@ -87,7 +87,7 @@ export default function OwnerDriverDetail() {
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.tripNet}>{formatZAR(t.driver_net)}</Text>
-                  <Text style={styles.tripGross}>Gross: {formatZAR(t.gross_amount)}</Text>
+                  <Text style={styles.tripGross}>Gross: {formatZAR(t.amount)}</Text>
                 </View>
               </View>
             ))}
@@ -116,7 +116,7 @@ export default function OwnerDriverDetail() {
               </View>
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={styles.tripNet}>{formatZAR(t.driver_net)}</Text>
-                <Text style={styles.tripGross}>Gross: {formatZAR(t.gross_amount)}</Text>
+                <Text style={styles.tripGross}>Gross: {formatZAR(t.amount)}</Text>
               </View>
             </View>
           ))
