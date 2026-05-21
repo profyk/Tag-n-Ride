@@ -73,9 +73,10 @@ export default function AppLayout() {
         }}
       />
       {/* Hidden screens — no tab bar entry */}
-      <Tabs.Screen name="topup" options={{ href: null }} />
-      <Tabs.Screen name="withdraw" options={{ href: null }} />
-      <Tabs.Screen name="kyc" options={{ href: null }} />
+<Tabs.Screen name="topup" options={{ href: null }} />
+<Tabs.Screen name="withdraw" options={{ href: null }} />
+<Tabs.Screen name="kyc" options={{ href: null }} />
+<Tabs.Screen name="my-qr" options={{ href: null }} />
     </Tabs>
   );
 }
