@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
-
 const TOKEN_KEY = "tnr_token";
 
 export const tokenStore = {
@@ -12,36 +11,23 @@ export const tokenStore = {
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await tokenStore.get();
-
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((opts.headers as Record<string, string>) || {}),
   };
-
   if (token) headers.Authorization = `Bearer ${token}`;
-
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
-
   const text = await res.text();
-
   let data: any = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { detail: text };
-  }
-
+  try { data = text ? JSON.parse(text) : null; }
+  catch { data = { detail: text }; }
   if (!res.ok) {
     const detail = data?.detail;
     const msg = Array.isArray(detail)
       ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(", ")
-      : typeof detail === "string"
-      ? detail
-      : `Request failed (${res.status})`;
-
+      : typeof detail === "string" ? detail : `Request failed (${res.status})`;
     throw new Error(msg);
   }
-
   return data as T;
 }
 
@@ -51,8 +37,9 @@ export const api = {
     phone_number: string;
     full_name: string;
     pin: string;
-    role: "passenger" | "driver";
+    role: "passenger" | "driver" | "owner";
     vehicle_plate?: string;
+    business_name?: string;
   }) =>
     request<{ token: string; user: User }>("/api/auth/register", {
       method: "POST",
@@ -89,10 +76,10 @@ export const api = {
     }),
 
   lookupDriver: (driverId: string) =>
-  request<DriverInfo>(`/api/wallet/driver/${driverId}`),
+    request<DriverInfo>(`/api/wallet/driver/${driverId}`),
 
-lookupDriverByQR: (qrCode: string) =>
-  request<DriverInfo>(`/api/wallet/driver/qr/${qrCode}`),
+  lookupDriverByQR: (qrCode: string) =>
+    request<DriverInfo>(`/api/wallet/driver/qr/${qrCode}`),
 
   transfer: (driver_user_id: string, amount: number, note?: string) =>
     request<{ balance: number; transaction: Txn }>("/api/wallet/transfer", {
@@ -110,10 +97,7 @@ lookupDriverByQR: (qrCode: string) =>
   }) =>
     request<{ balance: number; withdrawal: any; transaction: Txn }>(
       "/api/wallet/withdraw",
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
+      { method: "POST", body: JSON.stringify(body) }
     ),
 
   withdrawals: () => request<any[]>("/api/wallet/withdrawals"),
@@ -155,6 +139,127 @@ lookupDriverByQR: (qrCode: string) =>
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  // ── KYC ──
+  submitKyc: async (selfieBase64: string, licenceBase64: string) => {
+    const token = await tokenStore.get();
+    const formData = new FormData();
+    formData.append("selfie", {
+      uri: `data:image/jpeg;base64,${selfieBase64}`,
+      name: "selfie.jpg",
+      type: "image/jpeg",
+    } as any);
+    formData.append("licence_front", {
+      uri: `data:image/jpeg;base64,${licenceBase64}`,
+      name: "licence.jpg",
+      type: "image/jpeg",
+    } as any);
+    const res = await fetch(`${BASE}/api/kyc/submit`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || "KYC upload failed");
+    }
+    return res.json();
+  },
+
+  kycStatus: () =>
+    request<{
+      status: "not_submitted" | "pending" | "approved" | "rejected";
+      rejection_reason?: string;
+      submitted_at?: string;
+    }>("/api/kyc/status"),
+
+  // ── Owner ──
+  ownerDashboard: () =>
+    request<{
+      total_earnings: number;
+      today_revenue: number;
+      driver_count: number;
+      drivers: {
+        user_id: string;
+        full_name: string;
+        phone_number: string;
+        vehicle_plate: string;
+        total_earnings: number;
+        qr_code: string;
+        rating_avg: number;
+        rating_count: number;
+        is_verified: boolean;
+      }[];
+    }>("/api/owner/dashboard"),
+
+  ownerLinkDriver: (driver_code: string) =>
+    request<{
+      ok: boolean;
+      driver: {
+        user_id: string;
+        full_name: string;
+        phone_number: string;
+        vehicle_plate: string;
+        qr_code: string;
+      };
+    }>("/api/owner/drivers/link", {
+      method: "POST",
+      body: JSON.stringify({ driver_code }),
+    }),
+
+  ownerUnlinkDriver: (driver_user_id: string) =>
+    request<{ ok: boolean }>(`/api/owner/drivers/${driver_user_id}`, {
+      method: "DELETE",
+    }),
+
+  ownerDriverEarnings: (driver_user_id: string) =>
+    request<{
+      driver: {
+        user_id: string;
+        full_name: string;
+        phone_number: string;
+        vehicle_plate: string;
+        total_earnings: number;
+        qr_code: string;
+        rating_avg: number;
+        rating_count: number;
+      };
+      today_total: number;
+      today_trip_count: number;
+      today_trips: {
+        reference: string;
+        amount: number;
+        driver_net: number;
+        passenger: string;
+        created_at: string;
+      }[];
+      all_trips: {
+        reference: string;
+        amount: number;
+        driver_net: number;
+        passenger: string;
+        created_at: string;
+      }[];
+    }>(`/api/owner/drivers/${driver_user_id}/earnings`),
+
+  ownerTransactions: () =>
+    request<{
+      id: string;
+      reference: string;
+      driver_name: string;
+      vehicle_plate: string;
+      passenger: string;
+      gross_amount: number;
+      driver_net: number;
+      platform_fee: number;
+      created_at: string;
+    }[]>("/api/owner/transactions"),
+
+  ownerToggleDriverMode: (active: boolean) =>
+    request<{ ok: boolean; driver_mode_active: boolean }>(
+      "/api/owner/toggle-driver-mode",
+      { method: "POST", body: JSON.stringify({ active }) }
+    ),
 };
 
 // ── Types ──
@@ -162,17 +267,21 @@ export type User = {
   id: string;
   phone_number: string;
   full_name: string;
-  role: "passenger" | "driver";
+  role: "passenger" | "driver" | "owner";
   vehicle_plate?: string;
+  is_verified?: boolean;
+  driver_mode_active?: boolean;
 };
 
 export type Wallet = {
   balance: number;
   currency: string;
   is_frozen: boolean;
+  driver_mode_active?: boolean;
   qr_code?: string;
   vehicle_plate?: string;
   total_earnings?: number;
+  is_verified?: boolean;
   rating_avg?: number;
   rating_count?: number;
 };
@@ -212,80 +321,3 @@ export type PayoutAccount = {
   account_name?: string;
   created_at: string;
 };
-
-// ── Owner App ──
-  ownerDashboard: () =>
-    request<{
-      total_earnings: number;
-      today_revenue: number;
-      driver_count: number;
-      drivers: {
-        user_id: string; full_name: string; phone_number: string;
-        vehicle_plate: string; total_earnings: number; qr_code: string;
-        rating_avg: number; rating_count: number; is_verified: boolean;
-      }[];
-    }>("/api/owner/dashboard"),
-
-  ownerLinkDriver: (driver_code: string) =>
-    request<{
-      ok: boolean;
-      driver: {
-        user_id: string; full_name: string; phone_number: string;
-        vehicle_plate: string; qr_code: string;
-      };
-    }>("/api/owner/drivers/link", {
-      method: "POST",
-      body: JSON.stringify({ driver_code }),
-    }),
-
-  ownerUnlinkDriver: (driver_user_id: string) =>
-    request<{ ok: boolean }>(`/api/owner/drivers/${driver_user_id}`, {
-      method: "DELETE",
-    }),
-
-  ownerDriverEarnings: (driver_user_id: string) =>
-    request<{
-      driver: {
-        user_id: string; full_name: string; phone_number: string;
-        vehicle_plate: string; total_earnings: number; qr_code: string;
-        rating_avg: number; rating_count: number;
-      };
-      today_total: number;
-      today_trip_count: number;
-      today_trips: {
-        reference: string; amount: number; driver_net: number;
-        passenger: string; created_at: string;
-      }[];
-      all_trips: {
-        reference: string; amount: number; driver_net: number;
-        passenger: string; created_at: string;
-      }[];
-    }>(`/api/owner/drivers/${driver_user_id}/earnings`),
-
-  ownerTransactions: () =>
-    request<{
-      id: string; reference: string; driver_name: string;
-      vehicle_plate: string; passenger: string;
-      gross_amount: number; driver_net: number; platform_fee: number;
-      created_at: string;
-    }[]>("/api/owner/transactions"),
-
-  // ── KYC ──
-  kycSubmit: (selfie: { uri: string; type: string; name: string },
-              licenceFront: { uri: string; type: string; name: string }) => {
-    const formData = new FormData();
-    formData.append("selfie", selfie as any);
-    formData.append("licence_front", licenceFront as any);
-    return request<{ ok: boolean; status: string }>("/api/kyc/submit", {
-      method: "POST",
-      headers: {},
-      body: formData,
-    });
-  },
-
-  kycStatus: () =>
-    request<{
-      status: "not_submitted" | "pending" | "approved" | "rejected";
-      rejection_reason?: string;
-      submitted_at?: string;
-    }>("/api/kyc/status"),
