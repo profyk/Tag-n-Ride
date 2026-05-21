@@ -7,6 +7,14 @@
     "build": "next build",
     "start": "next start"
   },
+  {
+  "name": "tagnride-admin",
+  "version": "1.0.0",
+  "engines": {
+    "node": "20.x"
+  },
+  ...
+}
   "dependencies": {
     "next": "^14.0.0",
     "react": "^18.0.0",
