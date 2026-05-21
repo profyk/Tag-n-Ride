@@ -139,7 +139,10 @@ export default function Profile() {
       setPayoutBank("");
       setPayoutAccount("");
       setPayoutName("");
-      Alert.alert("Saved", `${payoutType === "self" ? "My Account" : "Owner Account"} saved successfully.`);
+      Alert.alert(
+        "Saved",
+        `${payoutType === "self" ? "My Account" : "Owner Account"} saved successfully.`
+      );
     } catch (e: any) {
       Alert.alert("Failed", e?.message || "Could not save account.");
     } finally {
@@ -157,10 +160,21 @@ export default function Profile() {
   };
 
   const confirmLogout = () => {
-    Alert.alert("Sign out?", "You will need to sign back in to use Tag n Ride.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: signOut },
-    ]);
+    Alert.alert(
+      "Sign out?",
+      "You will need to sign back in to use Tag n Ride.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: async () => {
+            await signOut();
+            router.replace("/(auth)/welcome");
+          },
+        },
+      ]
+    );
   };
 
   const selfAccount = payoutAccounts.find((p) => p.type === "self");
@@ -179,12 +193,20 @@ export default function Profile() {
 
         <View style={styles.card}>
           <View style={styles.avatar}>
-            <Ionicons name={isDriver ? "car-sport" : "person"} size={32} color={colors.cyan} />
+            <Ionicons
+              name={isDriver ? "car-sport" : "person"}
+              size={32}
+              color={colors.cyan}
+            />
           </View>
           <Text style={styles.name} testID="profile-name">{u.full_name}</Text>
           <Text style={styles.phone}>{u.phone_number}</Text>
           <View style={styles.rolePill}>
-            <Ionicons name={isDriver ? "shield-checkmark" : "person-circle"} size={13} color={colors.cyan} />
+            <Ionicons
+              name={isDriver ? "shield-checkmark" : "person-circle"}
+              size={13}
+              color={colors.cyan}
+            />
             <Text style={styles.rolePillText}>{u.role.toUpperCase()}</Text>
           </View>
         </View>
@@ -216,10 +238,22 @@ export default function Profile() {
                 />
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
                   <View style={{ flex: 1 }}>
-                    <Button label="Cancel" variant="secondary" onPress={() => { setPlate(u.vehicle_plate || ""); setEditingPlate(false); }} />
+                    <Button
+                      label="Cancel"
+                      variant="secondary"
+                      onPress={() => {
+                        setPlate(u.vehicle_plate || "");
+                        setEditingPlate(false);
+                      }}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Button label="Save" onPress={savePlate} loading={savingPlate} testID="save-plate-btn" />
+                    <Button
+                      label="Save"
+                      onPress={savePlate}
+                      loading={savingPlate}
+                      testID="save-plate-btn"
+                    />
                   </View>
                 </View>
               </View>
@@ -234,34 +268,52 @@ export default function Profile() {
               <ActivityIndicator color={colors.cyan} style={{ marginVertical: 12 }} />
             ) : (
               <>
-                <TouchableOpacity style={styles.payoutRow} onPress={() => openPayoutModal("self")} testID="payout-self-btn">
+                <TouchableOpacity
+                  style={styles.payoutRow}
+                  onPress={() => openPayoutModal("self")}
+                  testID="payout-self-btn">
                   <View style={[styles.payoutIcon, { backgroundColor: colors.cyanDim }]}>
                     <Ionicons name="person-outline" size={18} color={colors.cyan} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.payoutLabel}>My Account</Text>
                     {selfAccount ? (
-                      <Text style={styles.payoutSub}>{selfAccount.bank_name} · ****{selfAccount.account_number.slice(-4)}</Text>
+                      <Text style={styles.payoutSub}>
+                        {selfAccount.bank_name} · ****{selfAccount.account_number.slice(-4)}
+                      </Text>
                     ) : (
                       <Text style={styles.payoutEmpty}>Not set — tap to add</Text>
                     )}
                   </View>
-                  <Ionicons name={selfAccount ? "create-outline" : "add-circle-outline"} size={18} color={colors.cyan} />
+                  <Ionicons
+                    name={selfAccount ? "create-outline" : "add-circle-outline"}
+                    size={18}
+                    color={colors.cyan}
+                  />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.payoutRow} onPress={() => openPayoutModal("owner")} testID="payout-owner-btn">
+                <TouchableOpacity
+                  style={styles.payoutRow}
+                  onPress={() => openPayoutModal("owner")}
+                  testID="payout-owner-btn">
                   <View style={[styles.payoutIcon, { backgroundColor: "rgba(160,100,255,0.15)" }]}>
                     <Ionicons name="car-outline" size={18} color="#A064FF" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.payoutLabel}>Owner Account</Text>
                     {ownerAccount ? (
-                      <Text style={styles.payoutSub}>{ownerAccount.bank_name} · ****{ownerAccount.account_number.slice(-4)}</Text>
+                      <Text style={styles.payoutSub}>
+                        {ownerAccount.bank_name} · ****{ownerAccount.account_number.slice(-4)}
+                      </Text>
                     ) : (
                       <Text style={styles.payoutEmpty}>Not set — tap to add</Text>
                     )}
                   </View>
-                  <Ionicons name={ownerAccount ? "create-outline" : "add-circle-outline"} size={18} color="#A064FF" />
+                  <Ionicons
+                    name={ownerAccount ? "create-outline" : "add-circle-outline"}
+                    size={18}
+                    color="#A064FF"
+                  />
                 </TouchableOpacity>
               </>
             )}
@@ -269,22 +321,44 @@ export default function Profile() {
         ) : null}
 
         <Text style={styles.section}>ACCOUNT</Text>
-        <Row icon="card-outline" label={isDriver ? "Withdrawal requests" : "Top up wallet"}
+        <Row
+          icon="card-outline"
+          label={isDriver ? "Withdrawal requests" : "Top up wallet"}
           onPress={() => router.push(isDriver ? "/withdraw" : "/topup")}
-          testID={isDriver ? "row-withdraw" : "row-topup"} />
-        <Row icon="receipt-outline" label="Transaction history"
-          onPress={() => router.push("/(app)/transactions")} testID="row-history" />
-        <Row icon="lock-closed-outline" label="Change PIN"
-          onPress={() => setPinModal(true)} testID="row-change-pin" />
+          testID={isDriver ? "row-withdraw" : "row-topup"}
+        />
+        <Row
+          icon="receipt-outline"
+          label="Transaction history"
+          onPress={() => router.push("/(app)/transactions")}
+          testID="row-history"
+        />
+        <Row
+          icon="lock-closed-outline"
+          label="Change PIN"
+          onPress={() => setPinModal(true)}
+          testID="row-change-pin"
+        />
 
         <Text style={styles.section}>SUPPORT</Text>
-        <Row icon="help-circle-outline" label="Help & FAQs"
-          onPress={() => Alert.alert("Help", "support@tagnride.app")} />
-        <Row icon="shield-outline" label="Privacy & Security"
-          onPress={() => Alert.alert("Privacy", "Your PIN is bcrypt-hashed and never stored in plaintext.")} />
+        <Row
+          icon="help-circle-outline"
+          label="Help & FAQs"
+          onPress={() => Alert.alert("Help", "support@tagnride.app")}
+        />
+        <Row
+          icon="shield-outline"
+          label="Privacy & Security"
+          onPress={() =>
+            Alert.alert("Privacy", "Your PIN is bcrypt-hashed and never stored in plaintext.")
+          }
+        />
 
         <View style={{ height: 16 }} />
-        <TouchableOpacity onPress={confirmLogout} style={styles.signout} testID="signout-btn">
+        <TouchableOpacity
+          onPress={confirmLogout}
+          style={styles.signout}
+          testID="signout-btn">
           <Ionicons name="log-out-outline" size={18} color={colors.red} />
           <Text style={styles.signoutText}>Sign out</Text>
         </TouchableOpacity>
@@ -293,7 +367,12 @@ export default function Profile() {
         <PoweredBy testID="profile-powered" />
       </ScrollView>
 
-      <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
+      {/* Change PIN Modal */}
+      <Modal
+        visible={pinModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPinModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -301,7 +380,9 @@ export default function Profile() {
               <Ionicons name="lock-closed-outline" size={26} color={colors.cyan} />
             </View>
             <Text style={styles.modalTitle}>Change PIN</Text>
-            <Text style={styles.modalSub}>Enter your current PIN and choose a new 4-digit PIN.</Text>
+            <Text style={styles.modalSub}>
+              Enter your current PIN and choose a new 4-digit PIN.
+            </Text>
 
             <Text style={styles.inputLabel}>CURRENT PIN</Text>
             <TextInput
@@ -344,26 +425,43 @@ export default function Profile() {
 
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
               <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary" onPress={() => {
-                  setPinModal(false);
-                  setCurrentPin("");
-                  setNewPin("");
-                  setConfirmPin("");
-                }} />
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={() => {
+                    setPinModal(false);
+                    setCurrentPin("");
+                    setNewPin("");
+                    setConfirmPin("");
+                  }}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="Change PIN" onPress={handleChangePin} loading={savingPin} testID="save-pin-btn" />
+                <Button
+                  label="Change PIN"
+                  onPress={handleChangePin}
+                  loading={savingPin}
+                  testID="save-pin-btn"
+                />
               </View>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal visible={payoutModal} transparent animationType="slide" onRequestClose={() => setPayoutModal(false)}>
+      {/* Payout Account Modal */}
+      <Modal
+        visible={payoutModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPayoutModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
-            <View style={[styles.modalIconWrap, { backgroundColor: payoutType === "self" ? colors.cyanDim : "rgba(160,100,255,0.15)" }]}>
+            <View style={[
+              styles.modalIconWrap,
+              { backgroundColor: payoutType === "self" ? colors.cyanDim : "rgba(160,100,255,0.15)" }
+            ]}>
               <Ionicons
                 name={payoutType === "self" ? "person-outline" : "car-outline"}
                 size={26}
@@ -412,10 +510,19 @@ export default function Profile() {
 
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
               <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary" onPress={() => setPayoutModal(false)} />
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={() => setPayoutModal(false)}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="Save" onPress={handleSavePayout} loading={savingPayout} testID="save-payout-btn" />
+                <Button
+                  label="Save"
+                  onPress={handleSavePayout}
+                  loading={savingPayout}
+                  testID="save-payout-btn"
+                />
               </View>
             </View>
           </View>
@@ -425,8 +532,17 @@ export default function Profile() {
   );
 }
 
-const Row: React.FC<{ icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; testID?: string }> = ({ icon, label, onPress, testID }) => (
-  <TouchableOpacity testID={testID} onPress={onPress} activeOpacity={0.85} style={styles.row}>
+const Row: React.FC<{
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  testID?: string;
+}> = ({ icon, label, onPress, testID }) => (
+  <TouchableOpacity
+    testID={testID}
+    onPress={onPress}
+    activeOpacity={0.85}
+    style={styles.row}>
     <Ionicons name={icon} size={20} color={colors.cyan} />
     <Text style={styles.rowText}>{label}</Text>
     <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
@@ -437,35 +553,121 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { alignItems: "center", marginBottom: 8 },
   logo: { width: 80, height: 80 },
-  card: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 24, alignItems: "center" },
-  avatar: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan },
+  card: {
+    backgroundColor: colors.bg2, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+    padding: 24, alignItems: "center",
+  },
+  avatar: {
+    width: 72, height: 72, borderRadius: 36,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan,
+  },
   name: { color: colors.text, fontSize: 22, fontWeight: "800", marginTop: 12 },
   phone: { color: colors.textMuted, fontSize: 14, marginTop: 4 },
-  rolePill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.cyanDim, marginTop: 12, borderWidth: 1, borderColor: colors.cyan },
+  rolePill: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
+    backgroundColor: colors.cyanDim, marginTop: 12,
+    borderWidth: 1, borderColor: colors.cyan,
+  },
   rolePillText: { color: colors.cyan, fontSize: 11, fontWeight: "800", letterSpacing: 0.6 },
-  section: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4, marginTop: 24, marginBottom: 10 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: 8 },
+  section: {
+    color: colors.textMuted, fontSize: 12, fontWeight: "700",
+    letterSpacing: 1.4, marginTop: 24, marginBottom: 10,
+  },
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 16, backgroundColor: colors.bg2,
+    borderRadius: radius.md, borderWidth: 1,
+    borderColor: colors.border, marginBottom: 8,
+  },
   rowText: { color: colors.text, fontSize: 15, fontWeight: "600", flex: 1 },
-  signout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 16, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red, backgroundColor: colors.redDim },
+  signout: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, padding: 16, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.red, backgroundColor: colors.redDim,
+  },
   signoutText: { color: colors.red, fontWeight: "700", fontSize: 15 },
-  brand: { color: colors.textDim, textAlign: "center", marginTop: 32, fontSize: 12, letterSpacing: 1 },
-  plateCard: { marginTop: 16, padding: 16, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
+  brand: {
+    color: colors.textDim, textAlign: "center",
+    marginTop: 32, fontSize: 12, letterSpacing: 1,
+  },
+  plateCard: {
+    marginTop: 16, padding: 16, backgroundColor: colors.bg2,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+  },
   plateLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
-  plateBox: { marginTop: 10, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "#FFD60A", borderRadius: 8, borderWidth: 2, borderColor: "#0A0A0A", alignItems: "center" },
-  plateValue: { color: "#0A0A0A", fontSize: 22, fontWeight: "900", letterSpacing: 2, fontFamily: "monospace" },
-  plateInput: { marginTop: 10, backgroundColor: colors.bg, borderColor: colors.borderStrong, borderWidth: 1, borderRadius: radius.sm + 4, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 18, fontWeight: "800", letterSpacing: 2 },
-  payoutRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: 8 },
-  payoutIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  payoutLabel: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  plateBox: {
+    marginTop: 10, paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: "#FFD60A", borderRadius: 8,
+    borderWidth: 2, borderColor: "#0A0A0A", alignItems: "center",
+  },
+  plateValue: {
+    color: "#0A0A0A", fontSize: 22, fontWeight: "900",
+    letterSpacing: 2, fontFamily: "monospace",
+  },
+  plateInput: {
+    marginTop: 10, backgroundColor: colors.bg,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: radius.sm + 4, paddingHorizontal: 14,
+    paddingVertical: 14, color: colors.text,
+    fontSize: 18, fontWeight: "800", letterSpacing: 2,
+  },
+  payoutRow: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 14, backgroundColor: colors.bg2,
+    borderRadius: radius.md, borderWidth: 1,
+    borderColor: colors.border, marginBottom: 8,
+  },
+  payoutIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: "center", justifyContent: "center",
+  },
+  payoutLabel: { color: colors.text, fontSize: 14, fontWeight: "700" },
   payoutSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  payoutEmpty: { color: colors.textDim, fontSize: 12, marginTop: 2, fontStyle: "italic" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
-  modalSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.border },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 },
-  modalIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 12, borderWidth: 1, borderColor: colors.border },
-  modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center" },
-  modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4, marginBottom: 20 },
-  inputLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8, marginTop: 12 },
-  pinInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 14, color: colors.text, fontSize: 24, fontWeight: "800", letterSpacing: 8, textAlign: "center" },
-  textInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 15, marginBottom: 4 },
+  payoutEmpty: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  modalOverlay: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: colors.bg2, borderTopLeftRadius: 24,
+    borderTopRightRadius: 24, padding: 24, paddingBottom: 40,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  modalHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.border, alignSelf: "center", marginBottom: 20,
+  },
+  modalIconWrap: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: colors.cyanDim, alignItems: "center",
+    justifyContent: "center", alignSelf: "center", marginBottom: 12,
+  },
+  modalTitle: {
+    color: colors.text, fontSize: 20, fontWeight: "800",
+    textAlign: "center", marginBottom: 6,
+  },
+  modalSub: {
+    color: colors.textMuted, fontSize: 13,
+    textAlign: "center", marginBottom: 20, lineHeight: 20,
+  },
+  inputLabel: {
+    color: colors.textMuted, fontSize: 10, fontWeight: "700",
+    letterSpacing: 1.4, marginBottom: 6, marginTop: 12,
+  },
+  pinInput: {
+    backgroundColor: colors.bg, borderColor: colors.border,
+    borderWidth: 1, borderRadius: radius.md,
+    paddingHorizontal: 14, paddingVertical: 14,
+    color: colors.text, fontSize: 22,
+    fontWeight: "800", letterSpacing: 8, textAlign: "center",
+  },
+  textInput: {
+    backgroundColor: colors.bg, borderColor: colors.border,
+    borderWidth: 1, borderRadius: radius.md,
+    paddingHorizontal: 14, paddingVertical: 12,
+    color: colors.text, fontSize: 14,
+  },
 });
