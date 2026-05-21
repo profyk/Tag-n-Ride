@@ -9,6 +9,56 @@ import { ArrowLeft, CheckCircle, Star, Printer, Download } from "lucide-react";
 import toast from "react-hot-toast";
 import QRCode from "qrcode";
 
+async function generateQRWithLogo(text: string): Promise<string> {
+  return new Promise(async (resolve) => {
+    // Step 1 — generate base QR as data URL
+    const baseUrl = await QRCode.toDataURL(text, {
+      width: 400,
+      margin: 2,
+      color: { dark: "#000000", light: "#ffffff" },
+      errorCorrectionLevel: "H",
+    });
+
+    // Step 2 — draw QR onto canvas
+    const canvas = document.createElement("canvas");
+    canvas.width = 400;
+    canvas.height = 400;
+    const ctx = canvas.getContext("2d")!;
+
+    const qrImg = new Image();
+    qrImg.onload = () => {
+      // Draw QR code
+      ctx.drawImage(qrImg, 0, 0, 400, 400);
+
+      const cx = 200;
+      const cy = 200;
+      const r = 46;
+
+      // White ring around logo
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+
+      // Cyan circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#00D4FF";
+      ctx.fill();
+
+      // TNR text
+      ctx.fillStyle = "#05050A";
+      ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("TNR", cx, cy);
+
+      resolve(canvas.toDataURL("image/png"));
+    };
+    qrImg.src = baseUrl;
+  });
+}
+
 export default function DriverDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -25,14 +75,8 @@ export default function DriverDetailPage() {
     ]).then(async ([d, t]) => {
       setDriver(d || null);
       setTxns(t.data.filter((tx) => tx.sender_id === id || tx.receiver_id === id));
-      // Generate QR code
       if (d?.qr_code) {
-        const url = await QRCode.toDataURL(d.qr_code, {
-          width: 300,
-          margin: 2,
-          color: { dark: "#000000", light: "#ffffff" },
-          errorCorrectionLevel: "H",
-        });
+        const url = await generateQRWithLogo(d.qr_code);
         setQrDataUrl(url);
       }
     }).finally(() => setLoading(false));
@@ -71,104 +115,50 @@ export default function DriverDetailPage() {
               border-radius: 16px;
               padding: 32px;
               text-align: center;
-              width: 320px;
+              width: 340px;
               box-shadow: 0 4px 20px rgba(0,0,0,0.15);
             }
             .brand {
               display: flex;
               align-items: center;
-              justify-content: center;
               gap: 10px;
               margin-bottom: 20px;
             }
             .brand-icon {
-              width: 44px;
-              height: 44px;
+              width: 44px; height: 44px;
               background: #00D4FF;
               border-radius: 10px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-weight: 900;
-              font-size: 14px;
-              color: #05050A;
+              display: flex; align-items: center; justify-content: center;
+              font-weight: 900; font-size: 14px; color: #05050A;
+              flex-shrink: 0;
             }
-            .brand-name {
-              font-size: 18px;
-              font-weight: 900;
-              color: #05050A;
-            }
-            .brand-sub {
-              font-size: 11px;
-              color: #666;
-              margin-top: 2px;
-            }
+            .brand-name { font-size: 18px; font-weight: 900; color: #05050A; }
+            .brand-sub { font-size: 11px; color: #666; margin-top: 2px; }
             .qr-wrap {
-              border: 1px solid #eee;
-              border-radius: 12px;
-              padding: 12px;
-              display: inline-block;
-              margin-bottom: 20px;
+              border: 1px solid #eee; border-radius: 12px;
+              padding: 12px; display: inline-block; margin-bottom: 20px;
             }
-            .qr-wrap img { display: block; width: 240px; height: 240px; }
-            .driver-name {
-              font-size: 20px;
-              font-weight: 800;
-              color: #05050A;
-              margin-bottom: 6px;
-            }
-            .driver-phone {
-              font-size: 13px;
-              color: #666;
-              margin-bottom: 12px;
-            }
+            .qr-wrap img { display: block; width: 260px; height: 260px; }
+            .driver-name { font-size: 22px; font-weight: 800; color: #05050A; margin-bottom: 6px; }
+            .driver-phone { font-size: 13px; color: #666; margin-bottom: 12px; }
             .plate {
-              display: inline-block;
-              background: #FFD60A;
-              border: 2px solid #111;
-              border-radius: 6px;
-              padding: 4px 16px;
-              font-weight: 900;
-              font-size: 16px;
-              letter-spacing: 2px;
-              font-family: monospace;
-              color: #111;
-              margin-bottom: 12px;
+              display: inline-block; background: #FFD60A;
+              border: 2px solid #111; border-radius: 6px;
+              padding: 4px 16px; font-weight: 900; font-size: 16px;
+              letter-spacing: 2px; font-family: monospace;
+              color: #111; margin-bottom: 12px;
             }
             .code-pill {
-              display: inline-flex;
-              align-items: center;
-              gap: 6px;
-              background: #EEF9FF;
-              border: 1px solid #00D4FF44;
-              border-radius: 999px;
-              padding: 6px 16px;
-              margin-bottom: 12px;
+              display: inline-flex; align-items: center; gap: 6px;
+              background: #EEF9FF; border: 1px solid #00D4FF44;
+              border-radius: 999px; padding: 6px 16px; margin-bottom: 12px;
             }
-            .code-prefix {
-              font-weight: 900;
-              font-size: 11px;
-              color: #00D4FF;
-              letter-spacing: 1px;
-            }
-            .code-text {
-              font-family: monospace;
-              font-size: 12px;
-              font-weight: 700;
-              color: #05050A;
-              letter-spacing: 0.5px;
-            }
-            .hint {
-              font-size: 12px;
-              color: #888;
-              margin-top: 4px;
-            }
+            .code-prefix { font-weight: 900; font-size: 11px; color: #00D4FF; letter-spacing: 1px; }
+            .code-text { font-family: monospace; font-size: 12px; font-weight: 700; color: #05050A; }
+            .hint { font-size: 12px; color: #888; margin-top: 4px; }
             .footer {
-              margin-top: 20px;
-              padding-top: 16px;
-              border-top: 1px solid #eee;
-              font-size: 11px;
-              color: #aaa;
+              margin-top: 20px; padding-top: 16px;
+              border-top: 1px solid #eee; font-size: 11px; color: #aaa;
             }
             @media print {
               body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -184,26 +174,20 @@ export default function DriverDetailPage() {
                 <div class="brand-sub">Driver Payment QR Code</div>
               </div>
             </div>
-
             <div class="qr-wrap">
               <img src="${qrDataUrl}" alt="QR Code" />
             </div>
-
             <div class="driver-name">${driver.full_name}</div>
             <div class="driver-phone">${driver.phone_number || ""}</div>
-
-            ${driver.vehicle_plate ? `<div class="plate">${driver.vehicle_plate}</div><br/>` : ""}
-
+            ${driver.vehicle_plate
+              ? `<div class="plate">${driver.vehicle_plate}</div><br/>`
+              : ""}
             <div class="code-pill">
               <span class="code-prefix">TNR</span>
               <span class="code-text">${driver.qr_code}</span>
             </div>
-
             <div class="hint">Scan to pay this driver instantly</div>
-
-            <div class="footer">
-              Tag n Ride · tagnride.app · No cash, no stress
-            </div>
+            <div class="footer">Tag n Ride · tagnride.app · No cash, no stress</div>
           </div>
           <script>
             window.onload = function() { window.print(); window.close(); }
@@ -233,7 +217,6 @@ export default function DriverDetailPage() {
     <AdminShell title="Driver Detail">
       <div className="space-y-6 max-w-4xl">
 
-        {/* Back */}
         <button onClick={() => router.back()}
           className="flex items-center gap-2 text-textMuted hover:text-text text-sm transition-colors">
           <ArrowLeft size={16} /> Back to Drivers
@@ -241,7 +224,7 @@ export default function DriverDetailPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* Left — Driver info */}
+          {/* Driver info */}
           <Card>
             <div className="flex items-start justify-between mb-4">
               <div>
@@ -299,7 +282,7 @@ export default function DriverDetailPage() {
                 <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">
                   TNR Code
                 </p>
-                <p className="font-mono text-xs text-cyan">{driver.qr_code}</p>
+                <p className="font-mono text-xs text-cyan break-all">{driver.qr_code}</p>
               </div>
             </div>
 
@@ -312,14 +295,14 @@ export default function DriverDetailPage() {
             )}
           </Card>
 
-          {/* Right — QR Code card */}
+          {/* QR Code card */}
           <div className="flex flex-col gap-3">
-            {/* White QR card */}
             <div className="bg-white rounded-2xl p-6 flex flex-col items-center shadow-lg">
-              {/* Brand header */}
+
+              {/* Brand */}
               <div className="flex items-center gap-3 self-start mb-5">
-                <div className="w-10 h-10 rounded-lg bg-cyan flex items-center justify-center">
-                  <span className="font-black text-sm text-bg">TR</span>
+                <div className="w-10 h-10 rounded-lg bg-[#00D4FF] flex items-center justify-center">
+                  <span className="font-black text-sm text-[#05050A]">TR</span>
                 </div>
                 <div>
                   <p className="text-gray-900 font-extrabold text-sm">Tag n Ride</p>
@@ -327,12 +310,16 @@ export default function DriverDetailPage() {
                 </div>
               </div>
 
-              {/* QR */}
+              {/* QR with TNR logo */}
               <div className="border border-gray-100 rounded-xl p-3 mb-4">
                 {qrDataUrl ? (
-                  <img src={qrDataUrl} alt="Driver QR Code" className="w-52 h-52" />
+                  <img
+                    src={qrDataUrl}
+                    alt="Driver QR Code"
+                    className="w-56 h-56"
+                  />
                 ) : (
-                  <div className="w-52 h-52 flex items-center justify-center">
+                  <div className="w-56 h-56 flex items-center justify-center">
                     <Spinner />
                   </div>
                 )}
@@ -349,8 +336,8 @@ export default function DriverDetailPage() {
                 </div>
               )}
 
-              <div className="flex items-center gap-2 mt-3 bg-blue-50 rounded-full px-4 py-2 border border-cyan/20">
-                <span className="text-cyan font-black text-xs tracking-wider">TNR</span>
+              <div className="flex items-center gap-2 mt-3 bg-blue-50 rounded-full px-4 py-2 border border-[#00D4FF33]">
+                <span className="text-[#00D4FF] font-black text-xs tracking-wider">TNR</span>
                 <span className="font-mono text-xs font-bold text-gray-900">
                   {driver.qr_code}
                 </span>
@@ -359,7 +346,6 @@ export default function DriverDetailPage() {
               <p className="text-gray-400 text-xs mt-3">Scan to pay this driver instantly</p>
             </div>
 
-            {/* Action buttons */}
             <div className="grid grid-cols-2 gap-3">
               <Button onClick={handlePrint} className="justify-center">
                 <Printer size={14} /> Print QR
@@ -402,4 +388,4 @@ export default function DriverDetailPage() {
       </div>
     </AdminShell>
   );
-              }
+}
