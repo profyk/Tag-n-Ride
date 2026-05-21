@@ -399,10 +399,7 @@ const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent
   <View style={styles.whatsappIcon}>
     <Ionicons name="logo-whatsapp" size={22} color="#fff" />
   </View>
-  <View style={{ flex: 1 }}>
-    <Text style={styles.whatsappLabel}>WhatsApp Support</Text>
-    <Text style={styles.whatsappSub}>Chat with us · 083 278 9333 · Usually replies in minutes</Text>
-  </View>
+  <Text style={styles.whatsappLabel}>WhatsApp Support</Text>
   <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
 </TouchableOpacity>
 
@@ -656,10 +653,11 @@ const Row: React.FC<{
   },
   rowText: { color: colors.text, fontSize: 15, fontWeight: "600", flex: 1 },
   whatsappRow: {
-    flexDirection: "row", alignItems: "center", gap: 12, padding: 16,
-    backgroundColor: "#0A2F1A", borderRadius: radius.md,
-    borderWidth: 1, borderColor: "#25D366", marginBottom: 8,
-  },
+  flexDirection: "row", alignItems: "center", gap: 12,
+  padding: 16, backgroundColor: "#0A2F1A",
+  borderRadius: radius.md, borderWidth: 1,
+  borderColor: "#25D366", marginBottom: 8,
+},
   whatsappIcon: {
   width: 40, height: 40, borderRadius: 20,
   backgroundColor: "#25D366",
