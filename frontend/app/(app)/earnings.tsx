@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Alert, Modal, RefreshControl, Vibration, TextInput, Platform,
 } from "react-native";
