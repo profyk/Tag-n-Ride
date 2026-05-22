@@ -15,6 +15,13 @@ const authHeaders = () => ({
 
 const CONFIG_GROUPS = [
   {
+  label: "Withdrawal Settings",
+  keys: ["auto_approve_withdrawal_limit"],
+  descriptions: {
+    auto_approve_withdrawal_limit: "Auto-approve withdrawals below this amount in ZAR (set to 0 to disable)",
+  },
+},
+  {
     label: "Platform Fees",
     keys: ["platform_fee_percent"],
     descriptions: {
