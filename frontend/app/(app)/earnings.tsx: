@@ -25,8 +25,12 @@ function formatTime(iso: string) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+<<<<<<< HEAD
 const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];
 export default function EarningsScreen() {
+=======
+const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function EarningsScreen() {
+>>>>>>> 784289375c49c5cd42b5c30d93ade7c3f2451cac
   const { state } = useAuth();
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -109,8 +113,12 @@ export default function EarningsScreen() {
     finally { setCashUpdating(false); }
   };
 
+<<<<<<< HEAD
   const onRefresh = async () => { setRefreshing(true); await load(); };
 if (!routeData?.active) {
+=======
+  const onRefresh = async () => { setRefreshing(true); await load(); };if (!routeData?.active) {
+>>>>>>> 784289375c49c5cd42b5c30d93ade7c3f2451cac
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
         <ScrollView
@@ -261,8 +269,12 @@ if (!routeData?.active) {
         </Modal>
       </SafeAreaView>
     );
+<<<<<<< HEAD
   }
   const isLongRoute = routeData.duration_mins >= 120;
+=======
+  }const isLongRoute = routeData.duration_mins >= 120;
+>>>>>>> 784289375c49c5cd42b5c30d93ade7c3f2451cac
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
@@ -393,8 +405,12 @@ if (!routeData?.active) {
       </ScrollView>
     </SafeAreaView>
   );
+<<<<<<< HEAD
 }
 const styles = StyleSheet.create({
+=======
+}const styles = StyleSheet.create({
+>>>>>>> 784289375c49c5cd42b5c30d93ade7c3f2451cac
   root: { flex: 1, backgroundColor: colors.bg },
   pageTitle: { color: colors.text, fontSize: 26, fontWeight: "800", marginBottom: 16 },
   sectionLabel: {
@@ -567,4 +583,8 @@ const styles = StyleSheet.create({
   summaryVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
   summaryLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
   summarySub: { color: colors.textDim, fontSize: 12, textAlign: "center", marginBottom: 20 },
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 784289375c49c5cd42b5c30d93ade7c3f2451cac
