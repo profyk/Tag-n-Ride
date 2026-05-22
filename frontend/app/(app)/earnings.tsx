@@ -428,3 +428,4 @@ const styles = StyleSheet.create({
   summaryVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
   summaryLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
   summarySub: { color: colors.textDim, fontSize: 12, textAlign: "center", marginBottom: 20 },
+});
