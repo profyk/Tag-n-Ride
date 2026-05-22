@@ -173,6 +173,20 @@ export const api = {
       submitted_at?: string;
     }>("/api/kyc/status"),
 
+  // ── Notifications ──
+  getNotifications: () =>
+    request<Notification[]>("/api/notifications"),
+
+  deleteNotification: (id: string) =>
+    request<{ ok: boolean }>(`/api/notifications/${id}`, {
+      method: "DELETE",
+    }),
+
+  clearAllNotifications: () =>
+    request<{ ok: boolean }>("/api/notifications", {
+      method: "DELETE",
+    }),
+
   // ── Owner ──
   ownerDashboard: () =>
     request<{
@@ -320,4 +334,14 @@ export type PayoutAccount = {
   account_number: string;
   account_name?: string;
   created_at: string;
+};
+
+export type Notification = {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  target: string;
+  sent_at: string;
+  read?: boolean;
 };
