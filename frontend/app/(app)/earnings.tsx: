@@ -25,9 +25,7 @@ function formatTime(iso: string) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];
-
-export default function EarningsScreen() {
+const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function EarningsScreen() {
   const { state } = useAuth();
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -36,7 +34,6 @@ export default function EarningsScreen() {
   const [summaryModal, setSummaryModal] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [selectedFare, setSelectedFare] = useState(0);
-  const [customFare, setCustomFare] = useState("");
   const [cashUpdating, setCashUpdating] = useState(false);
   const prevPaymentCount = useRef(0);
 
@@ -45,7 +42,6 @@ export default function EarningsScreen() {
   const load = useCallback(async () => {
     try {
       const data = await api.currentRoute();
-      // Vibrate if new payment came in
       if (data.active && data.app_count > prevPaymentCount.current) {
         if (prevPaymentCount.current > 0) Vibration.vibrate(300);
         prevPaymentCount.current = data.app_count;
@@ -62,12 +58,11 @@ export default function EarningsScreen() {
   }, [load]);
 
   const handleStartRoute = async () => {
-    const fare = selectedFare || parseFloat(customFare) || 0;
+    const fare = selectedFare || 0;
     try {
       await api.startRoute(fare);
       setStartModal(false);
       setSelectedFare(0);
-      setCustomFare("");
       prevPaymentCount.current = 0;
       load();
     } catch (e: any) {
@@ -94,8 +89,8 @@ export default function EarningsScreen() {
             } catch (e: any) {
               Alert.alert("Error", e?.message || "Could not end route");
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
@@ -113,39 +108,35 @@ export default function EarningsScreen() {
     finally { setCashUpdating(false); }
   };
 
-  const onRefresh = async () => { setRefreshing(true); await load(); };
-
-  // ── OFF ROUTE ──────────────────────────────────────────────
-  if (!routeData?.active) {
+  const onRefresh = async () => { setRefreshing(true); await load(); };if (!routeData?.active) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
         <ScrollView
           contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />
+          }>
 
           <Text style={styles.pageTitle}>Earnings</Text>
 
-          {/* Today totals */}
           <View style={styles.todayCard}>
             <Text style={styles.todayLabel}>TODAY'S TOTAL</Text>
             <Text style={styles.todayAmount}>{formatZAR(routeData?.today_total || 0)}</Text>
-            <Text style={styles.todayCount}>{routeData?.today_count || 0} passengers paid via app</Text>
+            <Text style={styles.todayCount}>
+              {routeData?.today_count || 0} passengers paid via app
+            </Text>
           </View>
 
-          {/* Off route status */}
           <View style={styles.offDutyCard}>
             <View style={styles.offDutyDot} />
             <Text style={styles.offDutyTitle}>OFF ROUTE</Text>
             <Text style={styles.offDutySub}>Start a route to track payments</Text>
-            <TouchableOpacity
-              style={styles.startBtn}
-              onPress={() => setStartModal(true)}>
+            <TouchableOpacity style={styles.startBtn} onPress={() => setStartModal(true)}>
               <Ionicons name="play-circle" size={22} color={colors.bg} />
               <Text style={styles.startBtnText}>Start Route</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Last route */}
           {routeData?.last_route && (
             <View style={styles.lastRouteCard}>
               <Text style={styles.sectionLabel}>LAST ROUTE</Text>
@@ -177,7 +168,6 @@ export default function EarningsScreen() {
           )}
         </ScrollView>
 
-        {/* Start Route Modal */}
         <Modal visible={startModal} transparent animationType="slide"
           onRequestClose={() => setStartModal(false)}>
           <View style={styles.modalOverlay}>
@@ -187,40 +177,36 @@ export default function EarningsScreen() {
               <Text style={styles.modalSub}>
                 Set the fare so underpaid alerts show correctly (optional)
               </Text>
-
               <Text style={styles.fareLabel}>ROUTE FARE</Text>
               <View style={styles.fareGrid}>
                 {FARE_PRESETS.map(f => (
                   <TouchableOpacity
                     key={f}
-                    onPress={() => { setSelectedFare(f); setCustomFare(""); }}
+                    onPress={() => setSelectedFare(f)}
                     style={[styles.fareChip, selectedFare === f && styles.fareChipActive]}>
-                    <Text style={[styles.fareChipText, selectedFare === f && styles.fareChipTextActive]}>
-                      R{f}
-                    </Text>
+                    <Text style={[
+                      styles.fareChipText,
+                      selectedFare === f && styles.fareChipTextActive,
+                    ]}>R{f}</Text>
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity
                   onPress={() => setSelectedFare(0)}
-                  style={[styles.fareChip, selectedFare === 0 && !customFare && styles.fareChipActive]}>
-                  <Text style={[styles.fareChipText, selectedFare === 0 && !customFare && styles.fareChipTextActive]}>
-                    No fare
-                  </Text>
+                  style={[styles.fareChip, selectedFare === 0 && styles.fareChipActive]}>
+                  <Text style={[
+                    styles.fareChipText,
+                    selectedFare === 0 && styles.fareChipTextActive,
+                  ]}>No fare</Text>
                 </TouchableOpacity>
               </View>
-
               <View style={styles.modalActions}>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity
-                    style={styles.cancelBtn}
-                    onPress={() => setStartModal(false)}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setStartModal(false)}>
                     <Text style={styles.cancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity
-                    style={styles.confirmBtn}
-                    onPress={handleStartRoute}>
+                  <TouchableOpacity style={styles.confirmBtn} onPress={handleStartRoute}>
                     <Ionicons name="play-circle" size={18} color={colors.bg} />
                     <Text style={styles.confirmBtnText}>Start Route</Text>
                   </TouchableOpacity>
@@ -230,7 +216,6 @@ export default function EarningsScreen() {
           </View>
         </Modal>
 
-        {/* Summary Modal */}
         <Modal visible={summaryModal} transparent animationType="slide"
           onRequestClose={() => setSummaryModal(false)}>
           <View style={styles.modalOverlay}>
@@ -238,44 +223,31 @@ export default function EarningsScreen() {
               <View style={styles.modalHandle} />
               <Text style={styles.summaryEmoji}>🎉</Text>
               <Text style={styles.modalTitle}>Route Complete!</Text>
-
               <View style={styles.summaryGrid}>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>
-                    {formatZAR(summary?.total_collected || 0)}
-                  </Text>
+                  <Text style={styles.summaryVal}>{formatZAR(summary?.total_collected || 0)}</Text>
                   <Text style={styles.summaryLabel}>Collected</Text>
                 </View>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>
-                    {summary?.total_passengers || 0}
-                  </Text>
+                  <Text style={styles.summaryVal}>{summary?.total_passengers || 0}</Text>
                   <Text style={styles.summaryLabel}>Passengers</Text>
                 </View>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>
-                    {formatDuration(summary?.duration_mins || 0)}
-                  </Text>
+                  <Text style={styles.summaryVal}>{formatDuration(summary?.duration_mins || 0)}</Text>
                   <Text style={styles.summaryLabel}>Duration</Text>
                 </View>
               </View>
-
               <Text style={styles.summarySub}>
-                {summary?.app_count || 0} app payments
-                · {summary?.cash_count || 0} cash passengers
+                {summary?.app_count || 0} app · {summary?.cash_count || 0} cash
               </Text>
-
               <View style={styles.modalActions}>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity
-                    style={styles.cancelBtn}
-                    onPress={() => setSummaryModal(false)}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setSummaryModal(false)}>
                     <Text style={styles.cancelBtnText}>Done</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity
-                    style={styles.confirmBtn}
+                  <TouchableOpacity style={styles.confirmBtn}
                     onPress={() => { setSummaryModal(false); setStartModal(true); }}>
                     <Ionicons name="play-circle" size={18} color={colors.bg} />
                     <Text style={styles.confirmBtnText}>New Route</Text>
@@ -287,27 +259,23 @@ export default function EarningsScreen() {
         </Modal>
       </SafeAreaView>
     );
-  }
-
-  // ── ACTIVE ROUTE ───────────────────────────────────────────
-  const isLongRoute = routeData.duration_mins >= 120;
+  }const isLongRoute = routeData.duration_mins >= 120;
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />
+        }>
 
         <Text style={styles.pageTitle}>Earnings</Text>
 
-        {/* Active route header */}
         <View style={styles.activeHeader}>
           <View style={styles.activeLeft}>
             <View style={styles.activeDot} />
             <Text style={styles.activeTitle}>ROUTE ACTIVE</Text>
-            <Text style={styles.activeDuration}>
-              {formatDuration(routeData.duration_mins)}
-            </Text>
+            <Text style={styles.activeDuration}>{formatDuration(routeData.duration_mins)}</Text>
           </View>
           <TouchableOpacity style={styles.endBtn} onPress={handleEndRoute}>
             <Ionicons name="stop-circle" size={18} color="#fff" />
@@ -315,7 +283,6 @@ export default function EarningsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Long route warning */}
         {isLongRoute && (
           <View style={styles.warningBanner}>
             <Ionicons name="warning-outline" size={16} color="#FFD60A" />
@@ -325,13 +292,10 @@ export default function EarningsScreen() {
           </View>
         )}
 
-        {/* Stats row */}
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { flex: 1.2 }]}>
             <Text style={styles.statCardLabel}>COLLECTED</Text>
-            <Text style={styles.statCardVal}>
-              {formatZAR(routeData.total_collected)}
-            </Text>
+            <Text style={styles.statCardVal}>{formatZAR(routeData.total_collected)}</Text>
             {routeData.fare > 0 && (
               <Text style={styles.statCardSub}>R{routeData.fare} fare</Text>
             )}
@@ -341,13 +305,10 @@ export default function EarningsScreen() {
             <Text style={[styles.statCardVal, { color: colors.cyan }]}>
               {routeData.total_passengers}
             </Text>
-            <Text style={styles.statCardSub}>
-              {routeData.app_count} app
-            </Text>
+            <Text style={styles.statCardSub}>{routeData.app_count} app</Text>
           </View>
         </View>
 
-        {/* Cash counter */}
         <View style={styles.cashCard}>
           <View style={styles.cashLeft}>
             <Ionicons name="cash-outline" size={20} color="#FFD60A" />
@@ -361,26 +322,23 @@ export default function EarningsScreen() {
               style={[styles.cashBtn, routeData.cash_count === 0 && styles.cashBtnDisabled]}
               onPress={() => handleCash(-1)}
               disabled={cashUpdating || routeData.cash_count === 0}>
-              <Ionicons name="remove" size={20} color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
+              <Ionicons name="remove" size={20}
+                color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
             </TouchableOpacity>
             <Text style={styles.cashCount}>{routeData.cash_count}</Text>
-            <TouchableOpacity
-              style={styles.cashBtn}
-              onPress={() => handleCash(1)}
+            <TouchableOpacity style={styles.cashBtn} onPress={() => handleCash(1)}
               disabled={cashUpdating}>
               <Ionicons name="add" size={20} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Today total */}
         <View style={styles.todayMini}>
           <Text style={styles.todayMiniLabel}>Today total</Text>
           <Text style={styles.todayMiniVal}>{formatZAR(routeData.today_total)}</Text>
           <Text style={styles.todayMiniCount}>{routeData.today_count} passengers</Text>
         </View>
 
-        {/* Payment feed */}
         <Text style={styles.sectionLabel}>
           APP PAYMENTS THIS ROUTE ({routeData.app_count})
         </Text>
@@ -402,7 +360,7 @@ export default function EarningsScreen() {
             ]}>
               <View style={[
                 styles.paymentIcon,
-                { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim }
+                { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim },
               ]}>
                 <Ionicons
                   name={p.underpaid ? "warning" : "checkmark-circle"}
@@ -432,43 +390,28 @@ export default function EarningsScreen() {
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-const styles = StyleSheet.create({
+}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  pageTitle: {
-    color: colors.text, fontSize: 26,
-    fontWeight: "800", marginBottom: 16,
+  pageTitle: { color: colors.text, fontSize: 26, fontWeight: "800", marginBottom: 16 },
+  sectionLabel: {
+    color: colors.textMuted, fontSize: 11,
+    fontWeight: "700", letterSpacing: 1.2, marginBottom: 10,
   },
-  // Today card
   todayCard: {
     backgroundColor: colors.bg2, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.border,
     padding: 20, alignItems: "center", marginBottom: 16,
   },
-  todayLabel: {
-    color: colors.textMuted, fontSize: 11,
-    fontWeight: "700", letterSpacing: 1.4,
-  },
-  todayAmount: {
-    color: colors.green, fontSize: 36,
-    fontWeight: "900", marginTop: 4,
-  },
+  todayLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
+  todayAmount: { color: colors.green, fontSize: 36, fontWeight: "900", marginTop: 4 },
   todayCount: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
-  // Off duty
   offDutyCard: {
     backgroundColor: colors.bg2, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.border,
     padding: 32, alignItems: "center", marginBottom: 16, gap: 8,
   },
-  offDutyDot: {
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: colors.textDim,
-  },
-  offDutyTitle: {
-    color: colors.textMuted, fontSize: 13,
-    fontWeight: "800", letterSpacing: 2,
-  },
+  offDutyDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.textDim },
+  offDutyTitle: { color: colors.textMuted, fontSize: 13, fontWeight: "800", letterSpacing: 2 },
   offDutySub: { color: colors.textDim, fontSize: 13 },
   startBtn: {
     flexDirection: "row", alignItems: "center", gap: 8,
@@ -476,7 +419,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28, paddingVertical: 14, marginTop: 8,
   },
   startBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
-  // Last route
   lastRouteCard: {
     backgroundColor: colors.bg2, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.border, padding: 16,
@@ -486,23 +428,14 @@ const styles = StyleSheet.create({
   lastRouteVal: { color: colors.text, fontSize: 18, fontWeight: "800" },
   lastRouteLabel: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   lastRouteSub: { color: colors.textDim, fontSize: 12, textAlign: "center" },
-  // Active header
   activeHeader: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.green,
-    padding: 14, marginBottom: 8,
+    borderWidth: 1, borderColor: colors.green, padding: 14, marginBottom: 8,
   },
   activeLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
-  activeDot: {
-    width: 10, height: 10, borderRadius: 5,
-    backgroundColor: colors.green,
-  },
-  activeTitle: {
-    color: colors.green, fontSize: 12,
-    fontWeight: "800", letterSpacing: 1.2,
-  },
+  activeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.green },
+  activeTitle: { color: colors.green, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
   activeDuration: { color: colors.textMuted, fontSize: 12 },
   endBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
@@ -510,36 +443,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8,
   },
   endBtnText: { color: "#fff", fontWeight: "800", fontSize: 13 },
-  // Warning
   warningBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: "#FFD60A22", borderRadius: radius.sm,
-    borderWidth: 1, borderColor: "#FFD60A44",
-    padding: 10, marginBottom: 8,
+    borderWidth: 1, borderColor: "#FFD60A44", padding: 10, marginBottom: 8,
   },
   warningText: { color: "#FFD60A", fontSize: 12, fontWeight: "600", flex: 1 },
-  // Stats
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
   statCard: {
     backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-    padding: 16, alignItems: "center",
+    borderWidth: 1, borderColor: colors.border, padding: 16, alignItems: "center",
   },
   statCardLabel: {
     color: colors.textMuted, fontSize: 10,
     fontWeight: "700", letterSpacing: 1.2, marginBottom: 4,
   },
-  statCardVal: {
-    color: colors.green, fontSize: 22, fontWeight: "900",
-  },
+  statCardVal: { color: colors.green, fontSize: 22, fontWeight: "900" },
   statCardSub: { color: colors.textDim, fontSize: 11, marginTop: 2 },
-  // Cash counter
   cashCard: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: "#FFD60A44",
-    padding: 14, marginBottom: 10,
+    borderWidth: 1, borderColor: "#FFD60A44", padding: 14, marginBottom: 10,
   },
   cashLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   cashTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
@@ -547,8 +471,7 @@ const styles = StyleSheet.create({
   cashCounter: { flexDirection: "row", alignItems: "center", gap: 4 },
   cashBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: colors.bg3, borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.bg3, borderWidth: 1, borderColor: colors.border,
     alignItems: "center", justifyContent: "center",
   },
   cashBtnDisabled: { opacity: 0.3 },
@@ -556,38 +479,25 @@ const styles = StyleSheet.create({
     color: colors.text, fontSize: 22,
     fontWeight: "900", minWidth: 40, textAlign: "center",
   },
-  // Today mini
   todayMini: {
-    flexDirection: "row", alignItems: "center",
-    gap: 8, marginBottom: 16,
+    flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-    padding: 12,
+    borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 16,
   },
   todayMiniLabel: { color: colors.textMuted, fontSize: 12, flex: 1 },
   todayMiniVal: { color: colors.cyan, fontWeight: "800", fontSize: 15 },
   todayMiniCount: { color: colors.textDim, fontSize: 11 },
-  // Section label
-  sectionLabel: {
-    color: colors.textMuted, fontSize: 11,
-    fontWeight: "700", letterSpacing: 1.2, marginBottom: 10,
-  },
-  // Payment feed
   emptyFeed: {
-    alignItems: "center", padding: 32,
-    borderWidth: 1, borderStyle: "dashed",
-    borderColor: colors.border, borderRadius: radius.md, gap: 8,
+    alignItems: "center", padding: 32, borderWidth: 1,
+    borderStyle: "dashed", borderColor: colors.border,
+    borderRadius: radius.md, gap: 8,
   },
   emptyFeedText: { color: colors.textMuted, fontWeight: "700" },
-  emptyFeedSub: {
-    color: colors.textDim, fontSize: 12,
-    textAlign: "center", lineHeight: 18,
-  },
+  emptyFeedSub: { color: colors.textDim, fontSize: 12, textAlign: "center", lineHeight: 18 },
   paymentCard: {
     flexDirection: "row", alignItems: "center", gap: 12,
     backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-    padding: 14, marginBottom: 8,
+    borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 8,
   },
   paymentCardNew: { borderColor: colors.green },
   paymentCardWarn: { borderColor: "#FFD60A" },
@@ -595,9 +505,7 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 22,
     alignItems: "center", justifyContent: "center",
   },
-  paymentAmount: {
-    color: colors.green, fontSize: 18, fontWeight: "900",
-  },
+  paymentAmount: { color: colors.green, fontSize: 18, fontWeight: "900" },
   paymentTime: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   underpaidTag: { color: "#FFD60A", fontSize: 13, fontWeight: "700" },
   underpaidBadge: {
@@ -606,10 +514,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "#FFD60A44",
   },
   underpaidBadgeText: { color: "#FFD60A", fontSize: 10, fontWeight: "800" },
-  // Modals
-  modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end",
-  },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
   modalSheet: {
     backgroundColor: colors.bg2, borderTopLeftRadius: 24,
     borderTopRightRadius: 24, padding: 24, paddingBottom: 40,
@@ -617,8 +522,7 @@ const styles = StyleSheet.create({
   },
   modalHandle: {
     width: 40, height: 4, borderRadius: 2,
-    backgroundColor: colors.border,
-    alignSelf: "center", marginBottom: 20,
+    backgroundColor: colors.border, alignSelf: "center", marginBottom: 20,
   },
   modalTitle: {
     color: colors.text, fontSize: 20,
@@ -632,24 +536,19 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: 10,
     fontWeight: "700", letterSpacing: 1.4, marginBottom: 10,
   },
-  fareGrid: {
-    flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24,
-  },
+  fareGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 },
   fareChip: {
     paddingHorizontal: 16, paddingVertical: 10,
     borderRadius: radius.md, borderWidth: 1,
     borderColor: colors.border, backgroundColor: colors.bg,
   },
-  fareChipActive: {
-    backgroundColor: colors.cyanDim, borderColor: colors.cyan,
-  },
+  fareChipActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
   fareChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 14 },
   fareChipTextActive: { color: colors.cyan },
   modalActions: { flexDirection: "row", gap: 12 },
   cancelBtn: {
     backgroundColor: colors.bg3, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-    padding: 14, alignItems: "center",
+    borderWidth: 1, borderColor: colors.border, padding: 14, alignItems: "center",
   },
   cancelBtnText: { color: colors.textMuted, fontWeight: "700" },
   confirmBtn: {
@@ -658,16 +557,10 @@ const styles = StyleSheet.create({
     flexDirection: "row", justifyContent: "center", gap: 6,
   },
   confirmBtnText: { color: colors.bg, fontWeight: "800" },
-  // Summary
   summaryEmoji: { fontSize: 40, textAlign: "center", marginBottom: 8 },
-  summaryGrid: {
-    flexDirection: "row", marginVertical: 20,
-  },
+  summaryGrid: { flexDirection: "row", marginVertical: 20 },
   summaryStat: { flex: 1, alignItems: "center" },
   summaryVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
   summaryLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
-  summarySub: {
-    color: colors.textDim, fontSize: 12,
-    textAlign: "center", marginBottom: 20,
-  },
+  summarySub: { color: colors.textDim, fontSize: 12, textAlign: "center", marginBottom: 20 },
 });
