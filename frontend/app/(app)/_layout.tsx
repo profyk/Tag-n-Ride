@@ -72,6 +72,16 @@ export default function AppLayout() {
           tabBarTestID: "tab-profile",
         }}
       />
+      import { NotificationProvider } from "../../src/NotificationContext";
+
+// Wrap Tabs with NotificationProvider
+return (
+  <NotificationProvider>
+    <Tabs ...>
+      {/* existing tabs */}
+    </Tabs>
+  </NotificationProvider>
+);
       {/* Hidden screens — no tab bar entry */}
 <Tabs.Screen name="topup" options={{ href: null }} />
 <Tabs.Screen name="withdraw" options={{ href: null }} />
