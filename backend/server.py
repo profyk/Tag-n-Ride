@@ -2127,3 +2127,5 @@ async def onboarding_pipeline(admin: dict = Depends(require_admin)):
             "fully_verified": verified_count,
         }
     }
+    
+app.include_router(api)
