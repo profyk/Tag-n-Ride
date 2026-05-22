@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, Modal, RefreshControl, Vibration,
+  Alert, Modal, RefreshControl, Vibration, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,33 +9,34 @@ import { useAuth } from "../../src/AuthContext";
 import { api } from "../../src/api";
 import { colors, formatZAR, radius } from "../../src/theme";
 
-function formatDuration(mins) {
+function formatDuration(mins: number) {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  if (h === 0) return m + "m";
-  return h + "hr " + m + "m";
+  if (h === 0) return `${m}m`;
+  return `${h}hr ${m}m`;
 }
 
-function formatTime(iso) {
+function formatTime(iso: string) {
   const d = new Date(iso);
   const now = new Date();
   const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
   if (diff < 60) return "Just now";
-  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
-  return Math.floor(diff / 3600) + "h ago";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
 }
 
 const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];
 
 export default function EarningsScreen() {
   const { state } = useAuth();
-  const [routeData, setRouteData] = useState(null);
+  const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [startModal, setStartModal] = useState(false);
   const [summaryModal, setSummaryModal] = useState(false);
-  const [summary, setSummary] = useState(null);
+  const [summary, setSummary] = useState<any>(null);
   const [selectedFare, setSelectedFare] = useState(0);
+  const [customFare, setCustomFare] = useState("");
   const [cashUpdating, setCashUpdating] = useState(false);
   const prevPaymentCount = useRef(0);
 
@@ -60,43 +61,49 @@ export default function EarningsScreen() {
   }, [load]);
 
   const handleStartRoute = async () => {
-    const fare = selectedFare || 0;
+    const fare = customFare ? parseFloat(customFare) : selectedFare || 0;
     try {
       await api.startRoute(fare);
       setStartModal(false);
       setSelectedFare(0);
+      setCustomFare("");
       prevPaymentCount.current = 0;
       load();
-    } catch (e) {
-      Alert.alert("Error", e.message || "Could not start route");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not start route");
     }
   };
 
   const handleEndRoute = () => {
-    Alert.alert("End Route?", "This will close the current route and show your summary.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "End Route", style: "destructive",
-        onPress: async () => {
-          try {
-            const res = await api.endRoute();
-            setSummary(res.summary);
-            setSummaryModal(true);
-            prevPaymentCount.current = 0;
-            load();
-          } catch (e) {
-            Alert.alert("Error", e.message || "Could not end route");
-          }
+    Alert.alert(
+      "End Route?",
+      "This will close the current route and show your summary.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "End Route",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const res = await api.endRoute();
+              setSummary(res.summary);
+              setSummaryModal(true);
+              prevPaymentCount.current = 0;
+              load();
+            } catch (e: any) {
+              Alert.alert("Error", e?.message || "Could not end route");
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
-  const handleCash = async (delta) => {
+  const handleCash = async (delta: 1 | -1) => {
     setCashUpdating(true);
     try {
       const res = await api.updateCash(delta);
-      setRouteData(prev => ({
+      setRouteData((prev: any) => ({
         ...prev,
         cash_count: res.cash_count,
         total_passengers: prev.app_count + res.cash_count,
@@ -105,20 +112,24 @@ export default function EarningsScreen() {
     finally { setCashUpdating(false); }
   };
 
-  const onRefresh = async () => { setRefreshing(true); await load(); };
-
-  if (!routeData || !routeData.active) {
+  const onRefresh = async () => { setRefreshing(true); await load(); };if (!routeData || !routeData.active) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
-
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />
+          }>
           <Text style={styles.pageTitle}>Earnings</Text>
 
           <View style={styles.todayCard}>
             <Text style={styles.todayLabel}>TODAY'S TOTAL</Text>
-            <Text style={styles.todayAmount}>{formatZAR(routeData ? routeData.today_total : 0)}</Text>
-            <Text style={styles.todayCount}>{routeData ? routeData.today_count : 0} passengers paid via app</Text>
+            <Text style={styles.todayAmount}>
+              {formatZAR(routeData ? routeData.today_total : 0)}
+            </Text>
+            <Text style={styles.todayCount}>
+              {routeData ? routeData.today_count : 0} passengers paid via app
+            </Text>
           </View>
 
           <View style={styles.offDutyCard}>
@@ -136,55 +147,86 @@ export default function EarningsScreen() {
               <Text style={styles.sectionLabel}>LAST ROUTE</Text>
               <View style={styles.lastRouteRow}>
                 <View style={styles.lastRouteStat}>
-                  <Text style={styles.lastRouteVal}>{formatZAR(routeData.last_route.total_collected)}</Text>
+                  <Text style={styles.lastRouteVal}>
+                    {formatZAR(routeData.last_route.total_collected)}
+                  </Text>
                   <Text style={styles.lastRouteLabel}>Collected</Text>
                 </View>
                 <View style={styles.lastRouteStat}>
-                  <Text style={styles.lastRouteVal}>{routeData.last_route.total_passengers}</Text>
+                  <Text style={styles.lastRouteVal}>
+                    {routeData.last_route.total_passengers}
+                  </Text>
                   <Text style={styles.lastRouteLabel}>Passengers</Text>
                 </View>
                 <View style={styles.lastRouteStat}>
-                  <Text style={styles.lastRouteVal}>{formatDuration(routeData.last_route.duration_mins)}</Text>
+                  <Text style={styles.lastRouteVal}>
+                    {formatDuration(routeData.last_route.duration_mins)}
+                  </Text>
                   <Text style={styles.lastRouteLabel}>Duration</Text>
                 </View>
               </View>
               <Text style={styles.lastRouteSub}>
                 {routeData.last_route.app_count} app · {routeData.last_route.cash_count} cash
-                {routeData.last_route.fare > 0 ? " · R" + routeData.last_route.fare + " fare" : ""}
+                {routeData.last_route.fare > 0 ? ` · R${routeData.last_route.fare} fare` : ""}
               </Text>
             </View>
           )}
         </ScrollView>
 
-        <Modal visible={startModal} transparent animationType="slide" onRequestClose={() => setStartModal(false)}>
+        <Modal visible={startModal} transparent animationType="slide"
+          onRequestClose={() => setStartModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>Start Route</Text>
-              <Text style={styles.modalSub}>Set the fare so underpaid alerts show correctly (optional)</Text>
+              <Text style={styles.modalSub}>
+                Set the fare so underpaid alerts show correctly (optional)
+              </Text>
               <Text style={styles.fareLabel}>ROUTE FARE</Text>
               <View style={styles.fareGrid}>
                 {FARE_PRESETS.map(f => (
-                  <TouchableOpacity key={f} onPress={() => setSelectedFare(f)}
-                    style={[styles.fareChip, selectedFare === f && styles.fareChipActive]}>
-                    <Text style={[styles.fareChipText, selectedFare === f && styles.fareChipTextActive]}>R{f}</Text>
+                  <TouchableOpacity
+                    key={f}
+                    onPress={() => { setSelectedFare(f); setCustomFare(""); }}
+                    style={[styles.fareChip, selectedFare === f && !customFare && styles.fareChipActive]}>
+                    <Text style={[styles.fareChipText, selectedFare === f && !customFare && styles.fareChipTextActive]}>
+                      R{f}
+                    </Text>
                   </TouchableOpacity>
                 ))}
-                <TouchableOpacity onPress={() => setSelectedFare(0)}
-                  style={[styles.fareChip, selectedFare === 0 && styles.fareChipActive]}>
-                  <Text style={[styles.fareChipText, selectedFare === 0 && styles.fareChipTextActive]}>No fare</Text>
+                <TouchableOpacity
+                  onPress={() => { setSelectedFare(0); setCustomFare(""); }}
+                  style={[styles.fareChip, selectedFare === 0 && !customFare && styles.fareChipActive]}>
+                  <Text style={[styles.fareChipText, selectedFare === 0 && !customFare && styles.fareChipTextActive]}>
+                    No fare
+                  </Text>
                 </TouchableOpacity>
               </View>
+              <Text style={styles.fareLabel}>OR ENTER CUSTOM FARE (ZAR)</Text>
+              <TextInput
+                style={[styles.customFareInput, customFare ? styles.customFareInputActive : null]}
+                value={customFare}
+                onChangeText={(t) => {
+                  setCustomFare(t.replace(/[^0-9]/g, ""));
+                  setSelectedFare(0);
+                }}
+                placeholder="e.g. 18"
+                placeholderTextColor={colors.textDim}
+                keyboardType="number-pad"
+              />
               <View style={styles.modalActions}>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setStartModal(false)}>
+                  <TouchableOpacity style={styles.cancelBtn}
+                    onPress={() => { setStartModal(false); setSelectedFare(0); setCustomFare(""); }}>
                     <Text style={styles.cancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
                   <TouchableOpacity style={styles.confirmBtn} onPress={handleStartRoute}>
                     <Ionicons name="play-circle" size={18} color={colors.bg} />
-                    <Text style={styles.confirmBtnText}>Start Route</Text>
+                    <Text style={styles.confirmBtnText}>
+                      {customFare ? `Start · R${customFare}` : selectedFare > 0 ? `Start · R${selectedFare}` : "Start Route"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -192,7 +234,8 @@ export default function EarningsScreen() {
           </View>
         </Modal>
 
-        <Modal visible={summaryModal} transparent animationType="slide" onRequestClose={() => setSummaryModal(false)}>
+        <Modal visible={summaryModal} transparent animationType="slide"
+          onRequestClose={() => setSummaryModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
@@ -200,7 +243,9 @@ export default function EarningsScreen() {
               <Text style={styles.modalTitle}>Route Complete!</Text>
               <View style={styles.summaryGrid}>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>{formatZAR(summary ? summary.total_collected : 0)}</Text>
+                  <Text style={styles.summaryVal}>
+                    {formatZAR(summary ? summary.total_collected : 0)}
+                  </Text>
                   <Text style={styles.summaryLabel}>Collected</Text>
                 </View>
                 <View style={styles.summaryStat}>
@@ -208,7 +253,9 @@ export default function EarningsScreen() {
                   <Text style={styles.summaryLabel}>Passengers</Text>
                 </View>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>{formatDuration(summary ? summary.duration_mins : 0)}</Text>
+                  <Text style={styles.summaryVal}>
+                    {formatDuration(summary ? summary.duration_mins : 0)}
+                  </Text>
                   <Text style={styles.summaryLabel}>Duration</Text>
                 </View>
               </View>
@@ -234,15 +281,15 @@ export default function EarningsScreen() {
         </Modal>
       </SafeAreaView>
     );
-  }
-
-  const isLongRoute = routeData.duration_mins >= 120;
+  }const isLongRoute = routeData.duration_mins >= 120;
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
-
+      <ScrollView
+        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />
+        }>
         <Text style={styles.pageTitle}>Earnings</Text>
 
         <View style={styles.activeHeader}>
@@ -270,11 +317,15 @@ export default function EarningsScreen() {
           <View style={[styles.statCard, { flex: 1.2 }]}>
             <Text style={styles.statCardLabel}>COLLECTED</Text>
             <Text style={styles.statCardVal}>{formatZAR(routeData.total_collected)}</Text>
-            {routeData.fare > 0 && <Text style={styles.statCardSub}>R{routeData.fare} fare</Text>}
+            {routeData.fare > 0 && (
+              <Text style={styles.statCardSub}>R{routeData.fare} fare</Text>
+            )}
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statCardLabel}>PASSENGERS</Text>
-            <Text style={[styles.statCardVal, { color: colors.cyan }]}>{routeData.total_passengers}</Text>
+            <Text style={[styles.statCardVal, { color: colors.cyan }]}>
+              {routeData.total_passengers}
+            </Text>
             <Text style={styles.statCardSub}>{routeData.app_count} app</Text>
           </View>
         </View>
@@ -292,7 +343,8 @@ export default function EarningsScreen() {
               style={[styles.cashBtn, routeData.cash_count === 0 && styles.cashBtnDisabled]}
               onPress={() => handleCash(-1)}
               disabled={cashUpdating || routeData.cash_count === 0}>
-              <Ionicons name="remove" size={20} color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
+              <Ionicons name="remove" size={20}
+                color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
             </TouchableOpacity>
             <Text style={styles.cashCount}>{routeData.cash_count}</Text>
             <TouchableOpacity style={styles.cashBtn} onPress={() => handleCash(1)} disabled={cashUpdating}>
@@ -307,30 +359,40 @@ export default function EarningsScreen() {
           <Text style={styles.todayMiniCount}>{routeData.today_count} passengers</Text>
         </View>
 
-        <Text style={styles.sectionLabel}>APP PAYMENTS THIS ROUTE ({routeData.app_count})</Text>
+        <Text style={styles.sectionLabel}>
+          APP PAYMENTS THIS ROUTE ({routeData.app_count})
+        </Text>
 
         {routeData.payments.length === 0 ? (
           <View style={styles.emptyFeed}>
             <Ionicons name="time-outline" size={32} color={colors.textDim} />
             <Text style={styles.emptyFeedText}>Waiting for payments...</Text>
-            <Text style={styles.emptyFeedSub}>Passengers scan your QR to pay · auto-refreshes every 10s</Text>
+            <Text style={styles.emptyFeedSub}>
+              Passengers scan your QR to pay · auto-refreshes every 10s
+            </Text>
           </View>
         ) : (
-          routeData.payments.map((p, i) => (
+          routeData.payments.map((p: any, i: number) => (
             <View key={p.id} style={[
               styles.paymentCard,
               i === 0 && styles.paymentCardNew,
               p.underpaid && styles.paymentCardWarn,
             ]}>
-              <View style={[styles.paymentIcon, { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim }]}>
-                <Ionicons name={p.underpaid ? "warning" : "checkmark-circle"} size={22}
-                  color={p.underpaid ? "#FFD60A" : colors.green} />
+              <View style={[styles.paymentIcon,
+                { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim }]}>
+                <Ionicons
+                  name={p.underpaid ? "warning" : "checkmark-circle"}
+                  size={22}
+                  color={p.underpaid ? "#FFD60A" : colors.green}
+                />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.paymentAmount, p.underpaid && { color: "#FFD60A" }]}>
                   {formatZAR(p.driver_net)}
                   {p.underpaid && routeData.fare > 0 && (
-                    <Text style={styles.underpaidTag}> -{formatZAR(routeData.fare - p.amount)}</Text>
+                    <Text style={styles.underpaidTag}>
+                      {" "}minus{formatZAR(routeData.fare - p.amount)}
+                    </Text>
                   )}
                 </Text>
                 <Text style={styles.paymentTime}>{formatTime(p.created_at)}</Text>
@@ -346,9 +408,7 @@ export default function EarningsScreen() {
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-const styles = StyleSheet.create({
+}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   pageTitle: { color: colors.text, fontSize: 26, fontWeight: "800", marginBottom: 16 },
   sectionLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, marginBottom: 10 },
@@ -412,11 +472,13 @@ const styles = StyleSheet.create({
   modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center", marginBottom: 6 },
   modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 20, lineHeight: 18 },
   fareLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 10 },
-  fareGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 },
+  fareGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
   fareChip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   fareChipActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
   fareChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 14 },
   fareChipTextActive: { color: colors.cyan },
+  customFareInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 12, color: colors.text, fontSize: 18, fontWeight: "800", marginBottom: 20 },
+  customFareInputActive: { borderColor: colors.cyan },
   modalActions: { flexDirection: "row", gap: 12 },
   cancelBtn: { backgroundColor: colors.bg3, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, alignItems: "center" },
   cancelBtnText: { color: colors.textMuted, fontWeight: "700" },
