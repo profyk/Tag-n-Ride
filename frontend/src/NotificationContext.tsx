@@ -1,15 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api } from "./api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { api, Notification } from "./api";
 import { useAuth } from "./AuthContext";
-
-type Notification = {
-  id: string;
-  title: string;
-  message: string;
-  type: string;
-  sent_at: string;
-  read?: boolean;
-};
 
 type NotifContextType = {
   notifications: Notification[];
@@ -28,7 +20,17 @@ const NotifContext = createContext<NotifContextType>({
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { state } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [lastReadAt, setLastReadAt] = useState<string>("0");
+
+  const STORAGE_KEY = state.status === "authed"
+    ? `tnr_notif_read_${state.user.id}`
+    : "tnr_notif_read";
+
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY).then(v => {
+      if (v) setLastReadAt(v);
+    });
+  }, [STORAGE_KEY]);
 
   const load = useCallback(async () => {
     if (state.status !== "authed") return;
@@ -40,19 +42,27 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     load();
-    // Poll every 60 seconds
     const interval = setInterval(load, 60000);
     return () => clearInterval(interval);
   }, [load]);
 
-  const markAllRead = () => {
-    setReadIds(new Set(notifications.map(n => n.id)));
-  };
+  const markAllRead = useCallback(async () => {
+    const now = new Date().toISOString();
+    setLastReadAt(now);
+    await AsyncStorage.setItem(STORAGE_KEY, now);
+  }, [STORAGE_KEY]);
 
-  const unreadCount = notifications.filter(n => !readIds.has(n.id)).length;
+  const unreadCount = notifications.filter(
+    n => new Date(n.sent_at) > new Date(lastReadAt)
+  ).length;
 
   return (
-    <NotifContext.Provider value={{ notifications, unreadCount, markAllRead, refresh: load }}>
+    <NotifContext.Provider value={{
+      notifications,
+      unreadCount,
+      markAllRead,
+      refresh: load,
+    }}>
       {children}
     </NotifContext.Provider>
   );
