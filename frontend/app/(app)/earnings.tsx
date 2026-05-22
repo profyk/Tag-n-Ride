@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
+  import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, Modal, RefreshControl, Vibration, TextInput,
+  Alert, Modal, RefreshControl, Vibration, TextInput, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -74,31 +75,43 @@ export default function EarningsScreen() {
     }
   };
 
-  const handleEndRoute = () => {
-    Alert.alert(
-      "End Route?",
-      "This will close the current route and show your summary.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "End Route",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const res = await api.endRoute();
-              setSummary(res.summary);
-              setSummaryModal(true);
-              prevPaymentCount.current = 0;
-              load();
-            } catch (e: any) {
-              Alert.alert("Error", e?.message || "Could not end route");
-            }
-          },
+  const handleEndRoute = async () => {
+  if (Platform.OS === "web") {
+    // On web Alert.alert doesn't work — end directly
+    try {
+      const res = await api.endRoute();
+      setSummary(res.summary);
+      setSummaryModal(true);
+      prevPaymentCount.current = 0;
+      load();
+    } catch (e: any) {
+      console.error("End route error:", e);
+    }
+    return;
+  }
+  Alert.alert(
+    "End Route?",
+    "This will close the current route and show your summary.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "End Route",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const res = await api.endRoute();
+            setSummary(res.summary);
+            setSummaryModal(true);
+            prevPaymentCount.current = 0;
+            load();
+          } catch (e: any) {
+            Alert.alert("Error", e?.message || "Could not end route");
+          }
         },
-      ]
-    );
-  };
-
+      },
+    ]
+  );
+};
   const handleCash = async (delta: 1 | -1) => {
     setCashUpdating(true);
     try {
