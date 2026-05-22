@@ -23,6 +23,8 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
+
+# cache-bust: 2026-05-22-v2
 COPY server.py .
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
