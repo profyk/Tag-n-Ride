@@ -32,8 +32,8 @@ export default function AppLayout() {
             height: 64,
           },
           tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-        }}
-      >
+        }}>
+
         <Tabs.Screen
           name="index"
           options={{
@@ -41,7 +41,6 @@ export default function AppLayout() {
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="home" size={size} color={color} />
             ),
-            tabBarTestID: "tab-home",
           }}
         />
         <Tabs.Screen
@@ -51,9 +50,21 @@ export default function AppLayout() {
             tabBarIcon: ({ color, size }) => (
               <Ionicons name={isDriver ? "qr-code" : "scan"} size={size} color={color} />
             ),
-            tabBarTestID: "tab-action",
           }}
         />
+
+        {/* Earnings tab — drivers only */}
+        <Tabs.Screen
+          name="earnings"
+          options={{
+            title: "Earnings",
+            href: isDriver ? undefined : null,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="cash-outline" size={size} color={color} />
+            ),
+          }}
+        />
+
         <Tabs.Screen
           name="transactions"
           options={{
@@ -61,7 +72,6 @@ export default function AppLayout() {
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="receipt-outline" size={size} color={color} />
             ),
-            tabBarTestID: "tab-history",
           }}
         />
         <Tabs.Screen
@@ -71,11 +81,10 @@ export default function AppLayout() {
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="person-circle-outline" size={size} color={color} />
             ),
-            tabBarTestID: "tab-profile",
           }}
         />
 
-        {/* Hidden screens — no tab bar entry */}
+        {/* Hidden screens */}
         <Tabs.Screen name="topup" options={{ href: null }} />
         <Tabs.Screen name="withdraw" options={{ href: null }} />
         <Tabs.Screen name="kyc" options={{ href: null }} />
