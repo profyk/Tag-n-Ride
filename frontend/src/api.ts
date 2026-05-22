@@ -187,6 +187,30 @@ export const api = {
       method: "DELETE",
     }),
 
+  // ── Driver Routes ──
+  startRoute: (fare: number) =>
+    request<{ ok: boolean; route_id: string }>("/api/driver/route/start", {
+      method: "POST",
+      body: JSON.stringify({ fare }),
+    }),
+
+  endRoute: () =>
+    request<{ ok: boolean; summary: any }>("/api/driver/route/end", {
+      method: "POST",
+    }),
+
+  currentRoute: () =>
+    request<any>("/api/driver/route/current"),
+
+  updateCash: (delta: 1 | -1) =>
+    request<{ ok: boolean; cash_count: number }>("/api/driver/route/cash", {
+      method: "PATCH",
+      body: JSON.stringify({ delta }),
+    }),
+
+  routeHistory: () =>
+    request<any[]>("/api/driver/route/history"),
+
   // ── Owner ──
   ownerDashboard: () =>
     request<{
