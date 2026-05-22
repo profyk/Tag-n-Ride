@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { ..., MapPin } from "lucide-react";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, Car, ArrowLeftRight, Wallet,
@@ -30,6 +31,7 @@ const nav = [
 ];
 
 const advancedNav = [
+  { label: "Routes & Trips", href: "/admin/routes", icon: MapPin, permission: "view_analytics" },
   { label: "Compliance & Risk", href: "/admin/compliance", icon: AlertTriangle, permission: "view_audit" },
   { label: "Financial Reports", href: "/admin/reports", icon: TrendingUp, permission: "view_analytics" },
   { label: "Disputes", href: "/admin/disputes", icon: Scale, permission: "manage_users" },
