@@ -75,6 +75,33 @@ export const api = {
       body: JSON.stringify({ amount }),
     }),
 
+  topupInitiate: (amount: number) =>
+    request<{
+      payment_id: string;
+      redirect_url: string;
+      wallet_amount: number;
+      processing_fee: number;
+      charge_amount: number;
+      gateway_fee: number;
+      operations_income: number;
+      processing_fee_pct: number;
+      sandbox: boolean;
+    }>("/api/wallet/topup/initiate", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
+
+  verifyTopup: (payment_id: string) =>
+    request<{
+      payment_id: string;
+      status: string;
+      charge_amount: number;
+      wallet_amount: number;
+      processing_fee: number;
+      balance: number;
+      completed: boolean;
+    }>(`/api/wallet/topup/verify/${payment_id}`),
+
   lookupDriver: (driverId: string) =>
     request<DriverInfo>(`/api/wallet/driver/${driverId}`),
 
