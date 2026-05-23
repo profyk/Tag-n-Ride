@@ -166,6 +166,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // Driver cash-up
+driverCashupStatus: () => request<any>("/api/driver/cashup-status"),
+driverCashupDestination: () => request<any>("/api/driver/cashup-destination"),
+driverCashupV2: (owner_user_id: string) =>
+  request<any>("/api/driver/cashup/v2", { method: "POST", body: JSON.stringify({ owner_user_id }) }),
+driverOutstanding: () => request<any>("/api/driver/outstanding"),
+driverPayOutstanding: (outstanding_id: string) =>
+  request<any>("/api/driver/outstanding/pay", { method: "POST", body: JSON.stringify({ outstanding_id }) }),
+driverCashupHistory: () => request<any[]>("/api/driver/cashup-history"),
+
+// Owner cash-up management
+ownerSetTarget: (driver_user_id: string, daily_target: number) =>
+  request<any>(`/api/owner/drivers/${driver_user_id}/set-target`, { method: "POST", body: JSON.stringify({ daily_target }) }),
+ownerConfirmDriver: (driver_user_id: string) =>
+  request<any>(`/api/owner/drivers/${driver_user_id}/confirm`, { method: "POST" }),
+ownerUnconfirmDriver: (driver_user_id: string) =>
+  request<any>(`/api/owner/drivers/${driver_user_id}/unconfirm`, { method: "POST" }),
+ownerSetCashupMethod: (method: "wallet" | "bank") =>
+  request<any>("/api/owner/cashup-method", { method: "PATCH", body: JSON.stringify({ method }) }),
+ownerSaveBank: (body: { bank_name: string; account_number: string; account_name?: string }) =>
+  request<any>("/api/owner/bank-account", { method: "POST", body: JSON.stringify(body) }),
+ownerGetBank: () => request<any>("/api/owner/bank-account"),
+ownerOutstanding: () => request<any>("/api/owner/outstanding"),
+ownerCancelOutstanding: (outstanding_id: string) =>
+  request<any>(`/api/owner/outstanding/${outstanding_id}/cancel`, { method: "POST" }),
+ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
 
   // ── KYC ──
   submitKyc: async (selfieBase64: string, licenceBase64: string) => {
