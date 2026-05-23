@@ -25,31 +25,37 @@ function formatTime(iso: string) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];
-
-export default function EarningsScreen() {
+const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function EarningsScreen() {
   const { state } = useAuth();
   const [routeData, setRouteData] = useState<any>(null);
+  const [cashupStatus, setCashupStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [startModal, setStartModal] = useState(false);
   const [summaryModal, setSummaryModal] = useState(false);
+  const [cashupModal, setCashupModal] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [selectedFare, setSelectedFare] = useState(0);
   const [customFare, setCustomFare] = useState("");
   const [cashUpdating, setCashUpdating] = useState(false);
+  const [cashingUp, setCashingUp] = useState(false);
+  const [cashupDest, setCashupDest] = useState<any>(null);
   const prevPaymentCount = useRef(0);
 
   if (state.status !== "authed") return null;
 
   const load = useCallback(async () => {
     try {
-      const data = await api.currentRoute();
-      if (data.active && data.app_count > prevPaymentCount.current) {
+      const [routeRes, statusRes] = await Promise.all([
+        api.currentRoute(),
+        api.driverCashupStatus().catch(() => null),
+      ]);
+      if (routeRes.active && routeRes.app_count > prevPaymentCount.current) {
         if (prevPaymentCount.current > 0) Vibration.vibrate(300);
-        prevPaymentCount.current = data.app_count;
+        prevPaymentCount.current = routeRes.app_count;
       }
-      setRouteData(data);
+      setRouteData(routeRes);
+      setCashupStatus(statusRes);
     } catch (e) {}
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -75,27 +81,20 @@ export default function EarningsScreen() {
   };
 
   const handleEndRoute = async () => {
-  if (Platform.OS === "web") {
-    // On web Alert.alert doesn't work — end directly
-    try {
-      const res = await api.endRoute();
-      setSummary(res.summary);
-      setSummaryModal(true);
-      prevPaymentCount.current = 0;
-      load();
-    } catch (e: any) {
-      console.error("End route error:", e);
+    if (Platform.OS === "web") {
+      try {
+        const res = await api.endRoute();
+        setSummary(res.summary);
+        setSummaryModal(true);
+        prevPaymentCount.current = 0;
+        load();
+      } catch (e: any) { console.error(e); }
+      return;
     }
-    return;
-  }
-  Alert.alert(
-    "End Route?",
-    "This will close the current route and show your summary.",
-    [
+    Alert.alert("End Route?", "This will close the current route.", [
       { text: "Cancel", style: "cancel" },
       {
-        text: "End Route",
-        style: "destructive",
+        text: "End Route", style: "destructive",
         onPress: async () => {
           try {
             const res = await api.endRoute();
@@ -103,14 +102,12 @@ export default function EarningsScreen() {
             setSummaryModal(true);
             prevPaymentCount.current = 0;
             load();
-          } catch (e: any) {
-            Alert.alert("Error", e?.message || "Could not end route");
-          }
+          } catch (e: any) { Alert.alert("Error", e?.message || "Could not end route"); }
         },
       },
-    ]
-  );
-};
+    ]);
+  };
+
   const handleCash = async (delta: 1 | -1) => {
     setCashUpdating(true);
     try {
@@ -124,25 +121,99 @@ export default function EarningsScreen() {
     finally { setCashUpdating(false); }
   };
 
+  const handleOpenCashup = async () => {
+    try {
+      const dest = await api.driverCashupDestination();
+      setCashupDest(dest);
+      setCashupModal(true);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not load cashup info");
+    }
+  };
+
+  const handleCashup = async () => {
+    if (!cashupStatus?.owner_user_id) return;
+    setCashingUp(true);
+    try {
+      const res = await api.driverCashupV2(cashupStatus.owner_user_id);
+      setCashupModal(false);
+      const lines = [
+        `Cash-up: ${formatZAR(res.cashup_amount)}`,
+        res.driver_profit > 0 ? `Your profit: ${formatZAR(res.driver_profit)}` : null,
+        res.shortfall > 0 ? `Outstanding: ${formatZAR(res.shortfall)}` : null,
+        `Method: ${res.method === "wallet" ? "Owner wallet (free)" : `Owner bank (-R${res.payout_fee?.toFixed(2)})`}`,
+      ].filter(Boolean).join("\n");
+      Alert.alert("Cash-Up Complete!", lines);
+      load();
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not complete cash-up");
+    } finally { setCashingUp(false); }
+  };
+
   const onRefresh = async () => { setRefreshing(true); await load(); };if (!routeData || !routeData.active) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
-        <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />
-          }>
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
+
           <Text style={styles.pageTitle}>Earnings</Text>
 
           <View style={styles.todayCard}>
             <Text style={styles.todayLabel}>TODAY'S TOTAL</Text>
-            <Text style={styles.todayAmount}>
-              {formatZAR(routeData ? routeData.today_total : 0)}
-            </Text>
-            <Text style={styles.todayCount}>
-              {routeData ? routeData.today_count : 0} passengers paid via app
-            </Text>
+            <Text style={styles.todayAmount}>{formatZAR(routeData ? routeData.today_total : 0)}</Text>
+            <Text style={styles.todayCount}>{routeData ? routeData.today_count : 0} passengers paid via app</Text>
           </View>
+
+          {cashupStatus?.has_owner && (
+            <View style={styles.cashupCard}>
+              <View style={styles.cashupHeader}>
+                <Ionicons name="business-outline" size={20} color="#A064FF" />
+                <Text style={styles.cashupTitle}>Daily Cash-Up</Text>
+                {cashupStatus.is_confirmed && (
+                  <View style={styles.confirmedBadge}>
+                    <Ionicons name="checkmark-circle" size={12} color={colors.green} />
+                    <Text style={styles.confirmedText}>Confirmed</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.cashupOwner}>Owner: {cashupStatus.owner_name}</Text>
+              <View style={styles.cashupStatsRow}>
+                <View style={styles.cashupStat}>
+                  <Text style={styles.cashupStatVal}>{formatZAR(cashupStatus.daily_target)}</Text>
+                  <Text style={styles.cashupStatLabel}>Target</Text>
+                </View>
+                <View style={styles.cashupStat}>
+                  <Text style={[styles.cashupStatVal, { color: colors.green }]}>{formatZAR(cashupStatus.today_earned)}</Text>
+                  <Text style={styles.cashupStatLabel}>Earned</Text>
+                </View>
+                <View style={styles.cashupStat}>
+                  <Text style={[styles.cashupStatVal, { color: cashupStatus.driver_profit > 0 ? colors.cyan : colors.red }]}>
+                    {formatZAR(cashupStatus.driver_profit > 0 ? cashupStatus.driver_profit : cashupStatus.shortfall)}
+                  </Text>
+                  <Text style={styles.cashupStatLabel}>{cashupStatus.driver_profit > 0 ? "Profit" : "Shortfall"}</Text>
+                </View>
+              </View>
+              {cashupStatus.outstanding_balance > 0 && (
+                <View style={styles.outstandingBanner}>
+                  <Ionicons name="warning-outline" size={14} color="#FFD60A" />
+                  <Text style={styles.outstandingText}>Outstanding: {formatZAR(cashupStatus.outstanding_balance)}</Text>
+                </View>
+              )}
+              {!cashupStatus.is_confirmed && (
+                <View style={styles.unconfirmedNote}>
+                  <Ionicons name="information-circle-outline" size={13} color={colors.textMuted} />
+                  <Text style={styles.unconfirmedText}>Owner has not confirmed you yet — using your saved account</Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={[styles.cashupBtn, cashupStatus.today_earned <= 0 && styles.cashupBtnDisabled]}
+                onPress={handleOpenCashup}
+                disabled={cashupStatus.today_earned <= 0}>
+                <Ionicons name="arrow-up-circle" size={18} color={colors.bg} />
+                <Text style={styles.cashupBtnText}>Cash Up {formatZAR(cashupStatus.cashup_amount)} to Owner</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.offDutyCard}>
             <View style={styles.offDutyDot} />
@@ -154,26 +225,20 @@ export default function EarningsScreen() {
             </TouchableOpacity>
           </View>
 
-          {routeData && routeData.last_route && (
+          {routeData?.last_route && (
             <View style={styles.lastRouteCard}>
               <Text style={styles.sectionLabel}>LAST ROUTE</Text>
               <View style={styles.lastRouteRow}>
                 <View style={styles.lastRouteStat}>
-                  <Text style={styles.lastRouteVal}>
-                    {formatZAR(routeData.last_route.total_collected)}
-                  </Text>
+                  <Text style={styles.lastRouteVal}>{formatZAR(routeData.last_route.total_collected)}</Text>
                   <Text style={styles.lastRouteLabel}>Collected</Text>
                 </View>
                 <View style={styles.lastRouteStat}>
-                  <Text style={styles.lastRouteVal}>
-                    {routeData.last_route.total_passengers}
-                  </Text>
+                  <Text style={styles.lastRouteVal}>{routeData.last_route.total_passengers}</Text>
                   <Text style={styles.lastRouteLabel}>Passengers</Text>
                 </View>
                 <View style={styles.lastRouteStat}>
-                  <Text style={styles.lastRouteVal}>
-                    {formatDuration(routeData.last_route.duration_mins)}
-                  </Text>
+                  <Text style={styles.lastRouteVal}>{formatDuration(routeData.last_route.duration_mins)}</Text>
                   <Text style={styles.lastRouteLabel}>Duration</Text>
                 </View>
               </View>
@@ -185,60 +250,42 @@ export default function EarningsScreen() {
           )}
         </ScrollView>
 
-        <Modal visible={startModal} transparent animationType="slide"
-          onRequestClose={() => setStartModal(false)}>
+        <Modal visible={startModal} transparent animationType="slide" onRequestClose={() => setStartModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>Start Route</Text>
-              <Text style={styles.modalSub}>
-                Set the fare so underpaid alerts show correctly (optional)
-              </Text>
+              <Text style={styles.modalSub}>Set fare for underpaid alerts (optional)</Text>
               <Text style={styles.fareLabel}>ROUTE FARE</Text>
               <View style={styles.fareGrid}>
                 {FARE_PRESETS.map(f => (
-                  <TouchableOpacity
-                    key={f}
-                    onPress={() => { setSelectedFare(f); setCustomFare(""); }}
+                  <TouchableOpacity key={f} onPress={() => { setSelectedFare(f); setCustomFare(""); }}
                     style={[styles.fareChip, selectedFare === f && !customFare && styles.fareChipActive]}>
-                    <Text style={[styles.fareChipText, selectedFare === f && !customFare && styles.fareChipTextActive]}>
-                      R{f}
-                    </Text>
+                    <Text style={[styles.fareChipText, selectedFare === f && !customFare && styles.fareChipTextActive]}>R{f}</Text>
                   </TouchableOpacity>
                 ))}
-                <TouchableOpacity
-                  onPress={() => { setSelectedFare(0); setCustomFare(""); }}
+                <TouchableOpacity onPress={() => { setSelectedFare(0); setCustomFare(""); }}
                   style={[styles.fareChip, selectedFare === 0 && !customFare && styles.fareChipActive]}>
-                  <Text style={[styles.fareChipText, selectedFare === 0 && !customFare && styles.fareChipTextActive]}>
-                    No fare
-                  </Text>
+                  <Text style={[styles.fareChipText, selectedFare === 0 && !customFare && styles.fareChipTextActive]}>No fare</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.fareLabel}>OR ENTER CUSTOM FARE (ZAR)</Text>
+              <Text style={styles.fareLabel}>OR ENTER CUSTOM FARE</Text>
               <TextInput
                 style={[styles.customFareInput, customFare ? styles.customFareInputActive : null]}
                 value={customFare}
-                onChangeText={(t) => {
-                  setCustomFare(t.replace(/[^0-9]/g, ""));
-                  setSelectedFare(0);
-                }}
-                placeholder="e.g. 18"
-                placeholderTextColor={colors.textDim}
-                keyboardType="number-pad"
+                onChangeText={(t) => { setCustomFare(t.replace(/[^0-9]/g, "")); setSelectedFare(0); }}
+                placeholder="e.g. 18" placeholderTextColor={colors.textDim} keyboardType="number-pad"
               />
               <View style={styles.modalActions}>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity style={styles.cancelBtn}
-                    onPress={() => { setStartModal(false); setSelectedFare(0); setCustomFare(""); }}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => { setStartModal(false); setSelectedFare(0); setCustomFare(""); }}>
                     <Text style={styles.cancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
                   <TouchableOpacity style={styles.confirmBtn} onPress={handleStartRoute}>
                     <Ionicons name="play-circle" size={18} color={colors.bg} />
-                    <Text style={styles.confirmBtnText}>
-                      {customFare ? `Start · R${customFare}` : selectedFare > 0 ? `Start · R${selectedFare}` : "Start Route"}
-                    </Text>
+                    <Text style={styles.confirmBtnText}>{customFare ? `Start · R${customFare}` : selectedFare > 0 ? `Start · R${selectedFare}` : "Start Route"}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -246,8 +293,7 @@ export default function EarningsScreen() {
           </View>
         </Modal>
 
-        <Modal visible={summaryModal} transparent animationType="slide"
-          onRequestClose={() => setSummaryModal(false)}>
+        <Modal visible={summaryModal} transparent animationType="slide" onRequestClose={() => setSummaryModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
@@ -255,25 +301,19 @@ export default function EarningsScreen() {
               <Text style={styles.modalTitle}>Route Complete!</Text>
               <View style={styles.summaryGrid}>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>
-                    {formatZAR(summary ? summary.total_collected : 0)}
-                  </Text>
-                  <Text style={styles.summaryLabel}>Collected</Text>
+                  <Text style={styles.summaryVal}>{formatZAR(summary ? summary.total_collected : 0)}</Text>
+                  <Text style={styles.summaryStatLabel}>Collected</Text>
                 </View>
                 <View style={styles.summaryStat}>
                   <Text style={styles.summaryVal}>{summary ? summary.total_passengers : 0}</Text>
-                  <Text style={styles.summaryLabel}>Passengers</Text>
+                  <Text style={styles.summaryStatLabel}>Passengers</Text>
                 </View>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>
-                    {formatDuration(summary ? summary.duration_mins : 0)}
-                  </Text>
-                  <Text style={styles.summaryLabel}>Duration</Text>
+                  <Text style={styles.summaryVal}>{formatDuration(summary ? summary.duration_mins : 0)}</Text>
+                  <Text style={styles.summaryStatLabel}>Duration</Text>
                 </View>
               </View>
-              <Text style={styles.summarySub}>
-                {summary ? summary.app_count : 0} app · {summary ? summary.cash_count : 0} cash
-              </Text>
+              <Text style={styles.summarySub}>{summary ? summary.app_count : 0} app · {summary ? summary.cash_count : 0} cash</Text>
               <View style={styles.modalActions}>
                 <View style={{ flex: 1 }}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={() => setSummaryModal(false)}>
@@ -281,8 +321,7 @@ export default function EarningsScreen() {
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity style={styles.confirmBtn}
-                    onPress={() => { setSummaryModal(false); setStartModal(true); }}>
+                  <TouchableOpacity style={styles.confirmBtn} onPress={() => { setSummaryModal(false); setStartModal(true); }}>
                     <Ionicons name="play-circle" size={18} color={colors.bg} />
                     <Text style={styles.confirmBtnText}>New Route</Text>
                   </TouchableOpacity>
@@ -291,17 +330,84 @@ export default function EarningsScreen() {
             </View>
           </View>
         </Modal>
+
+        <Modal visible={cashupModal} transparent animationType="slide" onRequestClose={() => setCashupModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalSheet}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Confirm Cash-Up</Text>
+              {cashupStatus && (
+                <>
+                  <View style={styles.cashupConfirmGrid}>
+                    <View style={styles.cashupConfirmRow}>
+                      <Text style={styles.cashupConfirmLabel}>Today's target</Text>
+                      <Text style={styles.cashupConfirmVal}>{formatZAR(cashupStatus.daily_target)}</Text>
+                    </View>
+                    <View style={styles.cashupConfirmRow}>
+                      <Text style={styles.cashupConfirmLabel}>You earned</Text>
+                      <Text style={[styles.cashupConfirmVal, { color: colors.green }]}>{formatZAR(cashupStatus.today_earned)}</Text>
+                    </View>
+                    <View style={[styles.cashupConfirmRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 4 }]}>
+                      <Text style={styles.cashupConfirmLabel}>Cash-up amount</Text>
+                      <Text style={[styles.cashupConfirmVal, { color: "#A064FF" }]}>{formatZAR(cashupStatus.cashup_amount)}</Text>
+                    </View>
+                    {cashupStatus.driver_profit > 0 && (
+                      <View style={styles.cashupConfirmRow}>
+                        <Text style={styles.cashupConfirmLabel}>Your profit</Text>
+                        <Text style={[styles.cashupConfirmVal, { color: colors.cyan }]}>{formatZAR(cashupStatus.driver_profit)}</Text>
+                      </View>
+                    )}
+                    {cashupStatus.shortfall > 0 && (
+                      <View style={styles.cashupConfirmRow}>
+                        <Text style={[styles.cashupConfirmLabel, { color: colors.red }]}>Shortfall (outstanding)</Text>
+                        <Text style={[styles.cashupConfirmVal, { color: colors.red }]}>{formatZAR(cashupStatus.shortfall)}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {cashupDest && (
+                    <View style={styles.destCard}>
+                      <Text style={styles.destTitle}>GOING TO</Text>
+                      <View style={styles.destRow}>
+                        <Ionicons name={cashupDest.confirmed ? "checkmark-circle" : "warning-outline"} size={16} color={cashupDest.confirmed ? colors.green : "#FFD60A"} />
+                        <Text style={[styles.destText, !cashupDest.confirmed && { color: "#FFD60A" }]}>
+                          {cashupDest.confirmed
+                            ? cashupDest.method === "wallet"
+                              ? `${cashupStatus.owner_name} wallet (free)`
+                              : `${cashupDest.account?.bank_name} (R3.50 fee)`
+                            : cashupDest.account
+                              ? `Your saved: ${cashupDest.account.bank_name} (R3.50 fee)`
+                              : "No account — contact owner"}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              )}
+              <View style={styles.modalActions}>
+                <View style={{ flex: 1 }}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setCashupModal(false)}>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: "#A064FF" }]} onPress={handleCashup} disabled={cashingUp}>
+                    <Ionicons name="arrow-up-circle" size={18} color={colors.bg} />
+                    <Text style={styles.confirmBtnText}>{cashingUp ? "Processing..." : "Confirm"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
-  }const isLongRoute = routeData.duration_mins >= 120;
+        }const isLongRoute = routeData.duration_mins >= 120;
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
-      <ScrollView
-        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />
-        }>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
+
         <Text style={styles.pageTitle}>Earnings</Text>
 
         <View style={styles.activeHeader}>
@@ -319,9 +425,20 @@ export default function EarningsScreen() {
         {isLongRoute && (
           <View style={styles.warningBanner}>
             <Ionicons name="warning-outline" size={16} color="#FFD60A" />
-            <Text style={styles.warningText}>
-              Route running {formatDuration(routeData.duration_mins)} — did you forget to end?
-            </Text>
+            <Text style={styles.warningText}>Route running {formatDuration(routeData.duration_mins)} — did you forget to end?</Text>
+          </View>
+        )}
+
+        {cashupStatus?.has_owner && cashupStatus.daily_target > 0 && (
+          <View style={styles.targetMini}>
+            <Text style={styles.targetMiniLabel}>Target: {formatZAR(cashupStatus.daily_target)}</Text>
+            <View style={styles.targetBar}>
+              <View style={[styles.targetBarFill, {
+                width: `${Math.min(100, (routeData.today_total / cashupStatus.daily_target) * 100)}%` as any,
+                backgroundColor: routeData.today_total >= cashupStatus.daily_target ? colors.green : colors.cyan,
+              }]} />
+            </View>
+            <Text style={styles.targetMiniPct}>{Math.round((routeData.today_total / cashupStatus.daily_target) * 100)}%</Text>
           </View>
         )}
 
@@ -329,15 +446,11 @@ export default function EarningsScreen() {
           <View style={[styles.statCard, { flex: 1.2 }]}>
             <Text style={styles.statCardLabel}>COLLECTED</Text>
             <Text style={styles.statCardVal}>{formatZAR(routeData.total_collected)}</Text>
-            {routeData.fare > 0 && (
-              <Text style={styles.statCardSub}>R{routeData.fare} fare</Text>
-            )}
+            {routeData.fare > 0 && <Text style={styles.statCardSub}>R{routeData.fare} fare</Text>}
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statCardLabel}>PASSENGERS</Text>
-            <Text style={[styles.statCardVal, { color: colors.cyan }]}>
-              {routeData.total_passengers}
-            </Text>
+            <Text style={[styles.statCardVal, { color: colors.cyan }]}>{routeData.total_passengers}</Text>
             <Text style={styles.statCardSub}>{routeData.app_count} app</Text>
           </View>
         </View>
@@ -351,12 +464,9 @@ export default function EarningsScreen() {
             </View>
           </View>
           <View style={styles.cashCounter}>
-            <TouchableOpacity
-              style={[styles.cashBtn, routeData.cash_count === 0 && styles.cashBtnDisabled]}
-              onPress={() => handleCash(-1)}
-              disabled={cashUpdating || routeData.cash_count === 0}>
-              <Ionicons name="remove" size={20}
-                color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
+            <TouchableOpacity style={[styles.cashBtn, routeData.cash_count === 0 && styles.cashBtnDisabled]}
+              onPress={() => handleCash(-1)} disabled={cashUpdating || routeData.cash_count === 0}>
+              <Ionicons name="remove" size={20} color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
             </TouchableOpacity>
             <Text style={styles.cashCount}>{routeData.cash_count}</Text>
             <TouchableOpacity style={styles.cashBtn} onPress={() => handleCash(1)} disabled={cashUpdating}>
@@ -371,49 +481,28 @@ export default function EarningsScreen() {
           <Text style={styles.todayMiniCount}>{routeData.today_count} passengers</Text>
         </View>
 
-        <Text style={styles.sectionLabel}>
-          APP PAYMENTS THIS ROUTE ({routeData.app_count})
-        </Text>
+        <Text style={styles.sectionLabel}>APP PAYMENTS THIS ROUTE ({routeData.app_count})</Text>
 
         {routeData.payments.length === 0 ? (
           <View style={styles.emptyFeed}>
             <Ionicons name="time-outline" size={32} color={colors.textDim} />
             <Text style={styles.emptyFeedText}>Waiting for payments...</Text>
-            <Text style={styles.emptyFeedSub}>
-              Passengers scan your QR to pay · auto-refreshes every 10s
-            </Text>
+            <Text style={styles.emptyFeedSub}>Passengers scan your QR · auto-refreshes every 10s</Text>
           </View>
         ) : (
           routeData.payments.map((p: any, i: number) => (
-            <View key={p.id} style={[
-              styles.paymentCard,
-              i === 0 && styles.paymentCardNew,
-              p.underpaid && styles.paymentCardWarn,
-            ]}>
-              <View style={[styles.paymentIcon,
-                { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim }]}>
-                <Ionicons
-                  name={p.underpaid ? "warning" : "checkmark-circle"}
-                  size={22}
-                  color={p.underpaid ? "#FFD60A" : colors.green}
-                />
+            <View key={p.id} style={[styles.paymentCard, i === 0 && styles.paymentCardNew, p.underpaid && styles.paymentCardWarn]}>
+              <View style={[styles.paymentIcon, { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim }]}>
+                <Ionicons name={p.underpaid ? "warning" : "checkmark-circle"} size={22} color={p.underpaid ? "#FFD60A" : colors.green} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.paymentAmount, p.underpaid && { color: "#FFD60A" }]}>
                   {formatZAR(p.driver_net)}
-                  {p.underpaid && routeData.fare > 0 && (
-                    <Text style={styles.underpaidTag}>
-                      {" "}minus{formatZAR(routeData.fare - p.amount)}
-                    </Text>
-                  )}
+                  {p.underpaid && routeData.fare > 0 && <Text style={styles.underpaidTag}> -{formatZAR(routeData.fare - p.amount)}</Text>}
                 </Text>
                 <Text style={styles.paymentTime}>{formatTime(p.created_at)}</Text>
               </View>
-              {p.underpaid && (
-                <View style={styles.underpaidBadge}>
-                  <Text style={styles.underpaidBadgeText}>Underpaid</Text>
-                </View>
-              )}
+              {p.underpaid && <View style={styles.underpaidBadge}><Text style={styles.underpaidBadgeText}>Underpaid</Text></View>}
             </View>
           ))
         )}
@@ -428,6 +517,23 @@ export default function EarningsScreen() {
   todayLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
   todayAmount: { color: colors.green, fontSize: 36, fontWeight: "900", marginTop: 4 },
   todayCount: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  cashupCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: "#A064FF44", padding: 16, marginBottom: 16 },
+  cashupHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
+  cashupTitle: { color: colors.text, fontWeight: "800", fontSize: 15, flex: 1 },
+  confirmedBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.greenDim, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  confirmedText: { color: colors.green, fontSize: 10, fontWeight: "700" },
+  cashupOwner: { color: colors.textMuted, fontSize: 12, marginBottom: 12 },
+  cashupStatsRow: { flexDirection: "row", marginBottom: 12 },
+  cashupStat: { flex: 1, alignItems: "center" },
+  cashupStatVal: { color: colors.text, fontWeight: "800", fontSize: 16 },
+  cashupStatLabel: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  outstandingBanner: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFD60A11", borderRadius: radius.sm, padding: 8, marginBottom: 8, borderWidth: 1, borderColor: "#FFD60A33" },
+  outstandingText: { color: "#FFD60A", fontSize: 12, fontWeight: "700" },
+  unconfirmedNote: { flexDirection: "row", alignItems: "center", gap: 6, padding: 8, backgroundColor: colors.bg3, borderRadius: radius.sm, marginBottom: 8 },
+  unconfirmedText: { color: colors.textMuted, fontSize: 11, flex: 1 },
+  cashupBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#A064FF", borderRadius: radius.md, paddingVertical: 14 },
+  cashupBtnDisabled: { backgroundColor: colors.bg3, borderWidth: 1, borderColor: colors.border },
+  cashupBtnText: { color: colors.bg, fontWeight: "800", fontSize: 15 },
   offDutyCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 32, alignItems: "center", marginBottom: 16, gap: 8 },
   offDutyDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.textDim },
   offDutyTitle: { color: colors.textMuted, fontSize: 13, fontWeight: "800", letterSpacing: 2 },
@@ -449,6 +555,11 @@ export default function EarningsScreen() {
   endBtnText: { color: "#fff", fontWeight: "800", fontSize: 13 },
   warningBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFD60A22", borderRadius: radius.sm, borderWidth: 1, borderColor: "#FFD60A44", padding: 10, marginBottom: 8 },
   warningText: { color: "#FFD60A", fontSize: 12, fontWeight: "600", flex: 1 },
+  targetMini: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 10, marginBottom: 10 },
+  targetMiniLabel: { color: colors.textMuted, fontSize: 11, minWidth: 100 },
+  targetBar: { flex: 1, height: 6, backgroundColor: colors.bg3, borderRadius: 3, overflow: "hidden" },
+  targetBarFill: { height: 6, borderRadius: 3 },
+  targetMiniPct: { color: colors.textMuted, fontSize: 11, minWidth: 35, textAlign: "right" },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
   statCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, alignItems: "center" },
   statCardLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.2, marginBottom: 4 },
@@ -500,6 +611,14 @@ export default function EarningsScreen() {
   summaryGrid: { flexDirection: "row", marginVertical: 20 },
   summaryStat: { flex: 1, alignItems: "center" },
   summaryVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
-  summaryLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
+  summaryStatLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
   summarySub: { color: colors.textDim, fontSize: 12, textAlign: "center", marginBottom: 20 },
+  cashupConfirmGrid: { backgroundColor: colors.bg, borderRadius: radius.md, padding: 14, marginVertical: 16, gap: 8 },
+  cashupConfirmRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  cashupConfirmLabel: { color: colors.textMuted, fontSize: 13 },
+  cashupConfirmVal: { color: colors.text, fontWeight: "800", fontSize: 15 },
+  destCard: { backgroundColor: colors.bg, borderRadius: radius.md, padding: 12, marginBottom: 16 },
+  destTitle: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.2, marginBottom: 8 },
+  destRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  destText: { color: colors.textMuted, fontSize: 13, flex: 1 },
 });
