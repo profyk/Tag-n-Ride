@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Button, Spinner, Input } from "@/components/ui";
-import { isSuperAdmin } from "@/lib/api";
-import { Save, Settings } from "lucide-react";
+import { isSuperAdmin, hasPermission } from "@/lib/api";
+import { Save, Settings, Lock } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
@@ -13,23 +13,43 @@ const authHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
 });
 
+const CEO_ONLY_KEYS = [
+  "topup_processing_fee_percent",
+  "topup_gateway_fee_percent",
+  "topup_gateway_fee_fixed",
+  "platform_fee_percent",
+];
+
 const CONFIG_GROUPS = [
   {
-  label: "Withdrawal Settings",
-  keys: ["auto_approve_withdrawal_limit"],
-  descriptions: {
-    auto_approve_withdrawal_limit: "Auto-approve withdrawals below this amount in ZAR (set to 0 to disable)",
+    label: "Top-Up Processing Fees",
+    ceoOnly: true,
+    keys: ["topup_processing_fee_percent", "topup_gateway_fee_percent", "topup_gateway_fee_fixed"],
+    descriptions: {
+      topup_processing_fee_percent: "Fee % charged to user on top-up. e.g. 6.0 means user pays R106 to add R100",
+      topup_gateway_fee_percent: "Actual PayFast gateway fee %. Used to calculate operations income e.g. 4.9",
+      topup_gateway_fee_fixed: "PayFast fixed fee per transaction in ZAR e.g. 1.00",
+    },
   },
-},
   {
     label: "Platform Fees",
+    ceoOnly: true,
     keys: ["platform_fee_percent"],
     descriptions: {
-      platform_fee_percent: "Percentage fee on every payment (e.g. 3.0 = 3%)",
+      platform_fee_percent: "Percentage fee on every ride payment e.g. 3.0 = 3%",
+    },
+  },
+  {
+    label: "Withdrawal Settings",
+    ceoOnly: false,
+    keys: ["auto_approve_withdrawal_limit"],
+    descriptions: {
+      auto_approve_withdrawal_limit: "Auto-approve withdrawals below this amount in ZAR. Set to 0 to disable",
     },
   },
   {
     label: "Transaction Limits",
+    ceoOnly: false,
     keys: ["min_transfer_amount", "max_transfer_amount", "topup_max_amount"],
     descriptions: {
       min_transfer_amount: "Minimum payment amount in ZAR",
@@ -39,6 +59,7 @@ const CONFIG_GROUPS = [
   },
   {
     label: "Withdrawal Limits",
+    ceoOnly: false,
     keys: ["min_withdrawal_amount", "max_withdrawal_amount", "withdrawal_daily_limit"],
     descriptions: {
       min_withdrawal_amount: "Minimum withdrawal amount in ZAR",
@@ -48,6 +69,7 @@ const CONFIG_GROUPS = [
   },
   {
     label: "App Settings",
+    ceoOnly: false,
     keys: ["maintenance_mode", "kyc_required_for_payments", "app_version_android", "app_version_ios"],
     descriptions: {
       maintenance_mode: "Set to true to put app in maintenance mode",
@@ -58,9 +80,10 @@ const CONFIG_GROUPS = [
   },
   {
     label: "Support Contact",
+    ceoOnly: false,
     keys: ["support_whatsapp", "support_email"],
     descriptions: {
-      support_whatsapp: "Support WhatsApp number (digits only, no +)",
+      support_whatsapp: "Support WhatsApp number digits only no +",
       support_email: "Support email address",
     },
   },
@@ -69,6 +92,7 @@ const CONFIG_GROUPS = [
 export default function SettingsPage() {
   const router = useRouter();
   const superAdmin = isSuperAdmin();
+  const isCeoOrSuper = superAdmin || hasPermission("edit_fees");
   const [config, setConfig] = useState<Record<string, string>>({});
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -86,6 +110,10 @@ export default function SettingsPage() {
   }, []);
 
   const handleSave = async (key: string) => {
+    if (CEO_ONLY_KEYS.includes(key) && !isCeoOrSuper) {
+      toast.error("Only CEO or Superadmin can edit fee settings");
+      return;
+    }
     setSaving(key);
     try {
       await fetch(`${BASE}/api/admin/config/${key}`, {
@@ -99,6 +127,8 @@ export default function SettingsPage() {
   };
 
   const hasChanged = (key: string) => edited[key] !== config[key];
+  const canEdit = (key: string) => CEO_ONLY_KEYS.includes(key) ? isCeoOrSuper : superAdmin;
+
   if (!superAdmin) return null;
 
   return (
@@ -109,43 +139,60 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2 p-4 bg-yellow/10 border border-yellow/20 rounded-xl">
               <Settings size={16} className="text-yellow" />
               <p className="text-yellow text-sm font-medium">
-                Changes take effect immediately. Superadmin only.
+                Changes take effect immediately. Fee settings require CEO or Superadmin.
               </p>
             </div>
 
             {CONFIG_GROUPS.map(group => (
               <Card key={group.label}>
-                <h2 className="text-text font-bold mb-4">{group.label}</h2>
-                <div className="space-y-5">
-                  {group.keys.map(key => (
-                    <div key={key}>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest">
-                          {key.replace(/_/g, " ")}
-                        </label>
-                        {hasChanged(key) && (
-                          <span className="text-[10px] text-yellow font-bold">UNSAVED</span>
-                        )}
-                      </div>
-                      <p className="text-textDim text-xs mb-2">
-                        {(group.descriptions as any)[key]}
-                      </p>
-                      <div className="flex gap-2">
-                        <Input
-                          value={edited[key] || ""}
-                          onChange={(e) => setEdited(prev => ({ ...prev, [key]: e.target.value }))}
-                          className={hasChanged(key) ? "border-yellow/50" : ""}
-                        />
-                        <Button
-                          onClick={() => handleSave(key)}
-                          loading={saving === key}
-                          disabled={!hasChanged(key)}
-                          variant={hasChanged(key) ? "primary" : "secondary"}>
-                          <Save size={13} /> Save
-                        </Button>
-                      </div>
+                <div className="flex items-center gap-2 mb-4">
+                  <h2 className="text-text font-bold">{group.label}</h2>
+                  {group.ceoOnly && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-purple/10 border border-purple/20 rounded-full">
+                      <Lock size={10} className="text-purple" />
+                      <span className="text-[10px] font-bold text-purple">CEO ONLY</span>
                     </div>
-                  ))}
+                  )}
+                </div>
+                <div className="space-y-5">
+                  {group.keys.map(key => {
+                    const editable = canEdit(key);
+                    return (
+                      <div key={key}>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest">
+                            {key.replace(/_/g, " ")}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            {!editable && (
+                              <span className="text-[10px] text-purple font-bold flex items-center gap-1">
+                                <Lock size={9} /> CEO ONLY
+                              </span>
+                            )}
+                            {hasChanged(key) && editable && (
+                              <span className="text-[10px] text-yellow font-bold">UNSAVED</span>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-textDim text-xs mb-2">{(group.descriptions as any)[key]}</p>
+                        <div className="flex gap-2">
+                          <Input
+                            value={edited[key] || ""}
+                            onChange={(e) => { if (editable) setEdited(prev => ({ ...prev, [key]: e.target.value })); }}
+                            disabled={!editable}
+                            className={hasChanged(key) && editable ? "border-yellow/50" : ""}
+                          />
+                          <Button
+                            onClick={() => handleSave(key)}
+                            loading={saving === key}
+                            disabled={!hasChanged(key) || !editable}
+                            variant={hasChanged(key) && editable ? "primary" : "secondary"}>
+                            <Save size={13} /> Save
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </Card>
             ))}
