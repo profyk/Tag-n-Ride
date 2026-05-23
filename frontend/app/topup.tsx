@@ -1,17 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TextInput,
+  View, Text, StyleSheet, ScrollView,
   TouchableOpacity, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Linking,
+  ActivityIndicator, Linking, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "../../src/api";
-import { colors, radius, formatZAR } from "../../src/theme";
+import { api } from "../src/api";
+import { colors, radius, formatZAR } from "../src/theme";
 
 const QUICK_AMOUNTS = [50, 100, 200, 500, 1000];
-
 type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export default function TopUpScreen() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("amount");
@@ -86,13 +85,14 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
     } finally {
       setLoading(false);
     }
-  };const amt = parseFloat(amount) || 0;
-  const isValid = amt >= 10;
+  };
 
-  if (step === "amount") {
+  const amt = parseFloat(amount) || 0;
+  const isValid = amt >= 10;if (step === "amount") {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <KeyboardAvoidingView style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
             <View style={styles.headerRow}>
               <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -119,7 +119,9 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
                   key={q}
                   style={[styles.quickBtn, amount === String(q) && styles.quickBtnActive]}
                   onPress={() => setAmount(String(q))}>
-                  <Text style={[styles.quickText, amount === String(q) && styles.quickTextActive]}>R{q}</Text>
+                  <Text style={[styles.quickText, amount === String(q) && styles.quickTextActive]}>
+                    R{q}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -127,7 +129,9 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
             {amt >= 10 && (
               <View style={styles.miniFeeNote}>
                 <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
-                <Text style={styles.miniFeeText}>A small processing fee will be added. Tap Continue to see full breakdown.</Text>
+                <Text style={styles.miniFeeText}>
+                  A small processing fee will be added. Tap Continue to see full breakdown.
+                </Text>
               </View>
             )}
 
@@ -155,30 +159,22 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
             </TouchableOpacity>
 
             <View style={styles.paymentMethods}>
-              <Text style={styles.paymentMethodsLabel}>PAYMENT METHODS</Text>
+              <Text style={styles.paymentMethodsLabel}>PAY WITH YOUR BANK</Text>
               <View style={styles.methodRow}>
-                <View style={styles.methodBadge}>
-                  <Ionicons name="card-outline" size={16} color={colors.cyan} />
-                  <Text style={styles.methodText}>Visa / Mastercard</Text>
-                </View>
-                <View style={styles.methodBadge}>
-                  <Ionicons name="phone-portrait-outline" size={16} color={colors.cyan} />
-                  <Text style={styles.methodText}>Instant EFT</Text>
-                </View>
-                <View style={styles.methodBadge}>
-                  <Ionicons name="qr-code-outline" size={16} color={colors.cyan} />
-                  <Text style={styles.methodText}>SnapScan</Text>
-                </View>
+                {["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank"].map(bank => (
+                  <View key={bank} style={styles.methodBadge}>
+                    <Ionicons name="phone-portrait-outline" size={14} color={colors.cyan} />
+                    <Text style={styles.methodText}>{bank}</Text>
+                  </View>
+                ))}
               </View>
-              <Text style={styles.poweredBy}>Powered by PayFast · Secured by SSL</Text>
+              <Text style={styles.poweredBy}>Powered by Stitch · Instant EFT · Secured by SSL</Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     );
-  }
-
-  if (step === "breakdown" && breakdown) {
+                }if (step === "breakdown" && breakdown) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
@@ -222,7 +218,7 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
             <View style={styles.feeExplainRow}>
               <View style={[styles.feeExplainDot, { backgroundColor: "#FF6B6B" }]} />
               <Text style={styles.feeExplainText}>
-                Gateway fee approx {formatZAR(breakdown.gateway_fee)} goes to PayFast
+                Gateway fee approx {formatZAR(breakdown.gateway_fee)} goes to Stitch
               </Text>
             </View>
             <View style={styles.feeExplainRow}>
@@ -236,24 +232,26 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
           {breakdown.sandbox && (
             <View style={styles.sandboxNote}>
               <Ionicons name="flask-outline" size={14} color="#FFD60A" />
-              <Text style={styles.sandboxText}>Test mode — no real money will be charged</Text>
+              <Text style={styles.sandboxText}>
+                Sandbox mode — tap Pay then tap "I have paid" to simulate a successful payment
+              </Text>
             </View>
           )}
 
           <TouchableOpacity style={styles.payBtn} onPress={handleProceedToPayment}>
             <Ionicons name="lock-closed" size={18} color={colors.bg} />
-            <Text style={styles.payBtnText}>Pay {formatZAR(breakdown.charge_amount)} via PayFast</Text>
+            <Text style={styles.payBtnText}>
+              Pay {formatZAR(breakdown.charge_amount)} via Stitch
+            </Text>
           </TouchableOpacity>
 
           <Text style={styles.redirectNote}>
-            You will be redirected to PayFast secure payment page. Return here after payment.
+            You will be redirected to Stitch — select your bank and authorise the payment instantly.
           </Text>
         </ScrollView>
       </SafeAreaView>
     );
-  }
-
-  if (step === "processing") {
+  }if (step === "processing") {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
         <View style={styles.centeredScreen}>
@@ -262,7 +260,7 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
           </View>
           <Text style={styles.processingTitle}>Waiting for payment...</Text>
           <Text style={styles.processingSubtitle}>
-            Complete your payment on the PayFast page.{"\n"}This screen updates automatically.
+            Complete your payment on the Stitch page.{"\n"}This screen updates automatically.
           </Text>
           <View style={styles.processingSteps}>
             <View style={styles.processingStep}>
@@ -271,17 +269,19 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
             </View>
             <View style={styles.processingStep}>
               <ActivityIndicator size="small" color={colors.cyan} />
-              <Text style={styles.processingStepText}>Waiting for PayFast confirmation...</Text>
+              <Text style={styles.processingStepText}>Waiting for Stitch confirmation...</Text>
             </View>
             <View style={styles.processingStep}>
               <Ionicons name="ellipse-outline" size={18} color={colors.textDim} />
-              <Text style={[styles.processingStepText, { color: colors.textDim }]}>Wallet will be credited</Text>
+              <Text style={[styles.processingStepText, { color: colors.textDim }]}>
+                Wallet will be credited
+              </Text>
             </View>
           </View>
           <TouchableOpacity style={styles.verifyBtn} onPress={handleManualVerify} disabled={loading}>
-            {loading ? <ActivityIndicator color={colors.cyan} /> : (
-              <Text style={styles.verifyBtnText}>I have paid — check now</Text>
-            )}
+            {loading
+              ? <ActivityIndicator color={colors.cyan} />
+              : <Text style={styles.verifyBtnText}>I have paid — check now</Text>}
           </TouchableOpacity>
           <TouchableOpacity style={styles.cancelLink}
             onPress={() => { if (pollRef.current) clearInterval(pollRef.current); setStep("amount"); }}>
@@ -343,7 +343,7 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
   }
 
   return null;
-                    }const styles = StyleSheet.create({
+}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 24 },
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
@@ -388,7 +388,7 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
   feeExplainDot: { width: 8, height: 8, borderRadius: 4 },
   feeExplainText: { color: colors.textMuted, fontSize: 13 },
   sandboxNote: { flexDirection: "row", alignItems: "center", gap: 6, padding: 10, backgroundColor: "#FFD60A22", borderRadius: radius.sm, borderWidth: 1, borderColor: "#FFD60A44", marginBottom: 16 },
-  sandboxText: { color: "#FFD60A", fontSize: 12, fontWeight: "600" },
+  sandboxText: { color: "#FFD60A", fontSize: 12, fontWeight: "600", flex: 1 },
   payBtn: { backgroundColor: colors.cyan, borderRadius: radius.md, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 12 },
   payBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
   redirectNote: { color: colors.textDim, fontSize: 12, textAlign: "center", lineHeight: 18 },
