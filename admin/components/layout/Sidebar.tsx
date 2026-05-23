@@ -1,13 +1,12 @@
 "use client";
 import Link from "next/link";
-import { ..., MapPin } from "lucide-react";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, Car, ArrowLeftRight, Wallet,
   BarChart3, CreditCard, LogOut, Shield, ShieldCheck,
   FileText, HelpCircle, Fingerprint, Monitor, Bell,
   AlertTriangle, TrendingUp, Activity, Settings, UserCheck,
-  Users2, Truck, Scale,
+  Users2, Truck, Scale, MapPin, BookOpen,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -32,6 +31,7 @@ const nav = [
 
 const advancedNav = [
   { label: "Routes & Trips", href: "/admin/routes", icon: MapPin, permission: "view_analytics" },
+  { label: "Ledger", href: "/admin/ledger", icon: BookOpen, permission: "view_ledger" },
   { label: "Compliance & Risk", href: "/admin/compliance", icon: AlertTriangle, permission: "view_audit" },
   { label: "Financial Reports", href: "/admin/reports", icon: TrendingUp, permission: "view_analytics" },
   { label: "Disputes", href: "/admin/disputes", icon: Scale, permission: "manage_users" },
@@ -56,15 +56,10 @@ export function Sidebar() {
 
   const handleSignOut = async () => {
     try {
-      await fetch(
-        "https://tag-n-ride-production.up.railway.app/api/auth/admin-logout",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
-          },
-        }
-      );
+      await fetch("https://tag-n-ride-production.up.railway.app/api/auth/admin-logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}` },
+      });
     } catch {}
     clearToken();
     window.location.href = "/login";
@@ -75,28 +70,19 @@ export function Sidebar() {
     return hasPermission(permission);
   });
 
-  const visibleAdvanced = advancedNav.filter(({ permission }) => {
-    return hasPermission(permission);
-  });
+  const visibleAdvanced = advancedNav.filter(({ permission }) => hasPermission(permission));
 
   const NavLink = ({ href, icon: Icon, label, purple = false }: {
-    href: string;
-    icon: any;
-    label: string;
-    purple?: boolean;
+    href: string; icon: any; label: string; purple?: boolean;
   }) => {
     const active = path === href || path.startsWith(href + "/");
     return (
-      <Link
-        href={href}
-        className={cn(
-          "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-          active
-            ? purple
-              ? "bg-purple/10 text-purple border border-purple/20"
-              : "bg-cyanDim text-cyan border border-cyan/20"
-            : "text-textMuted hover:text-text hover:bg-bg3"
-        )}>
+      <Link href={href} className={cn(
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+        active
+          ? purple ? "bg-purple/10 text-purple border border-purple/20" : "bg-cyanDim text-cyan border border-cyan/20"
+          : "text-textMuted hover:text-text hover:bg-bg3"
+      )}>
         <Icon size={15} />
         {label}
       </Link>
@@ -105,7 +91,6 @@ export function Sidebar() {
 
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-bg2 border-r border-border flex flex-col z-40">
-      {/* Logo */}
       <div className="px-4 py-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-cyanDim border border-cyan/30 flex items-center justify-center">
@@ -113,42 +98,29 @@ export function Sidebar() {
           </div>
           <div>
             <p className="text-text font-extrabold text-sm leading-none">Tag n Ride</p>
-            <p className="text-textMuted text-[10px] mt-0.5 font-medium">
-              {ROLE_LABELS[role] || "Admin"} Panel
-            </p>
+            <p className="text-textMuted text-[10px] mt-0.5 font-medium">{ROLE_LABELS[role] || "Admin"} Panel</p>
           </div>
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-
-        {/* Core pages */}
         {visibleNav.map(({ label, href, icon }) => (
           <NavLink key={href} href={href} icon={icon} label={label} />
         ))}
-
-        {/* Advanced section */}
         {visibleAdvanced.length > 0 && (
           <>
             <div className="pt-4 pb-1.5">
-              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">
-                Advanced
-              </p>
+              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">Advanced</p>
             </div>
             {visibleAdvanced.map(({ label, href, icon }) => (
               <NavLink key={href} href={href} icon={icon} label={label} />
             ))}
           </>
         )}
-
-        {/* Superadmin section */}
         {superAdmin && (
           <>
             <div className="pt-4 pb-1.5">
-              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">
-                Superadmin
-              </p>
+              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">Superadmin</p>
             </div>
             {superAdminNav.map(({ label, href, icon }) => (
               <NavLink key={href} href={href} icon={icon} label={label} purple />
@@ -157,10 +129,8 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Sign out */}
       <div className="px-3 py-3 border-t border-border">
-        <button
-          onClick={handleSignOut}
+        <button onClick={handleSignOut}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-textMuted hover:text-red hover:bg-red/10 w-full transition-all">
           <LogOut size={15} />
           Sign out
@@ -168,4 +138,4 @@ export function Sidebar() {
       </div>
     </aside>
   );
-      }
+}
