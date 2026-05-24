@@ -4357,8 +4357,8 @@ async def admin_ledger_reverse_safe(
             "amount": float(original["amount"]), "reason": body.reason,
         }, request.client.host)
     return {"ok": True, "reversal_id": reversal_id, "new_balance": new_balance}
-    
-    @api.post("/system/reconcile-nightly")
+
+@api.post("/system/reconcile-nightly")
 async def nightly_reconcile(request: Request):
     """Called by cron-job.org every night at 02:00 SAST. No auth needed — IP restricted."""
     # Basic security — check secret key
