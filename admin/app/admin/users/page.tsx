@@ -123,7 +123,9 @@ export default function UsersPage() {
                       </span>
                     )}
                   </div>
-                  {u.flagged && <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>}
+                  {u.flagged && (
+                    <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>
+                  )}
                 </Td>
                 <Td className="font-mono text-xs text-textMuted">{u.phone_number}</Td>
                 <Td>
@@ -154,10 +156,7 @@ export default function UsersPage() {
                       </Button>
                     )}
                     {canManageTest && (
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleToggleTest(u)}
-                        title={u.is_test ? "Unmark as test account" : "Mark as test account"}>
+                      <Button variant="ghost" onClick={() => handleToggleTest(u)}>
                         <FlaskConical size={12} />
                         {u.is_test ? "Unmark" : "Test"}
                       </Button>
@@ -182,7 +181,9 @@ export default function UsersPage() {
           <Input placeholder="Reason for flagging..." value={flagReason}
             onChange={(e) => setFlagReason(e.target.value)} />
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" onClick={() => { setFlagModal(null); setFlagReason(""); }}>Cancel</Button>
+            <Button variant="secondary" onClick={() => { setFlagModal(null); setFlagReason(""); }}>
+              Cancel
+            </Button>
             <Button variant="danger" onClick={handleFlag}>Flag Account</Button>
           </div>
         </div>
@@ -195,7 +196,9 @@ export default function UsersPage() {
             They should change it immediately.
           </p>
           <div className="bg-bg border border-border rounded-lg p-4 text-center">
-            <span className="text-cyan font-mono text-3xl font-black tracking-widest">{pinModal?.pin}</span>
+            <span className="text-cyan font-mono text-3xl font-black tracking-widest">
+              {pinModal?.pin}
+            </span>
           </div>
           <p className="text-xs text-red text-center">This PIN is shown once. Save it now.</p>
           <Button className="w-full justify-center" onClick={() => setPinModal(null)}>Done</Button>
