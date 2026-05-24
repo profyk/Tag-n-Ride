@@ -6,7 +6,7 @@ import {
   BarChart3, CreditCard, LogOut, Shield, ShieldCheck,
   FileText, HelpCircle, Fingerprint, Monitor, Bell,
   AlertTriangle, TrendingUp, Activity, Settings, UserCheck,
-  Users2, Truck, Scale, MapPin, BookOpen,
+  Users2, Truck, Scale, MapPin, BookOpen, Terminal,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,7 @@ const superAdminNav = [
   { label: "Admin Accounts", href: "/admin/admins", icon: Shield },
   { label: "Sessions", href: "/admin/sessions", icon: Monitor },
   { label: "Settings", href: "/admin/settings", icon: Settings },
+  { label: "System Console", href: "/admin/console", icon: Terminal },
   { label: "Superadmin", href: "/admin/superadmin", icon: ShieldCheck },
 ];
 
