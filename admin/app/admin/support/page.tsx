@@ -46,7 +46,7 @@ function InfoRow({ label, value, copy }: { label: string; value: string; copy?: 
   );
 }
 
-const TXN_TONE: Record<string, string> = {
+const TXN_TONE: Record<string, any> = {
   topup: "cyan", payment: "green", withdrawal: "purple",
   cashup: "yellow", refund: "green", failed: "red",
 };export default function SupportPage() {
@@ -164,11 +164,11 @@ const TXN_TONE: Record<string, string> = {
   };
 
   const TABS = [
-    { key: "overview",      label: "Overview",      icon: User },
-    { key: "transactions",  label: `Transactions${result?.recent_transactions?.length ? ` (${result.recent_transactions.length})` : ""}`, icon: ArrowLeftRight },
-    { key: "withdrawals",   label: "Withdrawals",   icon: Wallet },
-    { key: "audit",         label: "Audit Trail",   icon: FileText },
-    { key: "notes",         label: "Notes",         icon: Bell },
+    { key: "overview",     label: "Overview",     icon: User },
+    { key: "transactions", label: `Transactions${result?.recent_transactions?.length ? ` (${result.recent_transactions.length})` : ""}`, icon: ArrowLeftRight },
+    { key: "withdrawals",  label: "Withdrawals",  icon: Wallet },
+    { key: "audit",        label: "Audit Trail",  icon: FileText },
+    { key: "notes",        label: "Notes",        icon: Bell },
   ];return (
     <AdminShell title="Support">
       <div className="space-y-5 max-w-3xl">
@@ -176,13 +176,10 @@ const TXN_TONE: Record<string, string> = {
         <div className="flex gap-3">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
+            <input value={query} onChange={e => setQuery(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSearch()}
               placeholder="Search by phone number, name, or user ID..."
-              className="w-full bg-bg2 border border-border rounded-xl pl-9 pr-4 py-3 text-text text-sm focus:outline-none focus:border-cyan placeholder:text-textDim"
-            />
+              className="w-full bg-bg2 border border-border rounded-xl pl-9 pr-4 py-3 text-text text-sm focus:outline-none focus:border-cyan placeholder:text-textDim" />
           </div>
           <button onClick={handleSearch} disabled={loading || !query.trim()}
             className="flex items-center gap-2 px-5 py-3 bg-cyan text-bg rounded-xl text-sm font-bold hover:bg-cyan/90 transition-colors disabled:opacity-50">
@@ -248,9 +245,10 @@ const TXN_TONE: Record<string, string> = {
                     className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors disabled:opacity-50 ${
                       result.wallet?.is_frozen
                         ? "bg-green/10 border-green/20 text-green hover:bg-green/20"
-                        : "bg-cyan/10 border-cyan/20 text-cyan hover:bg-cyan/20"
-                    }`}>
-                    {result.wallet?.is_frozen ? <><Unlock size={12} /> Unfreeze Wallet</> : <><Snowflake size={12} /> Freeze Wallet</>}
+                        : "bg-cyan/10 border-cyan/20 text-cyan hover:bg-cyan/20"}`}>
+                    {result.wallet?.is_frozen
+                      ? <><Unlock size={12} /> Unfreeze Wallet</>
+                      : <><Snowflake size={12} /> Freeze Wallet</>}
                   </button>
                 )}
                 {canManage && (
@@ -258,9 +256,10 @@ const TXN_TONE: Record<string, string> = {
                     className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors disabled:opacity-50 ${
                       !result.user.is_active
                         ? "bg-green/10 border-green/20 text-green hover:bg-green/20"
-                        : "bg-red/10 border-red/20 text-red hover:bg-red/20"
-                    }`}>
-                    {!result.user.is_active ? <><CheckCircle size={12} /> Unblock User</> : <><XCircle size={12} /> Block User</>}
+                        : "bg-red/10 border-red/20 text-red hover:bg-red/20"}`}>
+                    {!result.user.is_active
+                      ? <><CheckCircle size={12} /> Unblock User</>
+                      : <><XCircle size={12} /> Block User</>}
                   </button>
                 )}
                 {canManage && (
@@ -268,8 +267,7 @@ const TXN_TONE: Record<string, string> = {
                     className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors disabled:opacity-50 ${
                       result.user.flagged
                         ? "bg-green/10 border-green/20 text-green hover:bg-green/20"
-                        : "bg-yellow/10 border-yellow/20 text-yellow hover:bg-yellow/20"
-                    }`}>
+                        : "bg-yellow/10 border-yellow/20 text-yellow hover:bg-yellow/20"}`}>
                     <Flag size={12} />
                     {result.user.flagged ? "Unflag" : "Flag User"}
                   </button>
@@ -346,7 +344,9 @@ const TXN_TONE: Record<string, string> = {
 
             {activeTab === "transactions" && (
               <Card>
-                <h3 className="text-text font-bold text-sm mb-4">Recent Transactions ({result.recent_transactions?.length || 0})</h3>
+                <h3 className="text-text font-bold text-sm mb-4">
+                  Recent Transactions ({result.recent_transactions?.length || 0})
+                </h3>
                 {!result.recent_transactions?.length ? (
                   <p className="text-textMuted text-sm text-center py-8">No transactions found</p>
                 ) : (
@@ -360,7 +360,7 @@ const TXN_TONE: Record<string, string> = {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <Badge label={t.type} tone={TXN_TONE[t.type] || "muted"} />
+                              <Badge label={t.type} tone={TXN_TONE[t.type] ?? "cyan"} />
                               <span className="font-mono text-[10px] text-textDim truncate">{t.reference}</span>
                             </div>
                             <p className="text-textMuted text-xs mt-0.5">{formatDate(t.created_at)}</p>
@@ -369,9 +369,14 @@ const TXN_TONE: Record<string, string> = {
                             <p className={`font-bold text-sm ${t.direction === "in" ? "text-green" : "text-text"}`}>
                               {t.direction === "in" ? "+" : "-"}{formatZAR(t.amount)}
                             </p>
-                            <Badge label={t.status} tone={t.status === "completed" ? "green" : t.status === "failed" ? "red" : "yellow"} />
+                            <Badge
+                              label={t.status}
+                              tone={t.status === "completed" ? "green" : t.status === "failed" ? "red" : "yellow"}
+                            />
                           </div>
-                          {expandedTxn === t.id ? <ChevronUp size={12} className="text-textDim" /> : <ChevronDown size={12} className="text-textDim" />}
+                          {expandedTxn === t.id
+                            ? <ChevronUp size={12} className="text-textDim" />
+                            : <ChevronDown size={12} className="text-textDim" />}
                         </div>
                         {expandedTxn === t.id && (
                           <div className="mx-3 mb-2 p-3 bg-bg2 border border-border border-t-0 rounded-b-xl text-xs space-y-1.5">
@@ -379,9 +384,24 @@ const TXN_TONE: Record<string, string> = {
                               <span className="text-textMuted">Reference</span>
                               <CopyButton value={t.reference} label={t.reference} />
                             </div>
-                            {t.note && <div className="flex justify-between"><span className="text-textMuted">Note</span><span className="text-text">{t.note}</span></div>}
-                            {t.counterparty_name && <div className="flex justify-between"><span className="text-textMuted">Counterparty</span><span className="text-text">{t.counterparty_name}</span></div>}
-                            {t.platform_fee > 0 && <div className="flex justify-between"><span className="text-textMuted">Platform fee</span><span className="text-text">{formatZAR(t.platform_fee)}</span></div>}
+                            {t.note && (
+                              <div className="flex justify-between">
+                                <span className="text-textMuted">Note</span>
+                                <span className="text-text">{t.note}</span>
+                              </div>
+                            )}
+                            {t.counterparty_name && (
+                              <div className="flex justify-between">
+                                <span className="text-textMuted">Counterparty</span>
+                                <span className="text-text">{t.counterparty_name}</span>
+                              </div>
+                            )}
+                            {t.platform_fee > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-textMuted">Platform fee</span>
+                                <span className="text-text">{formatZAR(t.platform_fee)}</span>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -389,9 +409,7 @@ const TXN_TONE: Record<string, string> = {
                   </div>
                 )}
               </Card>
-            )}
-
-            {activeTab === "withdrawals" && (
+            )}{activeTab === "withdrawals" && (
               <Card>
                 <h3 className="text-text font-bold text-sm mb-4">Withdrawal History</h3>
                 {!result.withdrawals?.length ? (
@@ -403,7 +421,10 @@ const TXN_TONE: Record<string, string> = {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-text font-bold text-sm">{formatZAR(w.amount)}</span>
-                            <Badge label={w.status} tone={w.status === "approved" || w.status === "paid" ? "green" : w.status === "pending" ? "yellow" : "red"} />
+                            <Badge
+                              label={w.status}
+                              tone={w.status === "approved" || w.status === "paid" ? "green" : w.status === "pending" ? "yellow" : "red"}
+                            />
                           </div>
                           <p className="text-textMuted text-xs">{w.bank_name} · ****{w.account_number?.slice(-4)}</p>
                           <p className="text-textDim text-[10px]">{formatDate(w.created_at)}</p>
@@ -430,9 +451,13 @@ const TXN_TONE: Record<string, string> = {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-text font-bold text-xs">{a.action.replace(/_/g, " ")}</p>
-                          <p className="text-textMuted text-[10px] mt-0.5">by {a.admin_name || "Admin"} · {formatDate(a.created_at)}</p>
+                          <p className="text-textMuted text-[10px] mt-0.5">
+                            by {a.admin_name || "Admin"} · {formatDate(a.created_at)}
+                          </p>
                           {a.metadata && Object.keys(a.metadata).length > 0 && (
-                            <p className="text-textDim text-[10px] mt-1 font-mono">{JSON.stringify(a.metadata).slice(0, 100)}</p>
+                            <p className="text-textDim text-[10px] mt-1 font-mono">
+                              {JSON.stringify(a.metadata).slice(0, 100)}
+                            </p>
                           )}
                         </div>
                       </div>
@@ -446,13 +471,10 @@ const TXN_TONE: Record<string, string> = {
               <div className="space-y-4">
                 <Card>
                   <h3 className="text-text font-bold text-sm mb-3">Add Internal Note</h3>
-                  <textarea
-                    value={noteText}
-                    onChange={e => setNoteText(e.target.value)}
+                  <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
                     placeholder="Add a note visible to all support agents..."
                     rows={3}
-                    className="w-full bg-bg border border-border rounded-xl px-3 py-2.5 text-text text-sm focus:outline-none focus:border-cyan resize-none mb-3"
-                  />
+                    className="w-full bg-bg border border-border rounded-xl px-3 py-2.5 text-text text-sm focus:outline-none focus:border-cyan resize-none mb-3" />
                   <button onClick={handleSaveNote} disabled={savingNote || !noteText.trim()}
                     className="flex items-center gap-2 px-4 py-2 bg-cyan text-bg rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-cyan/90 transition-colors">
                     {savingNote ? <RefreshCw size={12} className="animate-spin" /> : <Bell size={12} />}
@@ -466,7 +488,9 @@ const TXN_TONE: Record<string, string> = {
                       {result.support_notes.map((n: any) => (
                         <div key={n.id} className="p-3 bg-bg rounded-xl border border-border">
                           <p className="text-text text-sm">{n.note}</p>
-                          <p className="text-textDim text-[10px] mt-1">{n.admin_name} · {formatDate(n.created_at)}</p>
+                          <p className="text-textDim text-[10px] mt-1">
+                            {n.admin_name} · {formatDate(n.created_at)}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -475,7 +499,9 @@ const TXN_TONE: Record<string, string> = {
               </div>
             )}
           </>
-        )}{!loading && !result && (
+        )}
+
+        {!loading && !result && (
           <div className="text-center py-16">
             <div className="w-16 h-16 rounded-2xl bg-bg2 border border-border flex items-center justify-center mx-auto mb-4">
               <Search size={24} className="text-textDim" />
