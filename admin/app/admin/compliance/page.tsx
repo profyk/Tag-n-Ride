@@ -5,11 +5,13 @@ import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input } from "@/com
 import { formatZAR, formatDate } from "@/lib/utils";
 import { AlertTriangle, Plus, Trash2, ShieldOff } from "lucide-react";
 import toast from "react-hot-toast";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
-const authHeaders = () => ({
+const authHeaders = (dangerToken?: string) => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
+  ...(dangerToken ? { "X-Danger-Token": dangerToken } : {}),
 });
 
 export default function CompliancePage() {
@@ -19,6 +21,7 @@ export default function CompliancePage() {
   const [addModal, setAddModal] = useState(false);
   const [phone, setPhone] = useState("");
   const [reason, setReason] = useState("");
+  const dangerPin = useDangerPin();
 
   const load = async () => {
     setLoading(true);
@@ -53,10 +56,13 @@ export default function CompliancePage() {
   };
 
   const handleRemove = async (id: string) => {
-    if (!confirm("Remove from blacklist?")) return;
+    if (!confirm("Remove from blacklist? This requires your danger PIN.")) return;
+    const token = await dangerPin.request();
+    if (!token) return;
     try {
       await fetch(`${BASE}/api/admin/blacklist/${id}`, {
-        method: "DELETE", headers: authHeaders(),
+        method: "DELETE",
+        headers: authHeaders(token),
       });
       toast.success("Removed from blacklist");
       load();
@@ -178,6 +184,13 @@ export default function CompliancePage() {
           </div>
         </div>
       </Modal>
+
+      <DangerPinModal
+        open={dangerPin.open}
+        onSuccess={dangerPin.handleSuccess}
+        onCancel={dangerPin.handleCancel}
+        actionLabel="remove from blacklist"
+      />
     </AdminShell>
   );
-            }
+}                                                                                                    }
