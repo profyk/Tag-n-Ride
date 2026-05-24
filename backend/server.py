@@ -4357,6 +4357,59 @@ async def admin_ledger_reverse_safe(
             "amount": float(original["amount"]), "reason": body.reason,
         }, request.client.host)
     return {"ok": True, "reversal_id": reversal_id, "new_balance": new_balance}
+    
+    @api.post("/system/reconcile-nightly")
+async def nightly_reconcile(request: Request):
+    """Called by cron-job.org every night at 02:00 SAST. No auth needed — IP restricted."""
+    # Basic security — check secret key
+    secret = request.headers.get("X-Cron-Secret", "")
+    if secret != os.getenv("CRON_SECRET", "tnr-nightly-reconcile-2026"):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    results = {}
+    async with pool.acquire() as conn:
+        # 1. Sync wallet balances
+        rows = await conn.fetch("SELECT id FROM users WHERE role IN ('passenger','driver','owner')")
+        fixed_wallets = 0
+        for row in rows:
+            uid = row["id"]
+            inflow = float(await conn.fetchval("SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND status='completed' AND type='payment'", uid) or 0)
+            topups = float(await conn.fetchval("SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND status='completed' AND type='topup'", uid) or 0)
+            refunds = float(await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE receiver_id=$1 AND status='completed' AND type='refund'", uid) or 0)
+            cashups_in = float(await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE receiver_id=$1 AND status='completed' AND type='cashup'", uid) or 0)
+            outflow = float(await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE sender_id=$1 AND status='completed' AND type IN ('payment','cashup')", uid) or 0)
+            withdrawals = float(await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE user_id=$1 AND status IN ('approved','paid')", uid) or 0)
+            correct = max(0, inflow + topups + refunds + cashups_in - outflow - withdrawals)
+            current = float(await conn.fetchval("SELECT balance FROM wallets WHERE user_id=$1", uid) or 0)
+            if abs(current - correct) > 0.01:
+                await conn.execute("UPDATE wallets SET balance=$1 WHERE user_id=$2", correct, uid)
+                fixed_wallets += 1
+        results["wallets_fixed"] = fixed_wallets
+        # 2. Sync driver earnings
+        driver_rows = await conn.fetch("SELECT user_id FROM drivers")
+        fixed_drivers = 0
+        for row in driver_rows:
+            uid = row["user_id"]
+            earned = float(await conn.fetchval("SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed'", uid) or 0)
+            current = float(await conn.fetchval("SELECT total_earnings FROM drivers WHERE user_id=$1", uid) or 0)
+            if abs(current - earned) > 0.01:
+                await conn.execute("UPDATE drivers SET total_earnings=$1 WHERE user_id=$2", earned, uid)
+                fixed_drivers += 1
+        results["drivers_fixed"] = fixed_drivers
+        # 3. Fix ledger balances
+        accounts = await conn.fetch("SELECT account FROM platform_accounts")
+        fixed_accounts = 0
+        for acc in accounts:
+            name = acc["account"]
+            credits = float(await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM platform_ledger WHERE account=$1 AND direction='credit'", name) or 0)
+            debits = float(await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM platform_ledger WHERE account=$1 AND direction='debit'", name) or 0)
+            correct = credits - debits
+            current = float(await conn.fetchval("SELECT balance FROM platform_accounts WHERE account=$1", name) or 0)
+            if abs(current - correct) > 0.01:
+                await conn.execute("UPDATE platform_accounts SET balance=$1, updated_at=NOW() WHERE account=$2", correct, name)
+                fixed_accounts += 1
+        results["accounts_fixed"] = fixed_accounts
+    print(f"[NIGHTLY RECONCILE] {results}")
+    return {"ok": True, "results": results, "timestamp": datetime.now(timezone.utc).isoformat()}
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line
