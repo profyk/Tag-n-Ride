@@ -1255,8 +1255,11 @@ async def support_user_lookup(query: str, admin: dict = Depends(require_admin)):
             raise HTTPException(status_code=404, detail="User not found")
         uid = user["id"]
         wallet = await conn.fetchrow(
-            "SELECT balance, is_frozen, COALESCE(total_earnings, 0) as total_earnings FROM wallets WHERE user_id=$1", uid
+            "SELECT balance, is_frozen FROM wallets WHERE user_id=$1", uid
         )
+        driver_earnings = await conn.fetchval(
+            "SELECT COALESCE(total_earnings, 0) FROM drivers WHERE user_id=$1", uid
+        ) or 0
         txns = await conn.fetch(
             """SELECT t.id, t.reference, t.type, t.status, t.amount, t.platform_fee,
                t.driver_net, t.note, t.created_at,
@@ -1314,7 +1317,7 @@ async def support_user_lookup(query: str, admin: dict = Depends(require_admin)):
         "wallet": {
             "balance": float(wallet["balance"]) if wallet else 0,
             "is_frozen": wallet["is_frozen"] if wallet else False,
-            "total_earnings": float(wallet["total_earnings"] or 0) if wallet else 0,
+            "total_earnings": float(driver_earnings or 0),
         },
         "kyc": {**dict(kyc), "submitted_at": iso(kyc["submitted_at"]), "reviewed_at": iso(kyc["reviewed_at"])} if kyc else None,
         "recent_transactions": [fmt_txn(t) for t in txns],
