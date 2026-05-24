@@ -21,11 +21,9 @@ export default function Home() {
   const [txns, setTxns] = useState<Txn[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-
   const [fuelModal, setFuelModal] = useState(false);
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
-
   const [cashUpModal, setCashUpModal] = useState(false);
   const [cashUpAmount, setCashUpAmount] = useState("");
   const [cashUpType, setCashUpType] = useState<"self" | "owner">("self");
@@ -56,13 +54,13 @@ export default function Home() {
     }
     setFuelLoading(true);
     try {
-      await api.withdraw({ amount });
+      await api.cashup({ amount, type: "self" });
       setFuelModal(false);
       setFuelAmount("");
-      Alert.alert("Done", "Fuel withdrawal submitted.");
+      Alert.alert("Done", "Fuel payment submitted from your wallet.");
       load();
     } catch (e: any) {
-      Alert.alert("Failed", e?.message || "Could not process withdrawal.");
+      Alert.alert("Failed", e?.message || "Could not process payment.");
     } finally {
       setFuelLoading(false);
     }
@@ -79,28 +77,24 @@ export default function Home() {
       await api.cashup({ amount, type: cashUpType });
       setCashUpModal(false);
       setCashUpAmount("");
-      Alert.alert("Done", `CashUp to ${cashUpType === "self" ? "your account" : "owner's account"} submitted.`);
+      Alert.alert(
+        "CashUp submitted",
+        `R${amount.toFixed(2)} will be paid to ${cashUpType === "self" ? "your account" : "the owner's account"}.`
+      );
       load();
     } catch (e: any) {
-      Alert.alert("Failed", e?.message || "Could not process CashUp.");
+      Alert.alert("Failed", e?.message || "Could not process CashUp. Make sure your payout account is set up in Profile.");
     } finally {
       setCashUpLoading(false);
     }
-  };
-
-  return (
+  };return (
     <SafeAreaView style={styles.root} edges={["top"]} testID="home-screen">
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load(); }}
-            tintColor={colors.cyan}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />
         }>
 
-        {/* Header */}
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.hello}>Hello,</Text>
@@ -109,45 +103,27 @@ export default function Home() {
             </Text>
           </View>
           <View style={styles.headerActions}>
-            {/* Notification Bell */}
-            <TouchableOpacity
-              onPress={() => router.push("/(app)/notifications")}
-              style={styles.headerBtn}
-              testID="home-notif-btn">
+            <TouchableOpacity onPress={() => router.push("/(app)/notifications")} style={styles.headerBtn} testID="home-notif-btn">
               <Ionicons name="notifications-outline" size={22} color={colors.text} />
               {unreadCount > 0 && (
                 <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </Text>
+                  <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
                 </View>
               )}
             </TouchableOpacity>
-
-            {/* Profile */}
-            <TouchableOpacity
-              onPress={() => router.push("/(app)/profile")}
-              testID="home-profile-btn"
-              style={styles.avatar}>
-              <Ionicons
-                name={isDriver ? "car-sport" : "person"}
-                size={22}
-                color={colors.cyan}
-              />
+            <TouchableOpacity onPress={() => router.push("/(app)/profile")} testID="home-profile-btn" style={styles.avatar}>
+              <Ionicons name={isDriver ? "car-sport" : "person"} size={22} color={colors.cyan} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Balance card */}
         <View style={styles.balanceCard} testID="balance-card">
           <View style={styles.balanceCardGlow} />
           <Text style={styles.balanceLabel}>WALLET BALANCE · ZAR</Text>
           {loading || !wallet ? (
             <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
           ) : (
-            <Text style={styles.balanceAmt} testID="balance-amount">
-              {formatZAR(wallet.balance)}
-            </Text>
+            <Text style={styles.balanceAmt} testID="balance-amount">{formatZAR(wallet.balance)}</Text>
           )}
           {isDriver && wallet ? (
             <View style={styles.statsRow}>
@@ -155,9 +131,7 @@ export default function Home() {
                 <Text style={styles.statLabel}>Total earnings</Text>
                 <Text style={styles.statVal}>{formatZAR(wallet.total_earnings ?? 0)}</Text>
               </View>
-              <View style={[styles.stat, {
-                borderLeftColor: colors.border, borderLeftWidth: 1, paddingLeft: 16
-              }]}>
+              <View style={[styles.stat, { borderLeftColor: colors.border, borderLeftWidth: 1, paddingLeft: 16 }]}>
                 <Text style={styles.statLabel}>Rating</Text>
                 <Text style={styles.statVal}>
                   {wallet.rating_count ? `★ ${wallet.rating_avg?.toFixed(1)}` : "—"}
@@ -172,39 +146,28 @@ export default function Home() {
           ) : null}
         </View>
 
-        {/* Quick actions */}
         <Text style={styles.section}>QUICK ACTIONS</Text>
         {isDriver ? (
           <>
             <View style={styles.qaRow}>
-              <QA icon="qr-code" label="My QR" tone="cyan"
-                onPress={() => router.push("/(app)/action")} testID="qa-myqr" />
-              <QA icon="cash-outline" label="Withdraw" tone="green"
-                onPress={() => router.push("/withdraw")} testID="qa-withdraw" />
-              <QA icon="receipt-outline" label="History" tone="muted"
-                onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+              <QA icon="qr-code" label="My QR" tone="cyan" onPress={() => router.push("/(app)/action")} testID="qa-myqr" />
+              <QA icon="receipt-outline" label="History" tone="muted" onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+              <QA icon="person-outline" label="Profile" tone="muted" onPress={() => router.push("/(app)/profile")} testID="qa-profile" />
             </View>
             <View style={[styles.qaRow, { marginTop: 12 }]}>
-              <QA icon="flame-outline" label="Pay Fuel" tone="orange"
-                onPress={() => setFuelModal(true)} testID="qa-payfuel" />
-              <QA icon="wallet-outline" label="CashUp" tone="purple"
-                onPress={() => setCashUpModal(true)} testID="qa-cashup" />
-              <QA icon="notifications-outline" label="Alerts" tone="muted"
-                onPress={() => router.push("/(app)/notifications")} testID="qa-notifs" />
+              <QA icon="flame-outline" label="Pay Fuel" tone="orange" onPress={() => setFuelModal(true)} testID="qa-payfuel" />
+              <QA icon="wallet-outline" label="CashUp" tone="purple" onPress={() => setCashUpModal(true)} testID="qa-cashup" />
+              <QA icon="notifications-outline" label="Alerts" tone="muted" onPress={() => router.push("/(app)/notifications")} testID="qa-notifs" />
             </View>
           </>
         ) : (
           <View style={styles.qaRow}>
-            <QA icon="scan" label="Scan & Pay" tone="cyan"
-              onPress={() => router.push("/(app)/action")} testID="qa-scan" />
-            <QA icon="add-circle-outline" label="Top Up" tone="green"
-              onPress={() => router.push("/topup")} testID="qa-topup" />
-            <QA icon="receipt-outline" label="History" tone="muted"
-              onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+            <QA icon="scan" label="Scan & Pay" tone="cyan" onPress={() => router.push("/(app)/action")} testID="qa-scan" />
+            <QA icon="add-circle-outline" label="Top Up" tone="green" onPress={() => router.push("/topup")} testID="qa-topup" />
+            <QA icon="receipt-outline" label="History" tone="muted" onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
           </View>
         )}
 
-        {/* Recent */}
         <View style={styles.recentHeader}>
           <Text style={styles.section}>RECENT</Text>
           <TouchableOpacity onPress={() => router.push("/(app)/transactions")}>
@@ -217,9 +180,7 @@ export default function Home() {
             <Ionicons name="time-outline" size={32} color={colors.textDim} />
             <Text style={styles.emptyText}>No transactions yet</Text>
             <Text style={styles.emptySub}>
-              {isDriver
-                ? "Share your QR code to start receiving payments."
-                : "Top up your wallet, then scan a driver's QR to pay."}
+              {isDriver ? "Share your QR code to start receiving payments." : "Top up your wallet, then scan a driver's QR to pay."}
             </Text>
           </View>
         ) : (
@@ -229,9 +190,7 @@ export default function Home() {
         )}
       </ScrollView>
 
-      {/* Pay Fuel Modal */}
-      <Modal visible={fuelModal} transparent animationType="slide"
-        onRequestClose={() => setFuelModal(false)}>
+      <Modal visible={fuelModal} transparent animationType="slide" onRequestClose={() => setFuelModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -239,36 +198,23 @@ export default function Home() {
               <Ionicons name="flame-outline" size={28} color="#FF8C00" />
             </View>
             <Text style={styles.modalTitle}>Pay Fuel</Text>
-            <Text style={styles.modalSub}>
-              Withdraws from your saved payout account instantly.
-            </Text>
+            <Text style={styles.modalSub}>CashUp to your personal payout account. Make sure it is set up in Profile first.</Text>
             <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
-            <TextInput
-              style={styles.input}
-              value={fuelAmount}
-              onChangeText={setFuelAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={colors.textDim}
-              testID="fuel-amount-input"
-            />
+            <TextInput style={styles.input} value={fuelAmount} onChangeText={setFuelAmount}
+              keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim} testID="fuel-amount-input" />
             <View style={styles.modalActions}>
               <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary"
-                  onPress={() => { setFuelModal(false); setFuelAmount(""); }} />
+                <Button label="Cancel" variant="secondary" onPress={() => { setFuelModal(false); setFuelAmount(""); }} />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="Pay Fuel" onPress={handlePayFuel}
-                  loading={fuelLoading} testID="fuel-confirm-btn" />
+                <Button label="Pay Fuel" onPress={handlePayFuel} loading={fuelLoading} testID="fuel-confirm-btn" />
               </View>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* CashUp Modal */}
-      <Modal visible={cashUpModal} transparent animationType="slide"
-        onRequestClose={() => setCashUpModal(false)}>
+      <Modal visible={cashUpModal} transparent animationType="slide" onRequestClose={() => setCashUpModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -278,45 +224,24 @@ export default function Home() {
             <Text style={styles.modalTitle}>CashUp</Text>
             <Text style={styles.modalSub}>Choose which account to cash out to.</Text>
             <View style={styles.toggleRow}>
-              <TouchableOpacity
-                style={[styles.toggleBtn, cashUpType === "self" && styles.toggleBtnActive]}
-                onPress={() => setCashUpType("self")}
-                testID="cashup-type-self">
-                <Ionicons name="person-outline" size={16}
-                  color={cashUpType === "self" ? colors.bg : colors.textMuted} />
-                <Text style={[styles.toggleText, cashUpType === "self" && styles.toggleTextActive]}>
-                  My Account
-                </Text>
+              <TouchableOpacity style={[styles.toggleBtn, cashUpType === "self" && styles.toggleBtnActive]} onPress={() => setCashUpType("self")} testID="cashup-type-self">
+                <Ionicons name="person-outline" size={16} color={cashUpType === "self" ? colors.bg : colors.textMuted} />
+                <Text style={[styles.toggleText, cashUpType === "self" && styles.toggleTextActive]}>My Account</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.toggleBtn, cashUpType === "owner" && styles.toggleBtnActive]}
-                onPress={() => setCashUpType("owner")}
-                testID="cashup-type-owner">
-                <Ionicons name="car-outline" size={16}
-                  color={cashUpType === "owner" ? colors.bg : colors.textMuted} />
-                <Text style={[styles.toggleText, cashUpType === "owner" && styles.toggleTextActive]}>
-                  Owner's Account
-                </Text>
+              <TouchableOpacity style={[styles.toggleBtn, cashUpType === "owner" && styles.toggleBtnActive]} onPress={() => setCashUpType("owner")} testID="cashup-type-owner">
+                <Ionicons name="car-outline" size={16} color={cashUpType === "owner" ? colors.bg : colors.textMuted} />
+                <Text style={[styles.toggleText, cashUpType === "owner" && styles.toggleTextActive]}>Owner's Account</Text>
               </TouchableOpacity>
             </View>
             <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
-            <TextInput
-              style={styles.input}
-              value={cashUpAmount}
-              onChangeText={setCashUpAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={colors.textDim}
-              testID="cashup-amount-input"
-            />
+            <TextInput style={styles.input} value={cashUpAmount} onChangeText={setCashUpAmount}
+              keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim} testID="cashup-amount-input" />
             <View style={styles.modalActions}>
               <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary"
-                  onPress={() => { setCashUpModal(false); setCashUpAmount(""); }} />
+                <Button label="Cancel" variant="secondary" onPress={() => { setCashUpModal(false); setCashUpAmount(""); }} />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="CashUp" onPress={handleCashUp}
-                  loading={cashUpLoading} testID="cashup-confirm-btn" />
+                <Button label="CashUp" onPress={handleCashUp} loading={cashUpLoading} testID="cashup-confirm-btn" />
               </View>
             </View>
           </View>
@@ -325,21 +250,16 @@ export default function Home() {
     </SafeAreaView>
   );
 }
-
 type Tone = "cyan" | "green" | "muted" | "orange" | "purple";
-
 const QA: React.FC<{
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  tone: Tone;
-  onPress: () => void;
-  testID?: string;
+  icon: keyof typeof Ionicons.glyphMap; label: string; tone: Tone;
+  onPress: () => void; testID?: string;
 }> = ({ icon, label, tone, onPress, testID }) => {
   const map: Record<Tone, { bg: string; fg: string }> = {
-    cyan:   { bg: colors.cyanDim, fg: colors.cyan },
+    cyan:   { bg: colors.cyanDim,  fg: colors.cyan },
     green:  { bg: colors.greenDim, fg: colors.green },
     muted:  { bg: "rgba(255,255,255,0.06)", fg: colors.text },
-    orange: { bg: "rgba(255,140,0,0.15)", fg: "#FF8C00" },
+    orange: { bg: "rgba(255,140,0,0.15)",   fg: "#FF8C00" },
     purple: { bg: "rgba(160,100,255,0.15)", fg: "#A064FF" },
   };
   const { bg, fg } = map[tone];
@@ -359,19 +279,8 @@ const TxnRow: React.FC<{ t: Txn }> = ({ t }) => {
   const isWithdraw = t.type === "withdrawal";
   const sign = isIn ? "+" : "-";
   const color = isIn ? colors.green : colors.text;
-  const icon = t.type === "topup"
-    ? "arrow-down"
-    : isWithdraw
-    ? "cash-outline"
-    : isIn
-    ? "arrow-down-circle"
-    : "arrow-up-circle";
-  const title = t.type === "topup"
-    ? "Wallet top-up"
-    : isWithdraw
-    ? "Withdrawal"
-    : t.counterparty_name || "Transfer";
-
+  const icon = t.type === "topup" ? "arrow-down" : isWithdraw ? "cash-outline" : isIn ? "arrow-down-circle" : "arrow-up-circle";
+  const title = t.type === "topup" ? "Wallet top-up" : isWithdraw ? "Withdrawal" : t.counterparty_name || "Transfer";
   return (
     <View style={styles.txnRow} testID={`txn-${t.id}`}>
       <View style={[styles.txnIcon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
@@ -384,10 +293,7 @@ const TxnRow: React.FC<{ t: Txn }> = ({ t }) => {
       <View style={{ alignItems: "flex-end" }}>
         <Text style={[styles.txnAmt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
         <View style={{ marginTop: 4 }}>
-          <Pill
-            label={t.status}
-            tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"}
-          />
+          <Pill label={t.status} tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
         </View>
       </View>
     </View>
@@ -396,130 +302,49 @@ const TxnRow: React.FC<{ t: Txn }> = ({ t }) => {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headerRow: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", marginBottom: 16,
-  },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
   hello: { color: colors.textMuted, fontSize: 14 },
   name: { color: colors.text, fontSize: 24, fontWeight: "800" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  headerBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: colors.bg2, borderWidth: 1,
-    borderColor: colors.border, position: "relative",
-  },
-  badge: {
-    position: "absolute", top: -2, right: -2,
-    backgroundColor: colors.red, borderRadius: 999,
-    minWidth: 18, height: 18,
-    alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 4, borderWidth: 2, borderColor: colors.bg,
-  },
+  headerBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border, position: "relative" },
+  badge: { position: "absolute", top: -2, right: -2, backgroundColor: colors.red, borderRadius: 999, minWidth: 18, height: 18, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 2, borderColor: colors.bg },
   badgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
-  avatar: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan,
-  },
-  balanceCard: {
-    backgroundColor: colors.bg2, borderColor: colors.cyan,
-    borderWidth: 1, borderRadius: radius.lg, padding: 24, overflow: "hidden",
-  },
-  balanceCardGlow: {
-    position: "absolute", top: -50, right: -50,
-    width: 200, height: 200, borderRadius: 100,
-    backgroundColor: colors.cyan, opacity: 0.08,
-  },
-  balanceLabel: {
-    color: colors.textMuted, fontSize: 12,
-    fontWeight: "700", letterSpacing: 1.4,
-  },
-  balanceAmt: {
-    color: colors.text, fontSize: 38, fontWeight: "800",
-    marginTop: 8, letterSpacing: -1,
-  },
+  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan },
+  balanceCard: { backgroundColor: colors.bg2, borderColor: colors.cyan, borderWidth: 1, borderRadius: radius.lg, padding: 24, overflow: "hidden" },
+  balanceCardGlow: { position: "absolute", top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: colors.cyan, opacity: 0.08 },
+  balanceLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4 },
+  balanceAmt: { color: colors.text, fontSize: 38, fontWeight: "800", marginTop: 8, letterSpacing: -1 },
   statsRow: { flexDirection: "row", marginTop: 18, gap: 16 },
   stat: { flex: 1 },
   statLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1 },
   statVal: { color: colors.text, fontSize: 16, fontWeight: "700", marginTop: 4 },
-  section: {
-    color: colors.textMuted, fontSize: 12, fontWeight: "700",
-    letterSpacing: 1.4, marginTop: 24, marginBottom: 12,
-  },
+  section: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4, marginTop: 24, marginBottom: 12 },
   qaRow: { flexDirection: "row", gap: 12 },
-  qa: {
-    flex: 1, paddingVertical: 18, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border, alignItems: "center",
-  },
-  qaIcon: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: "center", justifyContent: "center",
-  },
+  qa: { flex: 1, paddingVertical: 18, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  qaIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   qaLabel: { color: colors.text, marginTop: 8, fontSize: 13, fontWeight: "600" },
-  recentHeader: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-  },
+  recentHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   seeAll: { color: colors.cyan, fontWeight: "700", fontSize: 13, marginTop: 16 },
-  empty: {
-    padding: 32, alignItems: "center", borderWidth: 1,
-    borderStyle: "dashed", borderColor: colors.border, borderRadius: radius.md,
-  },
+  empty: { padding: 32, alignItems: "center", borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, borderRadius: radius.md },
   emptyText: { color: colors.text, fontWeight: "700", marginTop: 10 },
   emptySub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 6 },
-  txnRow: {
-    flexDirection: "row", alignItems: "center", padding: 14,
-    backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border, gap: 12,
-  },
-  txnIcon: {
-    width: 38, height: 38, borderRadius: 19,
-    alignItems: "center", justifyContent: "center",
-  },
+  txnRow: { flexDirection: "row", alignItems: "center", padding: 14, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 12 },
+  txnIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   txnTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
   txnSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   txnAmt: { fontWeight: "800", fontSize: 15 },
-  modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end",
-  },
-  modalSheet: {
-    backgroundColor: colors.bg2, borderTopLeftRadius: 24,
-    borderTopRightRadius: 24, padding: 24, paddingBottom: 40,
-    borderTopWidth: 1, borderColor: colors.border,
-  },
-  modalHandle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: colors.border, alignSelf: "center", marginBottom: 20,
-  },
-  modalIconWrap: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: colors.bg, alignItems: "center",
-    justifyContent: "center", alignSelf: "center",
-    marginBottom: 12, borderWidth: 1, borderColor: colors.border,
-  },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  modalSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.border },
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 },
+  modalIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.bg, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 12, borderWidth: 1, borderColor: colors.border },
   modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center" },
-  modalSub: {
-    color: colors.textMuted, fontSize: 13,
-    textAlign: "center", marginTop: 4, marginBottom: 20,
-  },
-  inputLabel: {
-    color: colors.textMuted, fontSize: 11,
-    fontWeight: "700", letterSpacing: 1.4, marginBottom: 8,
-  },
-  input: {
-    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.borderStrong,
-    borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 14,
-    color: colors.text, fontSize: 20, fontWeight: "800", marginBottom: 20,
-  },
-  modalActions: { flexDirection: "row", gap: 12 },
+  modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4, marginBottom: 20 },
+  inputLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8 },
+  input: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: colors.text, fontSize: 22, fontWeight: "700", padding: 16, textAlign: "center", marginBottom: 20 },
   toggleRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
-  toggleBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center",
-    justifyContent: "center", gap: 6, paddingVertical: 10,
-    borderRadius: radius.md, borderWidth: 1,
-    borderColor: colors.border, backgroundColor: colors.bg,
-  },
+  toggleBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   toggleBtnActive: { backgroundColor: colors.cyan, borderColor: colors.cyan },
   toggleText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
   toggleTextActive: { color: colors.bg },
+  modalActions: { flexDirection: "row", gap: 12 },
 });
