@@ -2,11 +2,18 @@
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal } from "@/components/ui";
-import { api, User } from "@/lib/api";
+import { api, User, hasPermission, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
-import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2 } from "lucide-react";
+import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, FlaskConical } from "lucide-react";
 import toast from "react-hot-toast";
-import { isSuperAdmin } from "@/lib/api";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
+
+const BASE = "https://tag-n-ride-production.up.railway.app";
+const authHeaders = (dangerToken?: string) => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
+  ...(dangerToken ? { "X-Danger-Token": dangerToken } : {}),
+});
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -17,6 +24,8 @@ export default function UsersPage() {
   const [flagReason, setFlagReason] = useState("");
   const [pinModal, setPinModal] = useState<{ name: string; pin: string } | null>(null);
   const superAdmin = isSuperAdmin();
+  const canManageTest = hasPermission("manage_test_users");
+  const dangerPin = useDangerPin();
 
   const load = (q?: string) => {
     setLoading(true);
@@ -57,9 +66,34 @@ export default function UsersPage() {
   };
 
   const handleDelete = async (u: User) => {
-    if (!confirm(`Delete ${u.full_name}? This cannot be undone.`)) return;
-    try { await api.deleteUser(u.id); toast.success("User deleted"); load(query); }
-    catch (e: any) { toast.error(e.message); }
+    if (!confirm(`Delete ${u.full_name}? This requires your danger PIN and cannot be undone.`)) return;
+    const token = await dangerPin.request();
+    if (!token) return;
+    try {
+      const res = await fetch(`${BASE}/api/admin/users/${u.id}`, {
+        method: "DELETE",
+        headers: authHeaders(token),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Delete failed");
+      toast.success(`${u.full_name} deleted`);
+      load(query);
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleToggleTest = async (u: any) => {
+    const isTest = !u.is_test;
+    try {
+      const res = await fetch(`${BASE}/api/admin/test-users/${u.id}/mark`, {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({ is_test: isTest }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed");
+      toast.success(isTest ? `${u.full_name} marked as test account` : `${u.full_name} unmarked`);
+      load(query);
+    } catch (e: any) { toast.error(e.message); }
   };
 
   return (
@@ -75,11 +109,20 @@ export default function UsersPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <Table headers={["Name", "Phone", "Role", "Status", "Joined", "Actions"]} empty={!users.length}>
-            {users.map((u) => (
+          <Table
+            headers={["Name", "Phone", "Role", "Status", "Joined", "Actions"]}
+            empty={!users.length}>
+            {users.map((u: any) => (
               <Tr key={u.id}>
                 <Td>
-                  <div className="font-semibold">{u.full_name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold">{u.full_name}</span>
+                    {u.is_test && (
+                      <span className="flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 bg-purple/10 border border-purple/20 rounded text-purple uppercase">
+                        <FlaskConical size={9} /> TEST
+                      </span>
+                    )}
+                  </div>
                   {u.flagged && <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>}
                 </Td>
                 <Td className="font-mono text-xs text-textMuted">{u.phone_number}</Td>
@@ -93,7 +136,7 @@ export default function UsersPage() {
                 </Td>
                 <Td className="text-textMuted text-xs">{formatDate(u.created_at)}</Td>
                 <Td>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <Button variant={u.is_active ? "danger" : "secondary"} onClick={() => handleBlock(u)}>
                       {u.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
                       {u.is_active ? "Block" : "Unblock"}
@@ -108,6 +151,15 @@ export default function UsersPage() {
                     ) : (
                       <Button variant="ghost" onClick={() => setFlagModal(u)}>
                         <Flag size={12} /> Flag
+                      </Button>
+                    )}
+                    {canManageTest && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleToggleTest(u)}
+                        title={u.is_test ? "Unmark as test account" : "Mark as test account"}>
+                        <FlaskConical size={12} />
+                        {u.is_test ? "Unmark" : "Test"}
                       </Button>
                     )}
                     {superAdmin && (
@@ -149,6 +201,13 @@ export default function UsersPage() {
           <Button className="w-full justify-center" onClick={() => setPinModal(null)}>Done</Button>
         </div>
       </Modal>
+
+      <DangerPinModal
+        open={dangerPin.open}
+        onSuccess={dangerPin.handleSuccess}
+        onCancel={dangerPin.handleCancel}
+        actionLabel="delete this user"
+      />
     </AdminShell>
   );
-          }
+}
