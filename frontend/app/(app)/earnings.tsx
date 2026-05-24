@@ -5,9 +5,32 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../../src/AuthContext";
 import { api } from "../../src/api";
 import { colors, formatZAR, radius } from "../../src/theme";
+
+const HIDDEN_ROUTES_KEY = "tnr_hidden_routes";
+
+async function getHiddenRoutes(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_ROUTES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+async function hideRoute(id: string) {
+  try {
+    const hidden = await getHiddenRoutes();
+    if (!hidden.includes(id)) {
+      await AsyncStorage.setItem(HIDDEN_ROUTES_KEY, JSON.stringify([...hidden, id]));
+    }
+  } catch {}
+}
+
+async function clearAllHiddenRoutes() {
+  try { await AsyncStorage.removeItem(HIDDEN_ROUTES_KEY); } catch {}
+}
 
 function formatDuration(mins: number) {
   const h = Math.floor(mins / 60);
@@ -40,15 +63,19 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
   const [cashUpdating, setCashUpdating] = useState(false);
   const [cashingUp, setCashingUp] = useState(false);
   const [cashupDest, setCashupDest] = useState<any>(null);
+  const [hiddenRoutes, setHiddenRoutes] = useState<string[]>([]);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
   const prevPaymentCount = useRef(0);
 
   if (state.status !== "authed") return null;
 
   const load = useCallback(async () => {
     try {
-      const [routeRes, statusRes] = await Promise.all([
+      const [routeRes, statusRes, walletRes, hidden] = await Promise.all([
         api.currentRoute(),
         api.driverCashupStatus().catch(() => null),
+        api.wallet().catch(() => null),
+        getHiddenRoutes(),
       ]);
       if (routeRes.active && routeRes.app_count > prevPaymentCount.current) {
         if (prevPaymentCount.current > 0) Vibration.vibrate(300);
@@ -56,6 +83,8 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
       }
       setRouteData(routeRes);
       setCashupStatus(statusRes);
+      setHiddenRoutes(hidden);
+      if (walletRes) setWalletBalance(walletRes.total_earnings ?? 0);
     } catch (e) {}
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -75,9 +104,7 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
       setCustomFare("");
       prevPaymentCount.current = 0;
       load();
-    } catch (e: any) {
-      Alert.alert("Error", e?.message || "Could not start route");
-    }
+    } catch (e: any) { Alert.alert("Error", e?.message || "Could not start route"); }
   };
 
   const handleEndRoute = async () => {
@@ -93,18 +120,15 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
     }
     Alert.alert("End Route?", "This will close the current route.", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "End Route", style: "destructive",
-        onPress: async () => {
-          try {
-            const res = await api.endRoute();
-            setSummary(res.summary);
-            setSummaryModal(true);
-            prevPaymentCount.current = 0;
-            load();
-          } catch (e: any) { Alert.alert("Error", e?.message || "Could not end route"); }
-        },
-      },
+      { text: "End Route", style: "destructive", onPress: async () => {
+        try {
+          const res = await api.endRoute();
+          setSummary(res.summary);
+          setSummaryModal(true);
+          prevPaymentCount.current = 0;
+          load();
+        } catch (e: any) { Alert.alert("Error", e?.message || "Could not end route"); }
+      }},
     ]);
   };
 
@@ -126,9 +150,7 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
       const dest = await api.driverCashupDestination();
       setCashupDest(dest);
       setCashupModal(true);
-    } catch (e: any) {
-      Alert.alert("Error", e?.message || "Could not load cashup info");
-    }
+    } catch (e: any) { Alert.alert("Error", e?.message || "Could not load cashup info"); }
   };
 
   const handleCashup = async () => {
@@ -145,25 +167,66 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
       ].filter(Boolean).join("\n");
       Alert.alert("Cash-Up Complete!", lines);
       load();
-    } catch (e: any) {
-      Alert.alert("Failed", e?.message || "Could not complete cash-up");
-    } finally { setCashingUp(false); }
+    } catch (e: any) { Alert.alert("Failed", e?.message || "Could not complete cash-up"); }
+    finally { setCashingUp(false); }
   };
 
-  const onRefresh = async () => { setRefreshing(true); await load(); };if (!routeData || !routeData.active) {
+  const handleHideRoute = async (id: string) => {
+    await hideRoute(id);
+    setHiddenRoutes(prev => [...prev, id]);
+  };
+
+  const handleClearAllRoutes = () => {
+    Alert.alert(
+      "Clear route history?",
+      "This only clears your view on this device. Your records are safely stored.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Clear", style: "destructive", onPress: async () => {
+          const allIds = (routeData?.route_history || []).map((r: any) => r.id);
+          await AsyncStorage.setItem(HIDDEN_ROUTES_KEY, JSON.stringify(allIds));
+          setHiddenRoutes(allIds);
+        }},
+      ]
+    );
+  };
+
+  const handleRestoreRoutes = async () => {
+    await clearAllHiddenRoutes();
+    setHiddenRoutes([]);
+  };
+
+  const onRefresh = async () => { setRefreshing(true); await load(); };
+
+  const visibleRoutes = (routeData?.route_history || []).filter((r: any) => !hiddenRoutes.includes(r.id));
+  const hiddenCount = hiddenRoutes.length;if (!routeData || !routeData.active) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
 
           <Text style={styles.pageTitle}>Earnings</Text>
 
-          <View style={styles.todayCard}>
-            <Text style={styles.todayLabel}>TODAY'S TOTAL</Text>
-            <Text style={styles.todayAmount}>{formatZAR(routeData ? routeData.today_total : 0)}</Text>
-            <Text style={styles.todayCount}>{routeData ? routeData.today_count : 0} passengers paid via app</Text>
+          {/* Total earnings card */}
+          <View style={styles.earningsCard}>
+            <View style={styles.earningsRow}>
+              <View style={styles.earningsStat}>
+                <Text style={styles.earningsLabel}>TOTAL EARNINGS</Text>
+                <Text style={styles.earningsVal}>{formatZAR(walletBalance)}</Text>
+                <Text style={styles.earningsSub}>Lifetime</Text>
+              </View>
+              <View style={[styles.earningsStat, { borderLeftWidth: 1, borderLeftColor: colors.border, paddingLeft: 16 }]}>
+                <Text style={styles.earningsLabel}>TODAY</Text>
+                <Text style={[styles.earningsVal, { color: colors.cyan }]}>
+                  {formatZAR(routeData?.today_total ?? 0)}
+                </Text>
+                <Text style={styles.earningsSub}>{routeData?.today_count ?? 0} app payments</Text>
+              </View>
+            </View>
           </View>
 
+          {/* Cash-up card */}
           {cashupStatus?.has_owner && (
             <View style={styles.cashupCard}>
               <View style={styles.cashupHeader}>
@@ -202,7 +265,7 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
               {!cashupStatus.is_confirmed && (
                 <View style={styles.unconfirmedNote}>
                   <Ionicons name="information-circle-outline" size={13} color={colors.textMuted} />
-                  <Text style={styles.unconfirmedText}>Owner has not confirmed you yet — using your saved account</Text>
+                  <Text style={styles.unconfirmedText}>Owner has not confirmed you yet</Text>
                 </View>
               )}
               <TouchableOpacity
@@ -215,6 +278,7 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
             </View>
           )}
 
+          {/* Off duty */}
           <View style={styles.offDutyCard}>
             <View style={styles.offDutyDot} />
             <Text style={styles.offDutyTitle}>OFF ROUTE</Text>
@@ -225,6 +289,7 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
             </TouchableOpacity>
           </View>
 
+          {/* Last route */}
           {routeData?.last_route && (
             <View style={styles.lastRouteCard}>
               <Text style={styles.sectionLabel}>LAST ROUTE</Text>
@@ -248,9 +313,61 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
               </Text>
             </View>
           )}
-        </ScrollView>
 
-        <Modal visible={startModal} transparent animationType="slide" onRequestClose={() => setStartModal(false)}>
+          {/* Route history */}
+          {(visibleRoutes.length > 0 || hiddenCount > 0) && (
+            <View>
+              <View style={styles.historyHeader}>
+                <Text style={styles.sectionLabel}>ROUTE HISTORY</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {hiddenCount > 0 && (
+                    <TouchableOpacity onPress={handleRestoreRoutes} style={styles.historyActionBtn}>
+                      <Ionicons name="eye-outline" size={13} color={colors.cyan} />
+                      <Text style={[styles.historyActionText, { color: colors.cyan }]}>Restore ({hiddenCount})</Text>
+                    </TouchableOpacity>
+                  )}
+                  {visibleRoutes.length > 0 && (
+                    <TouchableOpacity onPress={handleClearAllRoutes} style={styles.historyActionBtn}>
+                      <Ionicons name="trash-outline" size={13} color={colors.textMuted} />
+                      <Text style={styles.historyActionText}>Clear all</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+              {visibleRoutes.length === 0 && hiddenCount > 0 ? (
+                <View style={styles.hiddenNote}>
+                  <Text style={styles.hiddenNoteText}>All routes hidden on this device</Text>
+                  <TouchableOpacity onPress={handleRestoreRoutes}>
+                    <Text style={{ color: colors.cyan, fontWeight: "700", fontSize: 13 }}>Restore all</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : visibleRoutes.map((route: any) => (
+                <View key={route.id} style={styles.routeHistoryCard}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <Text style={styles.routeHistoryAmt}>{formatZAR(route.total_collected)}</Text>
+                      <View style={styles.routeHistoryPill}>
+                        <Text style={styles.routeHistoryPillText}>{route.passenger_count} pax</Text>
+                      </View>
+                      {route.fare > 0 && (
+                        <View style={[styles.routeHistoryPill, { backgroundColor: colors.cyanDim }]}>
+                          <Text style={[styles.routeHistoryPillText, { color: colors.cyan }]}>R{route.fare} fare</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.routeHistorySub}>
+                      {route.app_count} app · {route.cash_count} cash · {formatDuration(route.duration_mins || 0)}
+                    </Text>
+                    <Text style={styles.routeHistoryTime}>{formatTime(route.started_at)}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => handleHideRoute(route.id)} style={styles.hideRouteBtn}>
+                    <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView><Modal visible={startModal} transparent animationType="slide" onRequestClose={() => setStartModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
@@ -285,7 +402,9 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
                 <View style={{ flex: 1 }}>
                   <TouchableOpacity style={styles.confirmBtn} onPress={handleStartRoute}>
                     <Ionicons name="play-circle" size={18} color={colors.bg} />
-                    <Text style={styles.confirmBtnText}>{customFare ? `Start · R${customFare}` : selectedFare > 0 ? `Start · R${selectedFare}` : "Start Route"}</Text>
+                    <Text style={styles.confirmBtnText}>
+                      {customFare ? `Start · R${customFare}` : selectedFare > 0 ? `Start · R${selectedFare}` : "Start Route"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -301,19 +420,19 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
               <Text style={styles.modalTitle}>Route Complete!</Text>
               <View style={styles.summaryGrid}>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>{formatZAR(summary ? summary.total_collected : 0)}</Text>
+                  <Text style={styles.summaryVal}>{formatZAR(summary?.total_collected ?? 0)}</Text>
                   <Text style={styles.summaryStatLabel}>Collected</Text>
                 </View>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>{summary ? summary.total_passengers : 0}</Text>
+                  <Text style={styles.summaryVal}>{summary?.total_passengers ?? 0}</Text>
                   <Text style={styles.summaryStatLabel}>Passengers</Text>
                 </View>
                 <View style={styles.summaryStat}>
-                  <Text style={styles.summaryVal}>{formatDuration(summary ? summary.duration_mins : 0)}</Text>
+                  <Text style={styles.summaryVal}>{formatDuration(summary?.duration_mins ?? 0)}</Text>
                   <Text style={styles.summaryStatLabel}>Duration</Text>
                 </View>
               </View>
-              <Text style={styles.summarySub}>{summary ? summary.app_count : 0} app · {summary ? summary.cash_count : 0} cash</Text>
+              <Text style={styles.summarySub}>{summary?.app_count ?? 0} app · {summary?.cash_count ?? 0} cash</Text>
               <View style={styles.modalActions}>
                 <View style={{ flex: 1 }}>
                   <TouchableOpacity style={styles.cancelBtn} onPress={() => setSummaryModal(false)}>
@@ -368,7 +487,8 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
                     <View style={styles.destCard}>
                       <Text style={styles.destTitle}>GOING TO</Text>
                       <View style={styles.destRow}>
-                        <Ionicons name={cashupDest.confirmed ? "checkmark-circle" : "warning-outline"} size={16} color={cashupDest.confirmed ? colors.green : "#FFD60A"} />
+                        <Ionicons name={cashupDest.confirmed ? "checkmark-circle" : "warning-outline"} size={16}
+                          color={cashupDest.confirmed ? colors.green : "#FFD60A"} />
                         <Text style={[styles.destText, !cashupDest.confirmed && { color: "#FFD60A" }]}>
                           {cashupDest.confirmed
                             ? cashupDest.method === "wallet"
@@ -390,7 +510,8 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: "#A064FF" }]} onPress={handleCashup} disabled={cashingUp}>
+                  <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: "#A064FF" }]}
+                    onPress={handleCashup} disabled={cashingUp}>
                     <Ionicons name="arrow-up-circle" size={18} color={colors.bg} />
                     <Text style={styles.confirmBtnText}>{cashingUp ? "Processing..." : "Confirm"}</Text>
                   </TouchableOpacity>
@@ -401,224 +522,232 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
         </Modal>
       </SafeAreaView>
     );
-        }const isLongRoute = routeData.duration_mins >= 120;
+   }
+  const isLongRoute = routeData.duration_mins >= 120;
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.cyan} />}>
 
-        <Text style={styles.pageTitle}>Earnings</Text>
+        <View style={styles.activeBadge}>
+          <View style={styles.activeDot} />
+          <Text style={styles.activeBadgeText}>ROUTE ACTIVE</Text>
+          {isLongRoute && (
+            <View style={styles.longRouteBadge}>
+              <Ionicons name="time-outline" size={11} color="#FFD60A" />
+              <Text style={styles.longRouteText}>{formatDuration(routeData.duration_mins)}</Text>
+            </View>
+          )}
+        </View>
 
-        <View style={styles.activeHeader}>
-          <View style={styles.activeLeft}>
-            <View style={styles.activeDot} />
-            <Text style={styles.activeTitle}>ROUTE ACTIVE</Text>
-            <Text style={styles.activeDuration}>{formatDuration(routeData.duration_mins)}</Text>
+        <View style={styles.activeEarningsCard}>
+          <Text style={styles.activeEarningsLabel}>COLLECTED THIS ROUTE</Text>
+          <Text style={styles.activeEarningsAmt}>{formatZAR(routeData.total_collected || 0)}</Text>
+          {routeData.fare > 0 && (
+            <Text style={styles.activeFare}>R{routeData.fare} fare set</Text>
+          )}
+          <View style={styles.activeMiniStats}>
+            <View style={styles.activeMiniStat}>
+              <Text style={styles.activeMiniVal}>{routeData.app_count || 0}</Text>
+              <Text style={styles.activeMiniLabel}>App</Text>
+            </View>
+            <View style={styles.activeMiniStat}>
+              <Text style={styles.activeMiniVal}>{routeData.cash_count || 0}</Text>
+              <Text style={styles.activeMiniLabel}>Cash</Text>
+            </View>
+            <View style={styles.activeMiniStat}>
+              <Text style={styles.activeMiniVal}>{(routeData.app_count || 0) + (routeData.cash_count || 0)}</Text>
+              <Text style={styles.activeMiniLabel}>Total pax</Text>
+            </View>
+            <View style={styles.activeMiniStat}>
+              <Text style={styles.activeMiniVal}>{formatDuration(routeData.duration_mins || 0)}</Text>
+              <Text style={styles.activeMiniLabel}>Time</Text>
+            </View>
           </View>
-          <TouchableOpacity style={styles.endBtn} onPress={handleEndRoute}>
-            <Ionicons name="stop-circle" size={18} color="#fff" />
-            <Text style={styles.endBtnText}>End Route</Text>
+        </View>
+
+        <Text style={styles.sectionLabel}>CASH PASSENGERS</Text>
+        <View style={styles.cashRow}>
+          <TouchableOpacity
+            style={[styles.cashBtn, styles.cashBtnMinus]}
+            onPress={() => handleCash(-1)}
+            disabled={cashUpdating || (routeData.cash_count || 0) === 0}>
+            <Ionicons name="remove" size={24} color={colors.red} />
+          </TouchableOpacity>
+          <View style={styles.cashCount}>
+            <Text style={styles.cashCountNum}>{routeData.cash_count || 0}</Text>
+            <Text style={styles.cashCountLabel}>cash pax</Text>
+          </View>
+          <TouchableOpacity style={[styles.cashBtn, styles.cashBtnPlus]} onPress={() => handleCash(1)} disabled={cashUpdating}>
+            <Ionicons name="add" size={24} color={colors.green} />
           </TouchableOpacity>
         </View>
 
-        {isLongRoute && (
-          <View style={styles.warningBanner}>
-            <Ionicons name="warning-outline" size={16} color="#FFD60A" />
-            <Text style={styles.warningText}>Route running {formatDuration(routeData.duration_mins)} — did you forget to end?</Text>
-          </View>
-        )}
+        <TouchableOpacity style={styles.endRouteBtn} onPress={handleEndRoute}>
+          <Ionicons name="stop-circle" size={20} color={colors.bg} />
+          <Text style={styles.endRouteBtnText}>End Route</Text>
+        </TouchableOpacity>
+      </ScrollView>
 
-        {cashupStatus?.has_owner && cashupStatus.daily_target > 0 && (
-          <View style={styles.targetMini}>
-            <Text style={styles.targetMiniLabel}>Target: {formatZAR(cashupStatus.daily_target)}</Text>
-            <View style={styles.targetBar}>
-              <View style={[styles.targetBarFill, {
-                width: `${Math.min(100, (routeData.today_total / cashupStatus.daily_target) * 100)}%` as any,
-                backgroundColor: routeData.today_total >= cashupStatus.daily_target ? colors.green : colors.cyan,
-              }]} />
+      <Modal visible={summaryModal} transparent animationType="slide" onRequestClose={() => setSummaryModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.summaryEmoji}>🎉</Text>
+            <Text style={styles.modalTitle}>Route Complete!</Text>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryStat}>
+                <Text style={styles.summaryVal}>{formatZAR(summary?.total_collected ?? 0)}</Text>
+                <Text style={styles.summaryStatLabel}>Collected</Text>
+              </View>
+              <View style={styles.summaryStat}>
+                <Text style={styles.summaryVal}>{summary?.total_passengers ?? 0}</Text>
+                <Text style={styles.summaryStatLabel}>Passengers</Text>
+              </View>
+              <View style={styles.summaryStat}>
+                <Text style={styles.summaryVal}>{formatDuration(summary?.duration_mins ?? 0)}</Text>
+                <Text style={styles.summaryStatLabel}>Duration</Text>
+              </View>
             </View>
-            <Text style={styles.targetMiniPct}>{Math.round((routeData.today_total / cashupStatus.daily_target) * 100)}%</Text>
-          </View>
-        )}
-
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, { flex: 1.2 }]}>
-            <Text style={styles.statCardLabel}>COLLECTED</Text>
-            <Text style={styles.statCardVal}>{formatZAR(routeData.total_collected)}</Text>
-            {routeData.fare > 0 && <Text style={styles.statCardSub}>R{routeData.fare} fare</Text>}
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statCardLabel}>PASSENGERS</Text>
-            <Text style={[styles.statCardVal, { color: colors.cyan }]}>{routeData.total_passengers}</Text>
-            <Text style={styles.statCardSub}>{routeData.app_count} app</Text>
-          </View>
-        </View>
-
-        <View style={styles.cashCard}>
-          <View style={styles.cashLeft}>
-            <Ionicons name="cash-outline" size={20} color="#FFD60A" />
-            <View>
-              <Text style={styles.cashTitle}>Cash Passengers</Text>
-              <Text style={styles.cashSub}>Tap to add or remove</Text>
-            </View>
-          </View>
-          <View style={styles.cashCounter}>
-            <TouchableOpacity style={[styles.cashBtn, routeData.cash_count === 0 && styles.cashBtnDisabled]}
-              onPress={() => handleCash(-1)} disabled={cashUpdating || routeData.cash_count === 0}>
-              <Ionicons name="remove" size={20} color={routeData.cash_count === 0 ? colors.textDim : colors.text} />
-            </TouchableOpacity>
-            <Text style={styles.cashCount}>{routeData.cash_count}</Text>
-            <TouchableOpacity style={styles.cashBtn} onPress={() => handleCash(1)} disabled={cashUpdating}>
-              <Ionicons name="add" size={20} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.todayMini}>
-          <Text style={styles.todayMiniLabel}>Today total</Text>
-          <Text style={styles.todayMiniVal}>{formatZAR(routeData.today_total)}</Text>
-          <Text style={styles.todayMiniCount}>{routeData.today_count} passengers</Text>
-        </View>
-
-        <Text style={styles.sectionLabel}>APP PAYMENTS THIS ROUTE ({routeData.app_count})</Text>
-
-        {routeData.payments.length === 0 ? (
-          <View style={styles.emptyFeed}>
-            <Ionicons name="time-outline" size={32} color={colors.textDim} />
-            <Text style={styles.emptyFeedText}>Waiting for payments...</Text>
-            <Text style={styles.emptyFeedSub}>Passengers scan your QR · auto-refreshes every 10s</Text>
-          </View>
-        ) : (
-          routeData.payments.map((p: any, i: number) => (
-            <View key={p.id} style={[styles.paymentCard, i === 0 && styles.paymentCardNew, p.underpaid && styles.paymentCardWarn]}>
-              <View style={[styles.paymentIcon, { backgroundColor: p.underpaid ? "#FFD60A22" : colors.greenDim }]}>
-                <Ionicons name={p.underpaid ? "warning" : "checkmark-circle"} size={22} color={p.underpaid ? "#FFD60A" : colors.green} />
+            <Text style={styles.summarySub}>{summary?.app_count ?? 0} app · {summary?.cash_count ?? 0} cash</Text>
+            <View style={styles.modalActions}>
+              <View style={{ flex: 1 }}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setSummaryModal(false)}>
+                  <Text style={styles.cancelBtnText}>Done</Text>
+                </TouchableOpacity>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.paymentAmount, p.underpaid && { color: "#FFD60A" }]}>
-                  {formatZAR(p.driver_net)}
-                  {p.underpaid && routeData.fare > 0 && <Text style={styles.underpaidTag}> -{formatZAR(routeData.fare - p.amount)}</Text>}
-                </Text>
-                <Text style={styles.paymentTime}>{formatTime(p.created_at)}</Text>
+                <TouchableOpacity style={styles.confirmBtn} onPress={() => { setSummaryModal(false); setStartModal(true); }}>
+                  <Ionicons name="play-circle" size={18} color={colors.bg} />
+                  <Text style={styles.confirmBtnText}>New Route</Text>
+                </TouchableOpacity>
               </View>
-              {p.underpaid && <View style={styles.underpaidBadge}><Text style={styles.underpaidBadgeText}>Underpaid</Text></View>}
             </View>
-          ))
-        )}
-      </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
-}const styles = StyleSheet.create({
+}
+
+const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  pageTitle: { color: colors.text, fontSize: 26, fontWeight: "800", marginBottom: 16 },
-  sectionLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, marginBottom: 10 },
-  todayCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 20, alignItems: "center", marginBottom: 16 },
-  todayLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
-  todayAmount: { color: colors.green, fontSize: 36, fontWeight: "900", marginTop: 4 },
-  todayCount: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  pageTitle: { color: colors.text, fontSize: 24, fontWeight: "800", marginBottom: 16 },
+
+  // Earnings card
+  earningsCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 20, marginBottom: 16 },
+  earningsRow: { flexDirection: "row", gap: 16 },
+  earningsStat: { flex: 1 },
+  earningsLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 4 },
+  earningsVal: { color: colors.green, fontSize: 24, fontWeight: "800" },
+  earningsSub: { color: colors.textDim, fontSize: 11, marginTop: 2 },
+
+  // Cashup card
   cashupCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: "#A064FF44", padding: 16, marginBottom: 16 },
   cashupHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
   cashupTitle: { color: colors.text, fontWeight: "800", fontSize: 15, flex: 1 },
-  confirmedBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.greenDim, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  confirmedBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.greenDim, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   confirmedText: { color: colors.green, fontSize: 10, fontWeight: "700" },
   cashupOwner: { color: colors.textMuted, fontSize: 12, marginBottom: 12 },
-  cashupStatsRow: { flexDirection: "row", marginBottom: 12 },
-  cashupStat: { flex: 1, alignItems: "center" },
-  cashupStatVal: { color: colors.text, fontWeight: "800", fontSize: 16 },
+  cashupStatsRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  cashupStat: { flex: 1, backgroundColor: colors.bg, borderRadius: radius.sm, padding: 10, alignItems: "center" },
+  cashupStatVal: { color: colors.text, fontSize: 16, fontWeight: "800" },
   cashupStatLabel: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
-  outstandingBanner: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFD60A11", borderRadius: radius.sm, padding: 8, marginBottom: 8, borderWidth: 1, borderColor: "#FFD60A33" },
+  outstandingBanner: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFD60A15", borderRadius: radius.sm, padding: 8, marginBottom: 10 },
   outstandingText: { color: "#FFD60A", fontSize: 12, fontWeight: "700" },
-  unconfirmedNote: { flexDirection: "row", alignItems: "center", gap: 6, padding: 8, backgroundColor: colors.bg3, borderRadius: radius.sm, marginBottom: 8 },
+  unconfirmedNote: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
   unconfirmedText: { color: colors.textMuted, fontSize: 11, flex: 1 },
-  cashupBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#A064FF", borderRadius: radius.md, paddingVertical: 14 },
-  cashupBtnDisabled: { backgroundColor: colors.bg3, borderWidth: 1, borderColor: colors.border },
-  cashupBtnText: { color: colors.bg, fontWeight: "800", fontSize: 15 },
-  offDutyCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 32, alignItems: "center", marginBottom: 16, gap: 8 },
-  offDutyDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.textDim },
-  offDutyTitle: { color: colors.textMuted, fontSize: 13, fontWeight: "800", letterSpacing: 2 },
-  offDutySub: { color: colors.textDim, fontSize: 13 },
-  startBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.cyan, borderRadius: radius.md, paddingHorizontal: 28, paddingVertical: 14, marginTop: 8 },
-  startBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
-  lastRouteCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16 },
-  lastRouteRow: { flexDirection: "row", marginTop: 12, marginBottom: 8 },
+  cashupBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#A064FF", borderRadius: radius.md, padding: 14 },
+  cashupBtnDisabled: { opacity: 0.4 },
+  cashupBtnText: { color: colors.bg, fontWeight: "800", fontSize: 14 },
+
+  // Off duty
+  offDutyCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 24, alignItems: "center", marginBottom: 16 },
+  offDutyDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.textDim, marginBottom: 10 },
+  offDutyTitle: { color: colors.textMuted, fontSize: 13, fontWeight: "800", letterSpacing: 1.4 },
+  offDutySub: { color: colors.textDim, fontSize: 13, marginTop: 4, marginBottom: 16 },
+  startBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.cyan, borderRadius: radius.md, paddingHorizontal: 24, paddingVertical: 14 },
+  startBtnText: { color: colors.bg, fontWeight: "800", fontSize: 15 },
+
+  // Last route
+  lastRouteCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16 },
+  sectionLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 10 },
+  lastRouteRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
   lastRouteStat: { flex: 1, alignItems: "center" },
   lastRouteVal: { color: colors.text, fontSize: 18, fontWeight: "800" },
-  lastRouteLabel: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  lastRouteSub: { color: colors.textDim, fontSize: 12, textAlign: "center" },
-  activeHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.green, padding: 14, marginBottom: 8 },
-  activeLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  lastRouteLabel: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  lastRouteSub: { color: colors.textDim, fontSize: 11, textAlign: "center" },
+
+  // Route history
+  historyHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  historyActionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
+  historyActionText: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  routeHistoryCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10, paddingRight: 40 },
+  routeHistoryAmt: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  routeHistoryPill: { backgroundColor: colors.bg3, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  routeHistoryPillText: { color: colors.textMuted, fontSize: 10, fontWeight: "700" },
+  routeHistorySub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  routeHistoryTime: { color: colors.textDim, fontSize: 10, marginTop: 3 },
+  hideRouteBtn: { position: "absolute", top: 14, right: 12, padding: 4 },
+  hiddenNote: { alignItems: "center", padding: 20, gap: 8 },
+  hiddenNoteText: { color: colors.textMuted, fontSize: 13 },
+
+  // Active route
+  activeBadge: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
   activeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.green },
-  activeTitle: { color: colors.green, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
-  activeDuration: { color: colors.textMuted, fontSize: 12 },
-  endBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.red, borderRadius: radius.sm + 2, paddingHorizontal: 14, paddingVertical: 8 },
-  endBtnText: { color: "#fff", fontWeight: "800", fontSize: 13 },
-  warningBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFD60A22", borderRadius: radius.sm, borderWidth: 1, borderColor: "#FFD60A44", padding: 10, marginBottom: 8 },
-  warningText: { color: "#FFD60A", fontSize: 12, fontWeight: "600", flex: 1 },
-  targetMini: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 10, marginBottom: 10 },
-  targetMiniLabel: { color: colors.textMuted, fontSize: 11, minWidth: 100 },
-  targetBar: { flex: 1, height: 6, backgroundColor: colors.bg3, borderRadius: 3, overflow: "hidden" },
-  targetBarFill: { height: 6, borderRadius: 3 },
-  targetMiniPct: { color: colors.textMuted, fontSize: 11, minWidth: 35, textAlign: "right" },
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
-  statCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, alignItems: "center" },
-  statCardLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.2, marginBottom: 4 },
-  statCardVal: { color: colors.green, fontSize: 22, fontWeight: "900" },
-  statCardSub: { color: colors.textDim, fontSize: 11, marginTop: 2 },
-  cashCard: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: "#FFD60A44", padding: 14, marginBottom: 10 },
-  cashLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  cashTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
-  cashSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  cashCounter: { flexDirection: "row", alignItems: "center", gap: 4 },
-  cashBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bg3, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
-  cashBtnDisabled: { opacity: 0.3 },
-  cashCount: { color: colors.text, fontSize: 22, fontWeight: "900", minWidth: 40, textAlign: "center" },
-  todayMini: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 16 },
-  todayMiniLabel: { color: colors.textMuted, fontSize: 12, flex: 1 },
-  todayMiniVal: { color: colors.cyan, fontWeight: "800", fontSize: 15 },
-  todayMiniCount: { color: colors.textDim, fontSize: 11 },
-  emptyFeed: { alignItems: "center", padding: 32, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, borderRadius: radius.md, gap: 8 },
-  emptyFeedText: { color: colors.textMuted, fontWeight: "700" },
-  emptyFeedSub: { color: colors.textDim, fontSize: 12, textAlign: "center", lineHeight: 18 },
-  paymentCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 8 },
-  paymentCardNew: { borderColor: colors.green },
-  paymentCardWarn: { borderColor: "#FFD60A" },
-  paymentIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  paymentAmount: { color: colors.green, fontSize: 18, fontWeight: "900" },
-  paymentTime: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  underpaidTag: { color: "#FFD60A", fontSize: 13, fontWeight: "700" },
-  underpaidBadge: { backgroundColor: "#FFD60A22", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: "#FFD60A44" },
-  underpaidBadgeText: { color: "#FFD60A", fontSize: 10, fontWeight: "800" },
+  activeBadgeText: { color: colors.green, fontSize: 12, fontWeight: "800", letterSpacing: 1.4 },
+  longRouteBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FFD60A15", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  longRouteText: { color: "#FFD60A", fontSize: 11, fontWeight: "700" },
+  activeEarningsCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.green, padding: 24, marginBottom: 20, alignItems: "center" },
+  activeEarningsLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
+  activeEarningsAmt: { color: colors.green, fontSize: 44, fontWeight: "900", marginTop: 8, letterSpacing: -1 },
+  activeFare: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  activeMiniStats: { flexDirection: "row", gap: 16, marginTop: 16 },
+  activeMiniStat: { alignItems: "center" },
+  activeMiniVal: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  activeMiniLabel: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  cashRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 20, marginBottom: 24 },
+  cashBtn: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  cashBtnMinus: { borderColor: colors.red, backgroundColor: colors.red + "15" },
+  cashBtnPlus: { borderColor: colors.green, backgroundColor: colors.green + "15" },
+  cashCount: { alignItems: "center", minWidth: 80 },
+  cashCountNum: { color: colors.text, fontSize: 40, fontWeight: "900" },
+  cashCountLabel: { color: colors.textMuted, fontSize: 12 },
+  endRouteBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.red, borderRadius: radius.md, padding: 16 },
+  endRouteBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
+
+  // Modals
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.border },
   modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 },
-  modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center", marginBottom: 6 },
-  modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 20, lineHeight: 18 },
-  fareLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 10 },
-  fareGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  fareChip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
-  fareChipActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
-  fareChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 14 },
+  modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center", marginBottom: 4 },
+  modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 16 },
+  fareLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8, marginTop: 8 },
+  fareGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  fareChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  fareChipActive: { borderColor: colors.cyan, backgroundColor: colors.cyanDim },
+  fareChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
   fareChipTextActive: { color: colors.cyan },
-  customFareInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 12, color: colors.text, fontSize: 18, fontWeight: "800", marginBottom: 20 },
+  customFareInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, color: colors.text, fontSize: 16, padding: 12, textAlign: "center", marginBottom: 16 },
   customFareInputActive: { borderColor: colors.cyan },
-  modalActions: { flexDirection: "row", gap: 12 },
-  cancelBtn: { backgroundColor: colors.bg3, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, alignItems: "center" },
-  cancelBtnText: { color: colors.textMuted, fontWeight: "700" },
-  confirmBtn: { backgroundColor: colors.cyan, borderRadius: radius.md, padding: 14, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 },
-  confirmBtnText: { color: colors.bg, fontWeight: "800" },
+  modalActions: { flexDirection: "row", gap: 12, marginTop: 8 },
+  cancelBtn: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: 14, alignItems: "center" },
+  cancelBtnText: { color: colors.textMuted, fontWeight: "700", fontSize: 14 },
+  confirmBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.cyan, borderRadius: radius.md, padding: 14 },
+  confirmBtnText: { color: colors.bg, fontWeight: "800", fontSize: 14 },
   summaryEmoji: { fontSize: 40, textAlign: "center", marginBottom: 8 },
-  summaryGrid: { flexDirection: "row", marginVertical: 20 },
-  summaryStat: { flex: 1, alignItems: "center" },
-  summaryVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
-  summaryStatLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
-  summarySub: { color: colors.textDim, fontSize: 12, textAlign: "center", marginBottom: 20 },
-  cashupConfirmGrid: { backgroundColor: colors.bg, borderRadius: radius.md, padding: 14, marginVertical: 16, gap: 8 },
-  cashupConfirmRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  summaryGrid: { flexDirection: "row", gap: 8, marginVertical: 16 },
+  summaryStat: { flex: 1, backgroundColor: colors.bg, borderRadius: radius.sm, padding: 12, alignItems: "center" },
+  summaryVal: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  summaryStatLabel: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  summarySub: { color: colors.textMuted, fontSize: 12, textAlign: "center", marginBottom: 16 },
+  cashupConfirmGrid: { backgroundColor: colors.bg, borderRadius: radius.md, padding: 14, marginBottom: 12 },
+  cashupConfirmRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
   cashupConfirmLabel: { color: colors.textMuted, fontSize: 13 },
-  cashupConfirmVal: { color: colors.text, fontWeight: "800", fontSize: 15 },
-  destCard: { backgroundColor: colors.bg, borderRadius: radius.md, padding: 12, marginBottom: 16 },
-  destTitle: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.2, marginBottom: 8 },
+  cashupConfirmVal: { color: colors.text, fontSize: 13, fontWeight: "700" },
+  destCard: { backgroundColor: colors.bg, borderRadius: radius.sm, padding: 12, marginBottom: 12 },
+  destTitle: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 6 },
   destRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  destText: { color: colors.textMuted, fontSize: 13, flex: 1 },
+  destText: { color: colors.text, fontSize: 13, flex: 1 },
 });
