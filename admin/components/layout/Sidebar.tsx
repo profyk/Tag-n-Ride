@@ -7,9 +7,11 @@ import {
   FileText, HelpCircle, Fingerprint, Monitor, Bell,
   AlertTriangle, TrendingUp, Activity, Settings, UserCheck,
   Users2, Truck, Scale, MapPin, BookOpen, Terminal,
+  Sun, Moon,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/app/providers";
 
 const ROLE_LABELS: Record<string, string> = {
   superadmin: "Superadmin", ceo: "CEO", cto: "CTO",
@@ -50,6 +52,28 @@ const superAdminNav = [
   { label: "Superadmin", href: "/admin/superadmin", icon: ShieldCheck },
 ];
 
+function ThemeToggleCompact() {
+  const { theme, setTheme } = useTheme();
+
+  const cycle = () => {
+    const order = ["dark", "light", "system"] as const;
+    const next = order[(order.indexOf(theme as any) + 1) % order.length];
+    setTheme(next);
+  };
+
+  const Icon = theme === "light" ? Sun : theme === "system" ? Monitor : Moon;
+
+  return (
+    <button
+      onClick={cycle}
+      title={`Theme: ${theme} — click to cycle`}
+      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-textMuted hover:text-text hover:bg-bg3 w-full transition-all">
+      <Icon size={15} />
+      <span className="capitalize">{theme} mode</span>
+    </button>
+  );
+}
+
 export function Sidebar() {
   const path = usePathname();
   const role = getRole() || "";
@@ -81,7 +105,9 @@ export function Sidebar() {
       <Link href={href} className={cn(
         "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
         active
-          ? purple ? "bg-purple/10 text-purple border border-purple/20" : "bg-cyanDim text-cyan border border-cyan/20"
+          ? purple
+            ? "bg-purple/10 text-purple border border-purple/20"
+            : "bg-cyanDim text-cyan border border-cyan/20"
           : "text-textMuted hover:text-text hover:bg-bg3"
       )}>
         <Icon size={15} />
@@ -92,6 +118,7 @@ export function Sidebar() {
 
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-bg2 border-r border-border flex flex-col z-40">
+
       <div className="px-4 py-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-cyanDim border border-cyan/30 flex items-center justify-center">
@@ -99,7 +126,9 @@ export function Sidebar() {
           </div>
           <div>
             <p className="text-text font-extrabold text-sm leading-none">Tag n Ride</p>
-            <p className="text-textMuted text-[10px] mt-0.5 font-medium">{ROLE_LABELS[role] || "Admin"} Panel</p>
+            <p className="text-textMuted text-[10px] mt-0.5 font-medium">
+              {ROLE_LABELS[role] || "Admin"} Panel
+            </p>
           </div>
         </div>
       </div>
@@ -108,20 +137,26 @@ export function Sidebar() {
         {visibleNav.map(({ label, href, icon }) => (
           <NavLink key={href} href={href} icon={icon} label={label} />
         ))}
+
         {visibleAdvanced.length > 0 && (
           <>
             <div className="pt-4 pb-1.5">
-              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">Advanced</p>
+              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">
+                Advanced
+              </p>
             </div>
             {visibleAdvanced.map(({ label, href, icon }) => (
               <NavLink key={href} href={href} icon={icon} label={label} />
             ))}
           </>
         )}
+
         {superAdmin && (
           <>
             <div className="pt-4 pb-1.5">
-              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">Superadmin</p>
+              <p className="px-3 text-[9px] font-extrabold text-textDim uppercase tracking-widest">
+                Superadmin
+              </p>
             </div>
             {superAdminNav.map(({ label, href, icon }) => (
               <NavLink key={href} href={href} icon={icon} label={label} purple />
@@ -130,13 +165,16 @@ export function Sidebar() {
         )}
       </nav>
 
-      <div className="px-3 py-3 border-t border-border">
-        <button onClick={handleSignOut}
+      <div className="px-3 py-3 border-t border-border space-y-0.5">
+        <ThemeToggleCompact />
+        <button
+          onClick={handleSignOut}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-textMuted hover:text-red hover:bg-red/10 w-full transition-all">
           <LogOut size={15} />
           Sign out
         </button>
       </div>
+
     </aside>
   );
 }
