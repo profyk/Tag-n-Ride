@@ -1279,12 +1279,12 @@ async def support_user_lookup(query: str, admin: dict = Depends(require_admin)):
             uid
         )
         audit_logs = await conn.fetch(
-            """SELECT al.id, al.action, al.metadata, al.created_at, au.full_name as admin_name
-               FROM audit_logs al
-               LEFT JOIN users au ON au.id=al.admin_id
-               WHERE al.target_id=$1
-               ORDER BY al.created_at DESC LIMIT 20""",
-            uid
+    """SELECT al.id, al.action, al.metadata, al.created_at, au.full_name as admin_name
+       FROM audit_logs al
+       LEFT JOIN users au ON au.id=al.admin_id
+       WHERE al.target_id=$1
+       ORDER BY al.created_at DESC LIMIT 20""",
+    uid
         )
         support_notes = await conn.fetch(
             """SELECT sn.id, sn.note, sn.created_at, au.full_name as admin_name
