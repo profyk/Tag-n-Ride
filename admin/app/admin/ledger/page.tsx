@@ -106,7 +106,7 @@ export default function LedgerPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Refund failed");
-      alert(`Refund processed for ${refundUserName || refundSearch}. Reference: ${data.reference}`);
+      alert(`Refund processed successfully for ${refundUserName || refundSearch}.${data?.reference ? ` Reference: ${data.reference}` : ""}`);
       setRefundModal(false);
       setRefundSearch(""); setRefundUserName("");
       setRefundAmount(""); setRefundReason("");
