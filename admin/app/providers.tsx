@@ -1,23 +1,19 @@
 "use client";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Toaster } from "react-hot-toast";
 
-export function Providers({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      {children}
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: {
-            background: "#0D0D16",
-            color: "#F0F0FF",
-            border: "1px solid #1A1A2E",
-            fontSize: 13,
-          },
-          success: { iconTheme: { primary: "#00E676", secondary: "#05050A" } },
-          error: { iconTheme: { primary: "#FF4D6D", secondary: "#05050A" } },
-        }}
-      />
-    </>
-  );
+type Theme = "dark" | "light" | "system";
+
+interface ThemeContextValue {
+  theme: Theme;
+  setTheme: (t: Theme) => void;
+  resolvedTheme: "dark" | "light";
 }
+
+const ThemeContext = createContext<ThemeContextValue>({
+  theme: "dark",
+  setTheme: () => {},
+  resolvedTheme: "dark",
+});
+
+export function useTheme() { return useContext(ThemeContext); }
