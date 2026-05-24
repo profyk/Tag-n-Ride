@@ -3483,7 +3483,6 @@ async def admin_ledger_transactions(
              "description": r["description"], "created_at": iso(r["created_at"])} for r in rows]
 
 @api.post("/admin/ledger/refund")
-@api.post("/admin/ledger/refund")
 async def admin_process_refund(body: dict, request: Request, admin: dict = Depends(require_admin)):
     if not has_permission(admin, "process_refunds"):
         raise HTTPException(status_code=403, detail="Finance, CFO or CEO only")
@@ -3512,7 +3511,32 @@ async def admin_process_refund(body: dict, request: Request, admin: dict = Depen
         if not user_row:
             raise HTTPException(status_code=404, detail="User not found")
         user_id = user_row["id"]
-
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2",
+                amount, user_id
+            )
+            ref = gen_ref()
+            txn_id = str(uuid.uuid4())
+            await conn.execute(
+                "INSERT INTO transactions (id,reference,type,status,amount,receiver_id,note) VALUES ($1,$2,'refund','completed',$3,$4,$5)",
+                txn_id, ref, amount, user_id, reason
+            )
+            try:
+                await ledger_entry(conn, "refund_reserve", "debit", amount,
+                    txn_id, "refund", f"Refund: {reason}", admin["id"])
+                await ledger_entry(conn, "user_wallets", "credit", amount,
+                    txn_id, "refund", f"Refund credited R{amount:.2f}", user_id)
+            except Exception as e:
+                print(f"[LEDGER refund] {e}")
+        await send_sms(user_row["phone_number"],
+            f"Tag n Ride: Refund of R{amount:.2f} credited to your wallet. Ref: {ref}")
+        await push_notification(conn, "Refund Processed",
+            f"R{amount:.2f} refund credited. Ref: {ref}", "success", "user", user_id)
+        await audit(conn, admin["id"], "PROCESS_REFUND", user_id, "refund",
+            {"amount": amount, "reason": reason}, request.client.host)
+    return {"ok": True, "reference": ref, "amount": amount, "user": user_row["full_name"]}
+    
 @api.get("/admin/ledger/summary")
 async def admin_ledger_summary(admin: dict = Depends(require_ledger_access)):
     async with pool.acquire() as conn:
