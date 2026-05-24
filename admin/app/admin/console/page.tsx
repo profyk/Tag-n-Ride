@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Spinner } from "@/components/ui";
 import { useRouter } from "next/navigation";
-import { isSuperAdmin } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import {
   Play, CheckCircle, XCircle, AlertTriangle,
@@ -44,7 +43,17 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 const CATEGORY_ORDER = ["financial", "transactions", "routes", "drivers", "maintenance", "danger"];
 
-type CmdResult = { ok: boolean; message: string; details: Record<string, any> };export default function SystemConsolePage() {
+type CmdResult = { ok: boolean; message: string; details: Record<string, any> };
+
+function getAdminRole(): string {
+  try {
+    const token = localStorage.getItem("tnr_admin_token") || "";
+    const payload = JSON.parse(atob(token.split(".")[1] || "e30="));
+    return payload.role || "";
+  } catch { return ""; }
+}
+
+export default function SystemConsolePage() {
   const router = useRouter();
   const [commands, setCommands] = useState<Record<string, any>>({});
   const [log, setLog] = useState<any[]>([]);
@@ -54,10 +63,16 @@ type CmdResult = { ok: boolean; message: string; details: Record<string, any> };
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showLog, setShowLog] = useState(false);
   const [changePinOpen, setChangePinOpen] = useState(false);
+  const [role, setRole] = useState("");
   const dangerPin = useDangerPin();
 
   useEffect(() => {
-    if (!isSuperAdmin()) { router.push("/admin/dashboard"); return; }
+    const r = getAdminRole();
+    setRole(r);
+    if (!["superadmin", "ceo"].includes(r)) {
+      router.push("/admin/dashboard");
+      return;
+    }
     loadAll();
   }, []);
 
@@ -110,7 +125,9 @@ type CmdResult = { ok: boolean; message: string; details: Record<string, any> };
     return acc;
   }, {} as Record<string, any[]>);
 
-  if (!isSuperAdmin()) return null;return (
+  if (!["superadmin", "ceo"].includes(role) && role !== "") return null;
+
+  return (
     <AdminShell title="System Console">
       <div className="space-y-6 max-w-4xl">
 
@@ -118,7 +135,7 @@ type CmdResult = { ok: boolean; message: string; details: Record<string, any> };
           <div className="flex items-start gap-3 p-4 bg-yellow/5 border border-yellow/20 rounded-xl flex-1">
             <AlertTriangle size={18} className="text-yellow flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-yellow font-bold text-sm">Superadmin only — Use with caution</p>
+              <p className="text-yellow font-bold text-sm">CEO and Superadmin only — Use with caution</p>
               <p className="text-yellow/70 text-xs mt-1">
                 These commands modify live data. Danger Zone commands require your security PIN.
                 All actions are fully logged with your admin ID, IP, and timestamp.
@@ -136,6 +153,7 @@ type CmdResult = { ok: boolean; message: string; details: Record<string, any> };
           <Shield size={14} className="text-textMuted" />
           <p className="text-textMuted text-xs">
             Danger Zone is PIN-protected. Your PIN token is valid for 5 minutes after verification.
+            Only test account data is reset — real user data is never touched.
           </p>
         </div>
 
