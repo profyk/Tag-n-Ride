@@ -1242,7 +1242,7 @@ async def support_user_lookup(query: str, admin: dict = Depends(require_admin)):
         user = await conn.fetchrow(
             """SELECT u.id, u.phone_number, u.full_name, u.role, u.is_active,
                u.created_at, u.vehicle_plate,
-               COALESCE((SELECT true FROM flagged_accounts fa WHERE fa.user_id=u.id AND fa.status='open' LIMIT 1), false) as flagged
+               COALESCE((SELECT true FROM flagged_accounts fa WHERE fa.user_id=u.id AND fa.resolved_at IS NULL LIMIT 1), false) as flagged
                FROM users u
                WHERE u.phone_number ILIKE $1
                OR u.full_name ILIKE $1
