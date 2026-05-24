@@ -14,12 +14,6 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "@/app/providers";
 import { FlaskConical, FileText } from "lucide-react";
 
-// In advancedNav add:
-{ label: "Statements", href: "/admin/statements", icon: FileText, permission: "download_statements" },
-
-// In superAdminNav add:
-{ label: "Test Users", href: "/admin/test-users", icon: FlaskConical },
-
 const ROLE_LABELS: Record<string, string> = {
   superadmin: "Superadmin", ceo: "CEO", cto: "CTO",
   cfo: "CFO", admin: "Admin", finance: "Finance", support: "Support",
@@ -49,6 +43,7 @@ const advancedNav = [
   { label: "Passenger Analytics", href: "/admin/passengers", icon: Users2, permission: "view_analytics" },
   { label: "Fleet Reports", href: "/admin/fleet", icon: Truck, permission: "view_analytics" },
   { label: "Onboarding Pipeline", href: "/admin/onboarding", icon: UserCheck, permission: "manage_drivers" },
+  { label: "Statements", href: "/admin/statements", icon: FileText, permission: "download_statements" },
 ];
 
 const superAdminNav = [
@@ -57,6 +52,7 @@ const superAdminNav = [
   { label: "Settings", href: "/admin/settings", icon: Settings },
   { label: "System Console", href: "/admin/console", icon: Terminal },
   { label: "Superadmin", href: "/admin/superadmin", icon: ShieldCheck },
+  { label: "Test Users", href: "/admin/test-users", icon: FlaskConical },
 ];
 
 function ThemeToggleCompact() {
