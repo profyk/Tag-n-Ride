@@ -193,8 +193,8 @@ export default function Home() {
           {isDriver && wallet ? (
             <View style={styles.statsRow}>
               <View style={styles.stat}>
-                <Text style={styles.statLabel}>Total earnings</Text>
-                <Text style={styles.statVal}>{formatZAR(wallet.total_earnings ?? 0)}</Text>
+                <Text style={styles.statLabel}>Today</Text>
+                <Text style={styles.statVal}>{formatZAR(wallet.today_total ?? 0)}</Text>
               </View>
               <View style={[styles.stat, { borderLeftColor: colors.border, borderLeftWidth: 1, paddingLeft: 16 }]}>
                 <Text style={styles.statLabel}>Rating</Text>
