@@ -3531,8 +3531,8 @@ async def admin_process_refund(body: dict, request: Request, admin: dict = Depen
                 print(f"[LEDGER refund] {e}")
         await send_sms(user_row["phone_number"],
             f"Tag n Ride: Refund of R{amount:.2f} credited to your wallet. Ref: {ref}")
-        await push_notification(conn, "Refund Processed",
-            f"R{amount:.2f} refund credited. Ref: {ref}", "success", "user", user_id)
+        await send_notification(conn, "Refund Processed",
+    f"R{amount:.2f} refund credited. Ref: {ref}", "success", "user", user_id)
         await audit(conn, admin["id"], "PROCESS_REFUND", user_id, "refund",
             {"amount": amount, "reason": reason}, request.client.host)
     return {"ok": True, "reference": ref, "amount": amount, "user": user_row["full_name"]}
