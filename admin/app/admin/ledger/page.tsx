@@ -5,20 +5,26 @@ import { Card, Spinner } from "@/components/ui";
 import { hasPermission } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { TrendingUp, TrendingDown, DollarSign, Wallet, ArrowUpRight, ArrowDownLeft, RefreshCw } from "lucide-react";
+import {
+  TrendingUp, TrendingDown, DollarSign, Wallet,
+  ArrowUpRight, ArrowDownLeft, RefreshCw, CheckCircle,
+} from "lucide-react";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
-const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`, "Content-Type": "application/json" });
+const authHeaders = () => ({
+  Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
+  "Content-Type": "application/json",
+});
 
 const ACCOUNT_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  user_wallets:              { color: "text-cyan",   bg: "bg-cyan/10",     label: "User Wallets" },
-  driver_earnings_pending:   { color: "text-yellow", bg: "bg-yellow/10",   label: "Driver Earnings Pending" },
-  platform_revenue:          { color: "text-green",  bg: "bg-green/10",    label: "Platform Revenue" },
-  processing_fees_collected: { color: "text-purple", bg: "bg-purple/10",   label: "Processing Fees Collected" },
-  gateway_fees_paid:         { color: "text-red",    bg: "bg-red/10",      label: "Gateway Fees Paid" },
-  operations_income:         { color: "text-cyan",   bg: "bg-cyan/10",     label: "Operations Income" },
-  withdrawal_settlements:    { color: "text-orange-400", bg: "bg-orange-400/10", label: "Withdrawal Settlements" },
-  refund_reserve:            { color: "text-yellow", bg: "bg-yellow/10",   label: "Refund Reserve" },
+  user_wallets:              { color: "text-cyan",       bg: "bg-cyan/10",        label: "User Wallets" },
+  driver_earnings_pending:   { color: "text-yellow",     bg: "bg-yellow/10",      label: "Driver Earnings Pending" },
+  platform_revenue:          { color: "text-green",      bg: "bg-green/10",       label: "Platform Revenue" },
+  processing_fees_collected: { color: "text-purple",     bg: "bg-purple/10",      label: "Processing Fees Collected" },
+  gateway_fees_paid:         { color: "text-red",        bg: "bg-red/10",         label: "Gateway Fees Paid" },
+  operations_income:         { color: "text-cyan",       bg: "bg-cyan/10",        label: "Operations Income" },
+  withdrawal_settlements:    { color: "text-orange-400", bg: "bg-orange-400/10",  label: "Withdrawal Settlements" },
+  refund_reserve:            { color: "text-yellow",     bg: "bg-yellow/10",      label: "Refund Reserve" },
 };
 
 export default function LedgerPage() {
@@ -30,7 +36,9 @@ export default function LedgerPage() {
   const [txnLoading, setTxnLoading] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [refundModal, setRefundModal] = useState(false);
-  const [refundUserId, setRefundUserId] = useState("");
+  const [refundSearch, setRefundSearch] = useState("");
+  const [refundUserName, setRefundUserName] = useState("");
+  const [refundSearching, setRefundSearching] = useState(false);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refunding, setRefunding] = useState(false);
@@ -65,19 +73,43 @@ export default function LedgerPage() {
     finally { setTxnLoading(false); }
   };
 
+  const handleRefundSearch = async (value: string) => {
+    setRefundSearch(value);
+    setRefundUserName("");
+    if (value.length < 3) return;
+    setRefundSearching(true);
+    try {
+      const res = await fetch(
+        `${BASE}/api/admin/support/user/${encodeURIComponent(value)}`,
+        { headers: authHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user?.full_name) setRefundUserName(data.user.full_name);
+      }
+    } catch {}
+    finally { setRefundSearching(false); }
+  };
+
   const handleRefund = async () => {
-    if (!refundUserId || !refundAmount || !refundReason) return;
+    if (!refundSearch || !refundAmount || !refundReason) return;
     setRefunding(true);
     try {
       const res = await fetch(`${BASE}/api/admin/ledger/refund`, {
-        method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ user_id: refundUserId, amount: parseFloat(refundAmount), reason: refundReason }),
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          search: refundSearch,
+          amount: parseFloat(refundAmount),
+          reason: refundReason,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Refund failed");
-      alert(`Refund processed. Reference: ${data.reference}`);
+      alert(`Refund processed for ${refundUserName || refundSearch}. Reference: ${data.reference}`);
       setRefundModal(false);
-      setRefundUserId(""); setRefundAmount(""); setRefundReason("");
+      setRefundSearch(""); setRefundUserName("");
+      setRefundAmount(""); setRefundReason("");
       loadAll();
     } catch (e: any) { alert(e.message); }
     finally { setRefunding(false); }
@@ -96,10 +128,10 @@ export default function LedgerPage() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Today Top-Ups", value: formatZAR(summary?.today?.topups || 0), color: "text-cyan" },
-            { label: "Today Payments", value: formatZAR(summary?.today?.payments || 0), color: "text-green" },
-            { label: "Today Withdrawals", value: formatZAR(summary?.today?.withdrawals || 0), color: "text-yellow" },
-            { label: "Month Net Income", value: formatZAR(netIncome), color: netIncome >= 0 ? "text-green" : "text-red" },
+            { label: "Today Top-Ups",     value: formatZAR(summary?.today?.topups || 0),       color: "text-cyan" },
+            { label: "Today Payments",    value: formatZAR(summary?.today?.payments || 0),     color: "text-green" },
+            { label: "Today Withdrawals", value: formatZAR(summary?.today?.withdrawals || 0),  color: "text-yellow" },
+            { label: "Month Net Income",  value: formatZAR(netIncome), color: netIncome >= 0 ? "text-green" : "text-red" },
           ].map(s => (
             <Card key={s.label}>
               <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">{s.label}</p>
@@ -113,10 +145,10 @@ export default function LedgerPage() {
             <h2 className="text-text font-bold mb-4">This Month</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: "Platform Revenue", value: summary.this_month.platform_revenue, note: "3% ride commissions", color: "text-green" },
-                { label: "Processing Fees", value: summary.this_month.processing_fees, note: "Top-up fees collected", color: "text-purple" },
-                { label: "Gateway Fees Paid", value: summary.this_month.gateway_fees_paid, note: "Paid to PayFast", color: "text-red" },
-                { label: "Net Income", value: netIncome, note: "Revenue minus gateway fees", color: netIncome >= 0 ? "text-green" : "text-red" },
+                { label: "Platform Revenue",   value: summary.this_month.platform_revenue,    note: "3% ride commissions",       color: "text-green" },
+                { label: "Processing Fees",    value: summary.this_month.processing_fees,     note: "Top-up fees collected",     color: "text-purple" },
+                { label: "Gateway Fees Paid",  value: summary.this_month.gateway_fees_paid,   note: "Paid to Stitch",            color: "text-red" },
+                { label: "Net Income",         value: netIncome, note: "Revenue minus gateway fees", color: netIncome >= 0 ? "text-green" : "text-red" },
               ].map(s => (
                 <div key={s.label}>
                   <p className="text-[10px] text-textMuted font-bold uppercase tracking-widest mb-1">{s.label}</p>
@@ -131,7 +163,8 @@ export default function LedgerPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text font-bold">Account Balances</h2>
-            <button onClick={loadAll} className="text-xs text-textMuted hover:text-cyan flex items-center gap-1 transition-colors">
+            <button onClick={loadAll}
+              className="text-xs text-textMuted hover:text-cyan flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
           </div>
@@ -171,21 +204,35 @@ export default function LedgerPage() {
           <Card>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-text font-bold">
-                {selectedAccount ? `${ACCOUNT_CONFIG[selectedAccount]?.label || selectedAccount} History` : "Recent Ledger Entries"}
+                {selectedAccount
+                  ? `${ACCOUNT_CONFIG[selectedAccount]?.label || selectedAccount} History`
+                  : "Recent Ledger Entries"}
               </h2>
               <div className="flex gap-2">
                 {selectedAccount && (
-                  <button onClick={() => loadTransactions()} className="text-xs text-textMuted hover:text-cyan transition-colors">Show all</button>
+                  <button onClick={() => loadTransactions()}
+                    className="text-xs text-textMuted hover:text-cyan transition-colors">
+                    Show all
+                  </button>
                 )}
-                <button onClick={() => { setTransactions([]); setSelectedAccount(null); }} className="text-xs text-textMuted hover:text-red transition-colors">Close</button>
+                <button
+                  onClick={() => { setTransactions([]); setSelectedAccount(null); }}
+                  className="text-xs text-textMuted hover:text-red transition-colors">
+                  Close
+                </button>
               </div>
             </div>
             {txnLoading ? <Spinner /> : (
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {transactions.map((t: any) => (
-                  <div key={t.id} className="flex items-center gap-3 p-3 bg-bg rounded-lg border border-border text-sm">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${t.direction === "credit" ? "bg-green/10" : "bg-red/10"}`}>
-                      {t.direction === "credit" ? <ArrowUpRight size={14} className="text-green" /> : <ArrowDownLeft size={14} className="text-red" />}
+                  <div key={t.id}
+                    className="flex items-center gap-3 p-3 bg-bg rounded-lg border border-border text-sm">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      t.direction === "credit" ? "bg-green/10" : "bg-red/10"
+                    }`}>
+                      {t.direction === "credit"
+                        ? <ArrowUpRight size={14} className="text-green" />
+                        : <ArrowDownLeft size={14} className="text-red" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-text font-medium text-xs truncate">{t.description}</p>
@@ -205,7 +252,9 @@ export default function LedgerPage() {
         )}
 
         {!transactions.length && !txnLoading && (
-          <p className="text-textMuted text-sm text-center py-4">Click any account above to view its transaction history</p>
+          <p className="text-textMuted text-sm text-center py-4">
+            Click any account above to view its transaction history
+          </p>
         )}
       </div>
 
@@ -214,27 +263,71 @@ export default function LedgerPage() {
           <div className="bg-bg2 border border-border rounded-2xl p-6 w-full max-w-md">
             <h2 className="text-text font-bold text-lg mb-4">Process Refund</h2>
             <div className="space-y-4">
-              {[
-                { label: "User ID", value: refundUserId, onChange: setRefundUserId, placeholder: "Paste user ID from Users page" },
-                { label: "Amount (ZAR)", value: refundAmount, onChange: (v: string) => setRefundAmount(v.replace(/[^0-9.]/g, "")), placeholder: "0.00" },
-              ].map(f => (
-                <div key={f.label}>
-                  <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">{f.label}</label>
-                  <input value={f.value} onChange={e => f.onChange(e.target.value)} placeholder={f.placeholder}
-                    className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan" />
-                </div>
-              ))}
+
               <div>
-                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">Reason</label>
-                <textarea value={refundReason} onChange={e => setRefundReason(e.target.value)} placeholder="Reason for refund..." rows={3}
-                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan resize-none" />
+                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">
+                  Phone Number or Name
+                </label>
+                <input
+                  value={refundSearch}
+                  onChange={e => handleRefundSearch(e.target.value)}
+                  placeholder="+27821234567 or John Doe"
+                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan"
+                />
+                {refundSearching && (
+                  <p className="text-textDim text-xs mt-1">Searching...</p>
+                )}
+                {refundUserName && !refundSearching && (
+                  <div className="mt-1.5 px-3 py-2 bg-green/10 border border-green/20 rounded-lg flex items-center gap-2">
+                    <CheckCircle size={12} className="text-green" />
+                    <span className="text-green text-xs font-bold">Found: {refundUserName}</span>
+                  </div>
+                )}
+                {refundSearch.length >= 3 && !refundUserName && !refundSearching && (
+                  <p className="text-red text-xs mt-1">User not found — check phone or name</p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">
+                  Amount (ZAR)
+                </label>
+                <input
+                  value={refundAmount}
+                  onChange={e => setRefundAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  placeholder="0.00"
+                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">
+                  Reason
+                </label>
+                <textarea
+                  value={refundReason}
+                  onChange={e => setRefundReason(e.target.value)}
+                  placeholder="Reason for refund..."
+                  rows={3}
+                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan resize-none"
+                />
               </div>
             </div>
+
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setRefundModal(false)}
-                className="flex-1 py-2.5 bg-bg3 border border-border rounded-lg text-textMuted text-sm font-bold">Cancel</button>
-              <button onClick={handleRefund} disabled={refunding || !refundUserId || !refundAmount || !refundReason}
-                className="flex-1 py-2.5 bg-yellow/20 border border-yellow/30 rounded-lg text-yellow text-sm font-bold disabled:opacity-50">
+              <button
+                onClick={() => {
+                  setRefundModal(false);
+                  setRefundSearch(""); setRefundUserName("");
+                  setRefundAmount(""); setRefundReason("");
+                }}
+                className="flex-1 py-2.5 bg-bg3 border border-border rounded-lg text-textMuted text-sm font-bold hover:text-text transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={handleRefund}
+                disabled={refunding || !refundSearch || !refundUserName || !refundAmount || !refundReason}
+                className="flex-1 py-2.5 bg-yellow/20 border border-yellow/30 rounded-lg text-yellow text-sm font-bold disabled:opacity-50 hover:bg-yellow/30 transition-colors">
                 {refunding ? "Processing..." : "Process Refund"}
               </button>
             </div>
