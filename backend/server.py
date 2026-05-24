@@ -1240,15 +1240,18 @@ async def support_user_lookup(query: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         # Search by phone, name, or ID
         user = await conn.fetchrow(
-            """SELECT u.id, u.phone_number, u.full_name, u.role, u.is_active,
-               u.created_at, u.vehicle_plate,
-               COALESCE((SELECT true FROM flagged_accounts fa WHERE fa.user_id=u.id AND fa.resolved_at IS NULL LIMIT 1), false) as flagged
-               FROM users u
-               WHERE u.phone_number ILIKE $1
-               OR u.full_name ILIKE $1
-               OR u.id = $2
-               LIMIT 1""",
-            f"%{query}%", query
+        user = await conn.fetchrow(
+    """SELECT u.id, u.phone_number, u.full_name, u.role, u.is_active,
+       u.created_at,
+       d.vehicle_plate,
+       COALESCE((SELECT true FROM flagged_accounts fa WHERE fa.user_id=u.id AND fa.resolved_at IS NULL LIMIT 1), false) as flagged
+       FROM users u
+       LEFT JOIN drivers d ON d.user_id = u.id
+       WHERE u.phone_number ILIKE $1
+       OR u.full_name ILIKE $1
+       OR u.id = $2
+       LIMIT 1""",
+    f"%{query}%", query
         )
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
