@@ -12,6 +12,13 @@ import {
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/app/providers";
+import { FlaskConical, FileText } from "lucide-react";
+
+// In advancedNav add:
+{ label: "Statements", href: "/admin/statements", icon: FileText, permission: "download_statements" },
+
+// In superAdminNav add:
+{ label: "Test Users", href: "/admin/test-users", icon: FlaskConical },
 
 const ROLE_LABELS: Record<string, string> = {
   superadmin: "Superadmin", ceo: "CEO", cto: "CTO",
