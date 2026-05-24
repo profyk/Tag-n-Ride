@@ -1239,17 +1239,18 @@ async def support_user_lookup(query: str, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            """SELECT u.id, u.phone_number, u.full_name, u.role, u.is_active,
-               u.created_at,
-               d.vehicle_plate,
-               COALESCE((SELECT true FROM flagged_accounts fa WHERE fa.user_id=u.id AND fa.resolved_at IS NULL LIMIT 1), false) as flagged
-               FROM users u
-               LEFT JOIN drivers d ON d.user_id = u.id
-               WHERE u.phone_number ILIKE $1
-               OR u.full_name ILIKE $1
-               OR u.id = $2
-               LIMIT 1""",
-            f"%{query}%", query
+    """SELECT u.id, u.phone_number, u.full_name, u.role, u.is_active,
+       u.created_at,
+       d.vehicle_plate,
+       COALESCE((SELECT true FROM flagged_accounts fa WHERE fa.user_id=u.id AND fa.resolved_at IS NULL LIMIT 1), false) as flagged
+       FROM users u
+       LEFT JOIN drivers d ON d.user_id = u.id
+       WHERE u.phone_number ILIKE $1
+       OR u.phone_number ILIKE $3
+       OR u.full_name ILIKE $1
+       OR u.id = $2
+       LIMIT 1""",
+    f"%{query}%", query, f"%{query.lstrip('0')}%"
         )
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
