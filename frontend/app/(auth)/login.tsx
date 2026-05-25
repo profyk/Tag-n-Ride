@@ -4,7 +4,9 @@ import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
-import { colors } from "../../src/theme";
+import { useTheme } from "../../src/ThemeContext";
+// inside component:
+const { colors } = useTheme();
 import { useAuth } from "../../src/AuthContext";
 
 export default function Login() {
