@@ -166,46 +166,88 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  // Driver cash-up
-driverCashupStatus: () => request<any>("/api/driver/cashup-status"),
-driverCashupDestination: () => request<any>("/api/driver/cashup-destination"),
-driverCashupV2: (owner_user_id: string) =>
-  request<any>("/api/driver/cashup/v2", { method: "POST", body: JSON.stringify({ owner_user_id }) }),
-driverOutstanding: () => request<any>("/api/driver/outstanding"),
-driverPayOutstanding: (outstanding_id: string) =>
-  request<any>("/api/driver/outstanding/pay", { method: "POST", body: JSON.stringify({ outstanding_id }) }),
-driverCashupHistory: () => request<any[]>("/api/driver/cashup-history"),
 
-// Owner cash-up management
-ownerSetTarget: (driver_user_id: string, daily_target: number) =>
-  request<any>(`/api/owner/drivers/${driver_user_id}/set-target`, { method: "POST", body: JSON.stringify({ daily_target }) }),
-ownerConfirmDriver: (driver_user_id: string) =>
-  request<any>(`/api/owner/drivers/${driver_user_id}/confirm`, { method: "POST" }),
-ownerUnconfirmDriver: (driver_user_id: string) =>
-  request<any>(`/api/owner/drivers/${driver_user_id}/unconfirm`, { method: "POST" }),
-ownerSetCashupMethod: (method: "wallet" | "bank") =>
-  request<any>("/api/owner/cashup-method", { method: "PATCH", body: JSON.stringify({ method }) }),
-ownerSaveBank: (body: { bank_name: string; account_number: string; account_name?: string }) =>
-  request<any>("/api/owner/bank-account", { method: "POST", body: JSON.stringify(body) }),
-ownerGetBank: () => request<any>("/api/owner/bank-account"),
-ownerOutstanding: () => request<any>("/api/owner/outstanding"),
-ownerCancelOutstanding: (outstanding_id: string) =>
-  request<any>(`/api/owner/outstanding/${outstanding_id}/cancel`, { method: "POST" }),
-ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
+  // ── Driver cash-up ──
+  driverCashupStatus: () => request<any>("/api/driver/cashup-status"),
+
+  driverCashupDestination: () => request<any>("/api/driver/cashup-destination"),
+
+  driverCashupV2: (owner_user_id: string) =>
+    request<any>("/api/driver/cashup/v2", {
+      method: "POST",
+      body: JSON.stringify({ owner_user_id }),
+    }),
+
+  driverOutstanding: () => request<any>("/api/driver/outstanding"),
+
+  driverPayOutstanding: (outstanding_id: string) =>
+    request<any>("/api/driver/outstanding/pay", {
+      method: "POST",
+      body: JSON.stringify({ outstanding_id }),
+    }),
+
+  driverCashupHistory: () => request<any[]>("/api/driver/cashup-history"),
+
+  // ── Owner cash-up management ──
+  ownerSetTarget: (driver_user_id: string, daily_target: number) =>
+    request<any>(`/api/owner/drivers/${driver_user_id}/set-target`, {
+      method: "POST",
+      body: JSON.stringify({ daily_target }),
+    }),
+
+  ownerConfirmDriver: (driver_user_id: string) =>
+    request<any>(`/api/owner/drivers/${driver_user_id}/confirm`, {
+      method: "POST",
+    }),
+
+  ownerUnconfirmDriver: (driver_user_id: string) =>
+    request<any>(`/api/owner/drivers/${driver_user_id}/unconfirm`, {
+      method: "POST",
+    }),
+
+  ownerSetCashupMethod: (method: "wallet" | "bank") =>
+    request<any>("/api/owner/cashup-method", {
+      method: "PATCH",
+      body: JSON.stringify({ method }),
+    }),
+
+  ownerSaveBank: (body: {
+    bank_name: string;
+    account_number: string;
+    account_name?: string;
+  }) =>
+    request<any>("/api/owner/bank-account", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  ownerGetBank: () => request<any>("/api/owner/bank-account"),
+
+  ownerOutstanding: () => request<any>("/api/owner/outstanding"),
+
+  ownerCancelOutstanding: (outstanding_id: string) =>
+    request<any>(`/api/owner/outstanding/${outstanding_id}/cancel`, {
+      method: "POST",
+    }),
+
+  ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
 
   // ── KYC ──
-  submitKyc: async (selfieBase64: string, licenceBase64: string) => {
+  kycSubmit: async (
+    selfie: { uri: string; type: string; name: string },
+    licence: { uri: string; type: string; name: string }
+  ) => {
     const token = await tokenStore.get();
     const formData = new FormData();
     formData.append("selfie", {
-      uri: `data:image/jpeg;base64,${selfieBase64}`,
-      name: "selfie.jpg",
-      type: "image/jpeg",
+      uri: selfie.uri,
+      name: selfie.name,
+      type: selfie.type,
     } as any);
     formData.append("licence_front", {
-      uri: `data:image/jpeg;base64,${licenceBase64}`,
-      name: "licence.jpg",
-      type: "image/jpeg",
+      uri: licence.uri,
+      name: licence.name,
+      type: licence.type,
     } as any);
     const res = await fetch(`${BASE}/api/kyc/submit`, {
       method: "POST",
@@ -214,7 +256,9 @@ ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(text || "KYC upload failed");
+      let msg = text;
+      try { msg = JSON.parse(text)?.detail || text; } catch {}
+      throw new Error(msg || "KYC upload failed");
     }
     return res.json();
   },
@@ -228,15 +272,15 @@ ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
 
   // ── Notifications ──
   getNotifications: () =>
-    request<Notification[]>("/api/notifications"),
+    request<Notification[]>("/api/user/notifications"),
 
   deleteNotification: (id: string) =>
-    request<{ ok: boolean }>(`/api/notifications/${id}`, {
+    request<{ ok: boolean }>(`/api/user/notifications/${id}`, {
       method: "DELETE",
     }),
 
   clearAllNotifications: () =>
-    request<{ ok: boolean }>("/api/notifications", {
+    request<{ ok: boolean }>("/api/user/notifications", {
       method: "DELETE",
     }),
 
@@ -252,8 +296,7 @@ ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
       method: "POST",
     }),
 
-  currentRoute: () =>
-    request<any>("/api/driver/route/current"),
+  currentRoute: () => request<any>("/api/driver/route/current"),
 
   updateCash: (delta: 1 | -1) =>
     request<{ ok: boolean; cash_count: number }>("/api/driver/route/cash", {
@@ -261,8 +304,7 @@ ownerCashupHistory: () => request<any>("/api/owner/cashup-history"),
       body: JSON.stringify({ delta }),
     }),
 
-  routeHistory: () =>
-    request<any[]>("/api/driver/route/history"),
+  routeHistory: () => request<any[]>("/api/driver/route/history"),
 
   // ── Owner ──
   ownerDashboard: () =>
@@ -372,6 +414,7 @@ export type Wallet = {
   qr_code?: string;
   vehicle_plate?: string;
   total_earnings?: number;
+  today_total?: number;
   is_verified?: boolean;
   rating_avg?: number;
   rating_count?: number;
