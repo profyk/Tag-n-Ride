@@ -2,8 +2,9 @@ import React, { useEffect } from "react";
 import { View, ActivityIndicator, StyleSheet, Image, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "../src/AuthContext";
-import { colors } from "../src/theme";
-
+import { useTheme } from "../../src/ThemeContext";
+// inside component:
+const { colors } = useTheme();
 export default function Index() {
   const router = useRouter();
   const { state } = useAuth();
