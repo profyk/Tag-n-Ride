@@ -2,12 +2,13 @@ import React, { useEffect } from "react";
 import { Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
-import { colors } from "../../src/theme";
+import { useTheme } from "../../src/ThemeContext";
 import { NotificationProvider } from "../../src/NotificationContext";
 
 export default function AppLayout() {
   const router = useRouter();
   const { state } = useAuth();
+  const { colors } = useTheme();
 
   useEffect(() => {
     if (state.status === "guest") router.replace("/(auth)/welcome");
@@ -52,8 +53,6 @@ export default function AppLayout() {
             ),
           }}
         />
-
-        {/* Earnings tab — drivers only */}
         <Tabs.Screen
           name="earnings"
           options={{
@@ -64,7 +63,6 @@ export default function AppLayout() {
             ),
           }}
         />
-
         <Tabs.Screen
           name="transactions"
           options={{
