@@ -1,214 +1,199 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, Alert,
+  View, Text, StyleSheet, FlatList, RefreshControl,
+  TouchableOpacity, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useNotifications } from "../../src/NotificationContext";
-import { api } from "../../src/api";
-import { colors, radius } from "../../src/theme";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { api, Txn } from "../../src/api";
+import { useAuth } from "../../src/AuthContext";
+import { Pill } from "../../src/ui";
+import { colors, formatZAR, formatDate, radius } from "../../src/theme";
 
-function formatTime(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
-  if (diff < 60) return "Just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+type Filter = "all" | "in" | "out" | "topup" | "withdrawal";
+const HIDDEN_KEY = "tnr_hidden_transactions";
+
+async function getHidden(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
 }
 
-const TYPE_CONFIG: Record<string, { icon: any; color: string; bg: string }> = {
-  success:    { icon: "checkmark-circle", color: colors.green, bg: colors.greenDim },
-  warning:    { icon: "warning", color: "#FFD60A", bg: "#FFD60A22" },
-  error:      { icon: "close-circle", color: colors.red, bg: colors.redDim },
-  info:       { icon: "information-circle", color: colors.cyan, bg: colors.cyanDim },
-  payment:    { icon: "cash", color: colors.green, bg: colors.greenDim },
-  kyc:        { icon: "shield-checkmark", color: colors.cyan, bg: colors.cyanDim },
-  withdrawal: { icon: "wallet", color: "#A064FF", bg: "rgba(160,100,255,0.15)" },
-};
+async function addHidden(ids: string[]) {
+  try {
+    const existing = await getHidden();
+    const merged = Array.from(new Set([...existing, ...ids]));
+    await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(merged));
+  } catch {}
+}
 
-export default function NotificationsScreen() {
-  const router = useRouter();
-  const { notifications, markAllRead, refresh } = useNotifications();
+export default function Transactions() {
+  const { state } = useAuth();
+  const [items, setItems] = useState<Txn[]>([]);
+  const [hidden, setHidden] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { markAllRead(); }, []);
+  const load = useCallback(async () => {
+    try {
+      const [t, h] = await Promise.all([api.transactions(), getHidden()]);
+      setItems(t);
+      setHidden(h);
+    } catch {}
+    finally { setRefreshing(false); setLoading(false); }
+  }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
-  };
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const handleDelete = (id: string) => {
-    Alert.alert(
-      "Delete notification?",
-      "This will remove it from your list.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setDeleting(id);
-            try {
-              await api.deleteNotification(id);
-              await refresh();
-            } catch {}
-            setDeleting(null);
-          },
-        },
-      ]
-    );
+  const handleHide = async (id: string) => {
+    await addHidden([id]);
+    setHidden(prev => [...prev, id]);
   };
 
   const handleClearAll = () => {
-    if (notifications.length === 0) return;
     Alert.alert(
-      "Clear all notifications?",
-      "This will permanently remove all your notifications.",
+      "Clear all transactions?",
+      "They will be removed from your device. This cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Clear all",
-          style: "destructive",
+          text: "Clear all", style: "destructive",
           onPress: async () => {
-            try {
-              await api.clearAllNotifications();
-              await refresh();
-            } catch {}
+            const allIds = items.map(t => t.id);
+            await addHidden(allIds);
+            setHidden(prev => Array.from(new Set([...prev, ...allIds])));
           },
         },
       ]
     );
   };
 
+  const filtered = items
+    .filter(t => !hidden.includes(t.id))
+    .filter(t => {
+      if (filter === "all") return true;
+      if (filter === "topup") return t.type === "topup";
+      if (filter === "withdrawal") return t.type === "withdrawal";
+      if (filter === "in") return t.direction === "in";
+      if (filter === "out") return t.direction === "out";
+      return true;
+    });
+
+  const isDriver = state.status === "authed" && state.user.role === "driver";
+  const filters: Filter[] = isDriver ? ["all", "in", "withdrawal"] : ["all", "out", "topup"];
+
   return (
-    <SafeAreaView style={styles.root} edges={["top"]}>
-      {/* Header */}
+    <SafeAreaView style={styles.root} edges={["top"]} testID="transactions-screen">
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Notifications</Text>
-        {notifications.length > 0 ? (
+        <Text style={styles.title}>Transactions</Text>
+        {filtered.length > 0 && (
           <TouchableOpacity onPress={handleClearAll} style={styles.clearBtn}>
+            <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
             <Text style={styles.clearText}>Clear all</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={{ width: 70 }} />
         )}
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.cyan}
-          />
-        }>
+      <View style={styles.filterRow}>
+        {filters.map((f) => (
+          <TouchableOpacity key={f} onPress={() => setFilter(f)}
+            style={[styles.filter, filter === f && styles.filterActive]}
+            testID={`filter-${f}`}>
+            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
+              {f === "all" ? "All"
+                : f === "in" ? "Received"
+                : f === "out" ? "Paid"
+                : f === "topup" ? "Top-ups"
+                : "Withdrawals"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-        {notifications.length === 0 ? (
-          <View style={styles.empty}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="notifications-off-outline" size={40} color={colors.textDim} />
-            </View>
-            <Text style={styles.emptyTitle}>No notifications</Text>
-            <Text style={styles.emptySub}>
-              Payment confirmations, KYC updates and announcements will appear here.
-            </Text>
-          </View>
-        ) : (
-          <>
-            <Text style={styles.countText}>
-              {notifications.length} notification{notifications.length !== 1 ? "s" : ""}
-            </Text>
-            {notifications.map((n) => {
-              const cfg = TYPE_CONFIG[n.type] || TYPE_CONFIG.info;
-              const isDeleting = deleting === n.id;
-              return (
-                <View key={n.id} style={[styles.notifCard, isDeleting && { opacity: 0.4 }]}>
-                  <View style={[styles.notifIcon, { backgroundColor: cfg.bg }]}>
-                    <Ionicons name={cfg.icon} size={22} color={cfg.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.notifTitle}>{n.title}</Text>
-                    <Text style={styles.notifMessage}>{n.message}</Text>
-                    <Text style={styles.notifTime}>{formatTime(n.sent_at)}</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => handleDelete(n.id)}
-                    disabled={isDeleting}
-                    style={styles.deleteBtn}>
-                    <Ionicons name="close" size={16} color={colors.textDim} />
-                  </TouchableOpacity>
+      <FlatList
+        data={filtered}
+        keyExtractor={(t) => t.id}
+        contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 10 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(); }}
+            tintColor={colors.cyan} />
+        }
+        renderItem={({ item: t }) => {
+          const isIn = t.direction === "in" || t.type === "topup";
+          const isWithdraw = t.type === "withdrawal";
+          const sign = isIn ? "+" : "-";
+          const color = isIn ? colors.green : colors.text;
+          const icon = t.type === "topup" ? "arrow-down"
+            : isWithdraw ? "cash-outline"
+            : isIn ? "arrow-down-circle" : "arrow-up-circle";
+          const title = t.type === "topup" ? "Wallet top-up"
+            : isWithdraw ? "Withdrawal"
+            : t.counterparty_name || "Transfer";
+          return (
+            <View style={styles.rowWrap}>
+              <View style={styles.row} testID={`txn-row-${t.id}`}>
+                <View style={[styles.icon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
+                  <Ionicons name={icon as any} size={20} color={isIn ? colors.green : colors.cyan} />
                 </View>
-              );
-            })}
-          </>
-        )}
-      </ScrollView>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle}>{title}</Text>
+                  <Text style={styles.rowSub}>{formatDate(t.created_at)} · {t.reference}</Text>
+                  {t.note ? <Text style={styles.note}>{t.note}</Text> : null}
+                </View>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={[styles.amt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
+                  <View style={{ marginTop: 6 }}>
+                    <Pill label={t.status}
+                      tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => handleHide(t.id)}
+                  style={styles.hideBtn}
+                  testID={`hide-txn-${t.id}`}>
+                  <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        }}
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.empty}>
+              <Ionicons name="receipt-outline" size={36} color={colors.textDim} />
+              <Text style={styles.emptyTxt}>No transactions</Text>
+            </View>
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: colors.bg2, borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center", justifyContent: "center",
-  },
-  headerTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
-  clearBtn: { paddingHorizontal: 12, paddingVertical: 8 },
-  clearText: { color: colors.red, fontSize: 13, fontWeight: "700" },
-  empty: { alignItems: "center", paddingTop: 60, gap: 12 },
-  emptyIcon: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: colors.bg2, borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center", justifyContent: "center",
-  },
-  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: "700" },
-  emptySub: {
-    color: colors.textMuted, fontSize: 13,
-    textAlign: "center", paddingHorizontal: 32, lineHeight: 20,
-  },
-  countText: {
-    color: colors.textMuted, fontSize: 11,
-    fontWeight: "700", letterSpacing: 1.2, marginBottom: 12,
-  },
-  notifCard: {
-    flexDirection: "row", gap: 12, alignItems: "flex-start",
-    backgroundColor: colors.bg2, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
-    padding: 14, marginBottom: 8,
-  },
-  notifIcon: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: "center", justifyContent: "center", flexShrink: 0,
-  },
-  notifTitle: { color: colors.text, fontSize: 14, fontWeight: "700", marginBottom: 4 },
-  notifMessage: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
-  notifTime: { color: colors.textDim, fontSize: 11, marginTop: 6 },
-  deleteBtn: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: colors.bg3, borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center", justifyContent: "center",
-    flexShrink: 0, marginTop: 2,
-  },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, paddingBottom: 8 },
+  title: { color: colors.text, fontSize: 24, fontWeight: "800" },
+  clearBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
+  clearText: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  filterRow: { flexDirection: "row", paddingHorizontal: 20, gap: 8, paddingVertical: 8 },
+  filter: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
+  filterActive: { borderColor: colors.cyan, backgroundColor: colors.cyanDim },
+  filterText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
+  filterTextActive: { color: colors.cyan },
+  rowWrap: { position: "relative" },
+  row: { flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 40, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 12 },
+  icon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  rowTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  rowSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  note: { color: colors.textDim, fontSize: 11, marginTop: 4, fontStyle: "italic" },
+  amt: { fontWeight: "800", fontSize: 15 },
+  hideBtn: { position: "absolute", top: 14, right: 12, padding: 4 },
+  empty: { padding: 40, alignItems: "center" },
+  emptyTxt: { color: colors.textMuted, marginTop: 8, fontWeight: "600" },
 });
