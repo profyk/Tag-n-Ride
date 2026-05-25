@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, Image, ImageBackground } from "react-native";
 import { Link } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, PoweredBy } from "../../src/ui";
-import { colors } from "../../src/theme";
+import { useTheme } from "../../src/ThemeContext";
+// inside component:
+const { colors } = useTheme();
 
 export default function Welcome() {
   return (
