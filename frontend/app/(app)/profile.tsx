@@ -8,9 +8,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
+import { useTheme } from "../../src/ThemeContext";
+import { ThemeToggle } from "../../src/ThemeToggle";
 import { api } from "../../src/api";
 import { Button, PoweredBy } from "../../src/ui";
-import { colors, radius } from "../../src/theme";
+import { radius } from "../../src/theme";
 
 type PayoutAccount = {
   id: string; type: "self" | "owner";
@@ -31,6 +33,7 @@ const APP_VERSION = "1.0.0";
 export default function Profile() {
   const router = useRouter();
   const { state, signOut, refresh } = useAuth();
+  const { colors } = useTheme();
 
   const [editingPlate, setEditingPlate] = useState(false);
   const [plate, setPlate] = useState("");
@@ -149,10 +152,8 @@ export default function Profile() {
       await loadPayoutAccounts();
       setPayoutModal(false);
       setPayoutBank(""); setPayoutAccount(""); setPayoutName("");
-      Alert.alert(
-        "Saved ✓",
-        `${payoutType === "self" ? "My Account" : "Owner Account"} saved. You can now CashUp to this account.`
-      );
+      Alert.alert("Saved ✓",
+        `${payoutType === "self" ? "My Account" : "Owner Account"} saved. You can now CashUp to this account.`);
     } catch (e: any) { Alert.alert("Failed", e?.message || "Could not save account."); }
     finally { setSavingPayout(false); }
   };
@@ -212,58 +213,48 @@ export default function Profile() {
   const selfAccount = payoutAccounts.find((p) => p.type === "self");
   const ownerAccount = payoutAccounts.find((p) => p.type === "owner");
 
+  // Dynamic styles using live theme colors
+  const s = makeStyles(colors);
+
   return (
-    <SafeAreaView style={styles.root} edges={["top"]} testID="profile-screen">
+    <SafeAreaView style={s.root} edges={["top"]} testID="profile-screen">
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
 
-        {/* Logo */}
-        <View style={styles.header}>
-          <Image
-            source={require("../../assets/images/icon.png")}
-            style={styles.logo} resizeMode="contain"
-          />
+        <View style={s.header}>
+          <Image source={require("../../assets/images/icon.png")} style={s.logo} resizeMode="contain" />
         </View>
 
-        {/* Profile card */}
-        <View style={styles.card}>
-          <View style={styles.avatar}>
-            <Ionicons
-              name={isDriver ? "car-sport" : isOwner ? "business" : "person"}
-              size={32} color={colors.cyan}
-            />
+        <View style={s.card}>
+          <View style={s.avatar}>
+            <Ionicons name={isDriver ? "car-sport" : isOwner ? "business" : "person"} size={32} color={colors.cyan} />
           </View>
-          <Text style={styles.name} testID="profile-name">{u.full_name}</Text>
-          <Text style={styles.phone}>{u.phone_number}</Text>
-          <View style={styles.rolePill}>
-            <Ionicons
-              name={isDriver ? "shield-checkmark" : isOwner ? "briefcase" : "person-circle"}
-              size={13} color={colors.cyan}
-            />
-            <Text style={styles.rolePillText}>{u.role.toUpperCase()}</Text>
+          <Text style={s.name} testID="profile-name">{u.full_name}</Text>
+          <Text style={s.phone}>{u.phone_number}</Text>
+          <View style={s.rolePill}>
+            <Ionicons name={isDriver ? "shield-checkmark" : isOwner ? "briefcase" : "person-circle"} size={13} color={colors.cyan} />
+            <Text style={s.rolePillText}>{u.role.toUpperCase()}</Text>
           </View>
         </View>
 
         {/* KYC */}
         {showKyc && (
           <>
-            <Text style={styles.section}>IDENTITY VERIFICATION</Text>
+            <Text style={s.section}>IDENTITY VERIFICATION</Text>
             <TouchableOpacity
-              style={[styles.kycRow, { borderColor: kycColor() }]}
+              style={[s.kycRow, { borderColor: kycColor() }]}
               onPress={() => router.push("/(app)/kyc")}
               testID="kyc-btn"
               disabled={kycStatus === "approved"}>
-              <View style={[styles.kycIconWrap, { backgroundColor: kycColor() + "22" }]}>
+              <View style={[s.kycIconWrap, { backgroundColor: kycColor() + "22" }]}>
                 <Ionicons name={kycIcon()} size={22} color={kycColor()} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.kycTitle}>KYC Verification</Text>
-                <Text style={[styles.kycStatusText, { color: kycColor() }]}>{kycLabel()}</Text>
+                <Text style={s.kycTitle}>KYC Verification</Text>
+                <Text style={[s.kycStatusText, { color: kycColor() }]}>{kycLabel()}</Text>
                 {kycStatus !== "approved" && (
-                  <Text style={styles.kycHintText}>
-                    {kycStatus === "pending"
-                      ? "Being reviewed — usually 24 hrs"
-                      : kycStatus === "rejected"
-                      ? "Tap to resubmit your documents"
+                  <Text style={s.kycHintText}>
+                    {kycStatus === "pending" ? "Being reviewed — usually 24 hrs"
+                      : kycStatus === "rejected" ? "Tap to resubmit your documents"
                       : "Required to receive payments · Tap to verify"}
                   </Text>
                 )}
@@ -275,11 +266,11 @@ export default function Profile() {
           </>
         )}
 
-        {/* Vehicle plate — drivers only */}
+        {/* Vehicle plate */}
         {isDriver && (
-          <View style={styles.plateCard} testID="profile-plate-card">
+          <View style={s.plateCard} testID="profile-plate-card">
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <Text style={styles.plateLabel}>VEHICLE PLATE</Text>
+              <Text style={s.plateLabel}>VEHICLE PLATE</Text>
               {!editingPlate && (
                 <TouchableOpacity onPress={() => setEditingPlate(true)} testID="edit-plate-btn">
                   <Ionicons name="create-outline" size={18} color={colors.cyan} />
@@ -287,12 +278,11 @@ export default function Profile() {
               )}
             </View>
             {!editingPlate ? (
-              <View style={[
-                styles.plateBox,
-                { backgroundColor: u.vehicle_plate ? colors.bg : "#FFD60A22",
-                  borderColor: u.vehicle_plate ? colors.border : "#FFD60A" }
-              ]}>
-                <Text style={[styles.plateValue, { color: u.vehicle_plate ? colors.text : "#FFD60A" }]}>
+              <View style={[s.plateBox, {
+                backgroundColor: u.vehicle_plate ? colors.bg : "#FFD60A22",
+                borderColor: u.vehicle_plate ? colors.border : "#FFD60A",
+              }]}>
+                <Text style={[s.plateValue, { color: u.vehicle_plate ? colors.text : "#FFD60A" }]}>
                   {u.vehicle_plate || "Not set — tap pencil to add"}
                 </Text>
               </View>
@@ -302,7 +292,7 @@ export default function Profile() {
                   testID="plate-input" value={plate}
                   onChangeText={(t) => setPlate(t.toUpperCase().slice(0, 12))}
                   placeholder="ND 123 456" placeholderTextColor={colors.textDim}
-                  autoCapitalize="characters" style={styles.plateInput}
+                  autoCapitalize="characters" style={s.plateInput}
                 />
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
                   <View style={{ flex: 1 }}>
@@ -318,130 +308,112 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Payout accounts — drivers only */}
+        {/* Payout accounts */}
         {isDriver && (
           <>
-            <Text style={styles.section}>PAYOUT ACCOUNTS</Text>
-            <View style={styles.payoutInfo}>
+            <Text style={s.section}>PAYOUT ACCOUNTS</Text>
+            <View style={s.payoutInfo}>
               <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
-              <Text style={styles.payoutInfoText}>
-                Set up your bank accounts to receive CashUp payments instantly.
-              </Text>
+              <Text style={s.payoutInfoText}>Set up your bank accounts to receive CashUp payments instantly.</Text>
             </View>
             {loadingPayouts ? (
               <ActivityIndicator color={colors.cyan} style={{ marginVertical: 12 }} />
             ) : (
               <>
-                <TouchableOpacity
-                  style={styles.payoutRow}
-                  onPress={() => openPayoutModal("self")}
-                  testID="payout-self-btn">
-                  <View style={[styles.payoutIcon, {
-                    backgroundColor: selfAccount ? colors.cyanDim : colors.bg2
-                  }]}>
-                    <Ionicons name="person-outline" size={18}
-                      color={selfAccount ? colors.cyan : colors.textMuted} />
+                <TouchableOpacity style={s.payoutRow} onPress={() => openPayoutModal("self")} testID="payout-self-btn">
+                  <View style={[s.payoutIcon, { backgroundColor: selfAccount ? colors.cyanDim : colors.bg2 }]}>
+                    <Ionicons name="person-outline" size={18} color={selfAccount ? colors.cyan : colors.textMuted} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.payoutLabel}>My Account</Text>
+                    <Text style={s.payoutLabel}>My Account</Text>
                     {selfAccount
-                      ? <Text style={styles.payoutSub}>
-                          {selfAccount.bank_name} · ****{selfAccount.account_number.slice(-4)}
-                        </Text>
-                      : <Text style={styles.payoutEmpty}>Not set — tap to add</Text>}
+                      ? <Text style={s.payoutSub}>{selfAccount.bank_name} · ****{selfAccount.account_number.slice(-4)}</Text>
+                      : <Text style={s.payoutEmpty}>Not set — tap to add</Text>}
                   </View>
-                  <Ionicons
-                    name={selfAccount ? "checkmark-circle" : "add-circle-outline"}
-                    size={20}
-                    color={selfAccount ? colors.green : colors.cyan}
-                  />
+                  <Ionicons name={selfAccount ? "checkmark-circle" : "add-circle-outline"} size={20}
+                    color={selfAccount ? colors.green : colors.cyan} />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.payoutRow}
-                  onPress={() => openPayoutModal("owner")}
-                  testID="payout-owner-btn">
-                  <View style={[styles.payoutIcon, {
-                    backgroundColor: ownerAccount ? "rgba(160,100,255,0.15)" : colors.bg2
-                  }]}>
-                    <Ionicons name="car-outline" size={18}
-                      color={ownerAccount ? "#A064FF" : colors.textMuted} />
+                <TouchableOpacity style={s.payoutRow} onPress={() => openPayoutModal("owner")} testID="payout-owner-btn">
+                  <View style={[s.payoutIcon, { backgroundColor: ownerAccount ? "rgba(160,100,255,0.15)" : colors.bg2 }]}>
+                    <Ionicons name="car-outline" size={18} color={ownerAccount ? "#A064FF" : colors.textMuted} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.payoutLabel}>Owner Account</Text>
+                    <Text style={s.payoutLabel}>Owner Account</Text>
                     {ownerAccount
-                      ? <Text style={styles.payoutSub}>
-                          {ownerAccount.bank_name} · ****{ownerAccount.account_number.slice(-4)}
-                        </Text>
-                      : <Text style={styles.payoutEmpty}>Not set — tap to add</Text>}
+                      ? <Text style={s.payoutSub}>{ownerAccount.bank_name} · ****{ownerAccount.account_number.slice(-4)}</Text>
+                      : <Text style={s.payoutEmpty}>Not set — tap to add</Text>}
                   </View>
-                  <Ionicons
-                    name={ownerAccount ? "checkmark-circle" : "add-circle-outline"}
-                    size={20}
-                    color={ownerAccount ? colors.green : "#A064FF"}
-                  />
+                  <Ionicons name={ownerAccount ? "checkmark-circle" : "add-circle-outline"} size={20}
+                    color={ownerAccount ? colors.green : "#A064FF"} />
                 </TouchableOpacity>
               </>
             )}
           </>
         )}
 
-        {/* Account section */}
-        <Text style={styles.section}>ACCOUNT</Text>
+        {/* Appearance */}
+        <Text style={s.section}>APPEARANCE</Text>
+        <View style={s.themeCard}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <Ionicons name="contrast-outline" size={18} color={colors.textMuted} />
+            <Text style={s.themeLabel}>App Theme</Text>
+          </View>
+          <ThemeToggle />
+        </View>
+
+        {/* Account */}
+        <Text style={s.section}>ACCOUNT</Text>
         {isPassenger && (
           <Row icon="add-circle-outline" label="Top up wallet"
-            onPress={() => router.push("/topup")} testID="row-topup" />
+            onPress={() => router.push("/topup")} testID="row-topup" colors={colors} />
         )}
         <Row icon="receipt-outline" label="Transaction history"
-          onPress={() => router.push("/(app)/transactions")} testID="row-history" />
+          onPress={() => router.push("/(app)/transactions")} testID="row-history" colors={colors} />
         <Row icon="lock-closed-outline" label="Change PIN"
-          onPress={() => setPinModal(true)} testID="row-change-pin" />
+          onPress={() => setPinModal(true)} testID="row-change-pin" colors={colors} />
 
         {/* Support */}
-        <Text style={styles.section}>SUPPORT</Text>
-        <TouchableOpacity style={styles.whatsappRow} onPress={openWhatsApp} testID="row-whatsapp">
-          <View style={styles.whatsappIcon}>
+        <Text style={s.section}>SUPPORT</Text>
+        <TouchableOpacity style={s.whatsappRow} onPress={openWhatsApp} testID="row-whatsapp">
+          <View style={s.whatsappIcon}>
             <Ionicons name="logo-whatsapp" size={22} color="#fff" />
           </View>
-          <Text style={styles.whatsappLabel}>WhatsApp Support</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+          <Text style={s.whatsappLabel}>WhatsApp Support</Text>
+          <Ionicons name="chevron-forward" size={18} color="#ffffff88" />
         </TouchableOpacity>
 
         <View style={{ height: 16 }} />
-        <TouchableOpacity onPress={confirmLogout} style={styles.signout} testID="signout-btn">
+        <TouchableOpacity onPress={confirmLogout} style={s.signout} testID="signout-btn">
           <Ionicons name="log-out-outline" size={18} color={colors.red} />
-          <Text style={styles.signoutText}>Sign out</Text>
+          <Text style={s.signoutText}>Sign out</Text>
         </TouchableOpacity>
 
-        <Text style={styles.brand}>Tag n Ride · No cash · No stress</Text>
-        <Text style={styles.version}>Version {APP_VERSION}</Text>
+        <Text style={s.brand}>Tag n Ride · No cash · No stress</Text>
+        <Text style={s.version}>Version {APP_VERSION}</Text>
         <PoweredBy testID="profile-powered" />
       </ScrollView>
 
       {/* Change PIN Modal */}
-      <Modal visible={pinModal} transparent animationType="slide"
-        onRequestClose={() => setPinModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <View style={styles.modalIconWrap}>
+      <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalSheet}>
+            <View style={s.modalHandle} />
+            <View style={s.modalIconWrap}>
               <Ionicons name="lock-closed-outline" size={26} color={colors.cyan} />
             </View>
-            <Text style={styles.modalTitle}>Change PIN</Text>
-            <Text style={styles.modalSub}>
-              Enter your current PIN and choose a new 4-digit PIN.
-            </Text>
-
+            <Text style={s.modalTitle}>Change PIN</Text>
+            <Text style={s.modalSub}>Enter your current PIN and choose a new 4-digit PIN.</Text>
             {[
               { label: "CURRENT PIN", value: currentPin, setter: setCurrentPin, testID: "current-pin-input" },
               { label: "NEW PIN", value: newPin, setter: setNewPin, testID: "new-pin-input" },
               { label: "CONFIRM NEW PIN", value: confirmPin, setter: setConfirmPin, testID: "confirm-pin-input" },
             ].map((f, i) => (
               <View key={f.label}>
-                <Text style={styles.inputLabel}>{f.label}</Text>
-                <View style={styles.pinRow}>
+                <Text style={s.inputLabel}>{f.label}</Text>
+                <View style={s.pinRow}>
                   <TextInput
-                    style={[styles.pinInput, { flex: 1 }]}
+                    style={[s.pinInput, { flex: 1 }]}
                     value={f.value}
                     onChangeText={(t) => f.setter(t.replace(/\D/g, "").slice(0, 4))}
                     keyboardType="number-pad"
@@ -451,133 +423,90 @@ export default function Profile() {
                     maxLength={4}
                     testID={f.testID}
                   />
-                  {/* Show toggle only on last field to avoid clutter */}
                   {i === 2 && (
-                    <TouchableOpacity
-                      onPress={() => setShowPin(v => !v)}
-                      style={styles.pinToggle}>
-                      <Ionicons
-                        name={showPin ? "eye-off-outline" : "eye-outline"}
-                        size={20} color={colors.textMuted}
-                      />
+                    <TouchableOpacity onPress={() => setShowPin(v => !v)} style={s.pinToggle}>
+                      <Ionicons name={showPin ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
                     </TouchableOpacity>
                   )}
                 </View>
               </View>
             ))}
-
             <View style={{ flexDirection: "row", gap: 12, marginTop: 12 }}>
               <View style={{ flex: 1 }}>
                 <Button label="Cancel" variant="secondary" onPress={() => {
-                  setPinModal(false);
-                  setCurrentPin(""); setNewPin(""); setConfirmPin(""); setShowPin(false);
+                  setPinModal(false); setCurrentPin(""); setNewPin(""); setConfirmPin(""); setShowPin(false);
                 }} />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="Change PIN" onPress={handleChangePin}
-                  loading={savingPin} testID="save-pin-btn" />
+                <Button label="Change PIN" onPress={handleChangePin} loading={savingPin} testID="save-pin-btn" />
               </View>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Payout account modal */}
-      <Modal visible={payoutModal} transparent animationType="slide"
-        onRequestClose={() => setPayoutModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <View style={[styles.modalIconWrap, {
+      {/* Payout modal */}
+      <Modal visible={payoutModal} transparent animationType="slide" onRequestClose={() => setPayoutModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalSheet}>
+            <View style={s.modalHandle} />
+            <View style={[s.modalIconWrap, {
               backgroundColor: payoutType === "self" ? colors.cyanDim : "rgba(160,100,255,0.15)"
             }]}>
-              <Ionicons
-                name={payoutType === "self" ? "person-outline" : "car-outline"}
-                size={26}
-                color={payoutType === "self" ? colors.cyan : "#A064FF"}
-              />
+              <Ionicons name={payoutType === "self" ? "person-outline" : "car-outline"} size={26}
+                color={payoutType === "self" ? colors.cyan : "#A064FF"} />
             </View>
-            <Text style={styles.modalTitle}>
-              {payoutType === "self" ? "My Account" : "Owner Account"}
-            </Text>
-            <Text style={styles.modalSub}>
+            <Text style={s.modalTitle}>{payoutType === "self" ? "My Account" : "Owner Account"}</Text>
+            <Text style={s.modalSub}>
               {payoutType === "self"
                 ? "Your personal bank account for CashUp payouts."
                 : "The vehicle owner account for CashUp payments."}
             </Text>
-
-            <Text style={styles.inputLabel}>BANK</Text>
+            <Text style={s.inputLabel}>BANK</Text>
             <TouchableOpacity
-              style={[styles.textInput, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
+              style={[s.textInput, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
               onPress={() => setShowBankPicker(true)}>
               <Text style={{ color: payoutBank ? colors.text : colors.textDim, fontSize: 15 }}>
                 {payoutBank || "Select your bank"}
               </Text>
               <Ionicons name="chevron-down" size={16} color={colors.textDim} />
             </TouchableOpacity>
-
-            <Text style={styles.inputLabel}>ACCOUNT NUMBER</Text>
-            <TextInput
-              style={styles.textInput}
-              value={payoutAccount}
+            <Text style={s.inputLabel}>ACCOUNT NUMBER</Text>
+            <TextInput style={s.textInput} value={payoutAccount}
               onChangeText={(t) => setPayoutAccount(t.replace(/\D/g, ""))}
-              placeholder="e.g. 1234567890"
-              placeholderTextColor={colors.textDim}
-              keyboardType="number-pad"
-              testID="payout-account-input"
-            />
-
-            <Text style={styles.inputLabel}>ACCOUNT NAME (optional)</Text>
-            <TextInput
-              style={styles.textInput}
-              value={payoutName}
-              onChangeText={setPayoutName}
-              placeholder="e.g. John Doe"
-              placeholderTextColor={colors.textDim}
-              testID="payout-name-input"
-            />
-
+              placeholder="e.g. 1234567890" placeholderTextColor={colors.textDim}
+              keyboardType="number-pad" testID="payout-account-input" />
+            <Text style={s.inputLabel}>ACCOUNT NAME (optional)</Text>
+            <TextInput style={s.textInput} value={payoutName} onChangeText={setPayoutName}
+              placeholder="e.g. John Doe" placeholderTextColor={colors.textDim} testID="payout-name-input" />
             <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
               <View style={{ flex: 1 }}>
                 <Button label="Cancel" variant="secondary" onPress={() => {
-                  setPayoutModal(false);
-                  setPayoutBank(""); setPayoutAccount(""); setPayoutName("");
+                  setPayoutModal(false); setPayoutBank(""); setPayoutAccount(""); setPayoutName("");
                 }} />
               </View>
               <View style={{ flex: 1 }}>
-                <Button label="Save Account" onPress={handleSavePayout}
-                  loading={savingPayout} testID="save-payout-btn" />
+                <Button label="Save Account" onPress={handleSavePayout} loading={savingPayout} testID="save-payout-btn" />
               </View>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Bank picker modal */}
-      <Modal visible={showBankPicker} transparent animationType="slide"
-        onRequestClose={() => setShowBankPicker(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalSheet, { maxHeight: "70%" }]}>
-            <View style={styles.modalHandle} />
-            <Text style={[styles.modalTitle, { marginBottom: 16 }]}>Select Bank</Text>
+      {/* Bank picker */}
+      <Modal visible={showBankPicker} transparent animationType="slide" onRequestClose={() => setShowBankPicker(false)}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { maxHeight: "70%" }]}>
+            <View style={s.modalHandle} />
+            <Text style={[s.modalTitle, { marginBottom: 16 }]}>Select Bank</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
               {SA_BANKS.map(bank => (
                 <TouchableOpacity
                   key={bank}
-                  style={[
-                    styles.bankOption,
-                    payoutBank === bank && styles.bankOptionActive,
-                  ]}
+                  style={[s.bankOption, payoutBank === bank && s.bankOptionActive]}
                   onPress={() => { setPayoutBank(bank); setShowBankPicker(false); }}>
-                  <Text style={[
-                    styles.bankOptionText,
-                    payoutBank === bank && { color: colors.cyan },
-                  ]}>
-                    {bank}
-                  </Text>
-                  {payoutBank === bank && (
-                    <Ionicons name="checkmark" size={18} color={colors.cyan} />
-                  )}
+                  <Text style={[s.bankOptionText, payoutBank === bank && { color: colors.cyan }]}>{bank}</Text>
+                  {payoutBank === bank && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -589,16 +518,23 @@ export default function Profile() {
 }
 
 const Row: React.FC<{
-  icon: any; label: string; onPress: () => void; testID?: string;
-}> = ({ icon, label, onPress, testID }) => (
-  <TouchableOpacity style={styles.row} onPress={onPress} testID={testID} activeOpacity={0.7}>
+  icon: any; label: string; onPress: () => void; testID?: string; colors: any;
+}> = ({ icon, label, onPress, testID, colors }) => (
+  <TouchableOpacity
+    style={{
+      flexDirection: "row", alignItems: "center",
+      backgroundColor: colors.bg2, borderRadius: radius.md,
+      borderWidth: 1, borderColor: colors.border,
+      padding: 16, gap: 12, marginBottom: 10,
+    }}
+    onPress={onPress} testID={testID} activeOpacity={0.7}>
     <Ionicons name={icon} size={20} color={colors.cyan} />
-    <Text style={styles.rowLabel}>{label}</Text>
+    <Text style={{ flex: 1, color: colors.text, fontWeight: "600", fontSize: 15 }}>{label}</Text>
     <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
   </TouchableOpacity>
 );
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { alignItems: "center", marginBottom: 8 },
   logo: { width: 80, height: 40 },
@@ -606,7 +542,7 @@ const styles = StyleSheet.create({
   avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.cyan, marginBottom: 12 },
   name: { color: colors.text, fontSize: 20, fontWeight: "800" },
   phone: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
-  rolePill: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8, backgroundColor: colors.cyanDim, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: colors.cyan },
+  rolePill: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8, backgroundColor: colors.cyanDim, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.cyan },
   rolePillText: { color: colors.cyan, fontSize: 11, fontWeight: "800", letterSpacing: 1 },
   section: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4, marginTop: 24, marginBottom: 12 },
   kycRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1.5, padding: 14, gap: 12, marginBottom: 4 },
@@ -626,8 +562,8 @@ const styles = StyleSheet.create({
   payoutLabel: { color: colors.text, fontWeight: "700", fontSize: 14 },
   payoutSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   payoutEmpty: { color: colors.textDim, fontSize: 12, marginTop: 2, fontStyle: "italic" },
-  row: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 12, marginBottom: 10 },
-  rowLabel: { flex: 1, color: colors.text, fontWeight: "600", fontSize: 15 },
+  themeCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 4 },
+  themeLabel: { color: colors.text, fontWeight: "600", fontSize: 15 },
   whatsappRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#128C7E", borderRadius: radius.md, padding: 16, gap: 12, marginBottom: 10 },
   whatsappIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   whatsappLabel: { flex: 1, color: "#fff", fontWeight: "700", fontSize: 15 },
