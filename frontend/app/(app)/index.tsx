@@ -6,11 +6,29 @@ import {
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../../src/AuthContext";
 import { api, Wallet, Txn } from "../../src/api";
 import { colors, formatZAR, formatDate, radius } from "../../src/theme";
 import { Pill, Button } from "../../src/ui";
 import { useNotifications } from "../../src/NotificationContext";
+
+const HIDDEN_KEY = "tnr_hidden_transactions";
+
+async function getHidden(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+async function addHidden(ids: string[]) {
+  try {
+    const existing = await getHidden();
+    const merged = Array.from(new Set([...existing, ...ids]));
+    await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(merged));
+  } catch {}
+}
 
 export default function Home() {
   const router = useRouter();
@@ -19,6 +37,7 @@ export default function Home() {
 
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [txns, setTxns] = useState<Txn[]>([]);
+  const [allTxns, setAllTxns] = useState<Txn[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fuelModal, setFuelModal] = useState(false);
@@ -31,9 +50,14 @@ export default function Home() {
 
   const load = useCallback(async () => {
     try {
-      const [w, t] = await Promise.all([api.wallet(), api.transactions()]);
+      const [w, t, hidden] = await Promise.all([
+        api.wallet(),
+        api.transactions(),
+        getHidden(),
+      ]);
       setWallet(w);
-      setTxns(t.slice(0, 5));
+      setAllTxns(t);
+      setTxns(t.filter((tx: Txn) => !hidden.includes(tx.id)).slice(0, 5));
     } catch {}
     finally {
       setLoading(false);
@@ -46,6 +70,11 @@ export default function Home() {
   if (state.status !== "authed") return null;
   const isDriver = state.user.role === "driver";
 
+  const handleHideTxn = async (id: string) => {
+    await addHidden([id]);
+    setTxns(prev => prev.filter(t => t.id !== id));
+  };
+
   const handlePayFuel = async () => {
     const amount = parseFloat(fuelAmount);
     if (!fuelAmount || isNaN(amount) || amount <= 0) {
@@ -53,10 +82,8 @@ export default function Home() {
       return;
     }
     if (amount > (wallet?.balance ?? 0)) {
-      Alert.alert(
-        "Insufficient balance",
-        `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}. You cannot pay more than your balance.`
-      );
+      Alert.alert("Insufficient balance",
+        `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}. You cannot pay more than your balance.`);
       return;
     }
     if (amount < 5) {
@@ -73,22 +100,18 @@ export default function Home() {
     } catch (e: any) {
       const msg = e?.message || "";
       if (msg.includes("payout account") || msg.includes("No 'self'")) {
-        Alert.alert(
-          "No payout account set up",
+        Alert.alert("No payout account set up",
           "You need to add your personal bank account first.\n\nGo to Profile → My Account to add it.",
           [
             { text: "Go to Profile", onPress: () => { setFuelModal(false); router.push("/(app)/profile"); } },
             { text: "Cancel", style: "cancel" },
-          ]
-        );
+          ]);
       } else if (msg.includes("Insufficient") || msg.includes("balance")) {
         Alert.alert("Insufficient balance", "You do not have enough in your wallet for this amount.");
       } else {
         Alert.alert("Failed", msg || "Could not process payment. Please try again.");
       }
-    } finally {
-      setFuelLoading(false);
-    }
+    } finally { setFuelLoading(false); }
   };
 
   const handleCashUp = async () => {
@@ -98,10 +121,8 @@ export default function Home() {
       return;
     }
     if (amount > (wallet?.balance ?? 0)) {
-      Alert.alert(
-        "Insufficient balance",
-        `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}. You cannot CashUp more than your balance.`
-      );
+      Alert.alert("Insufficient balance",
+        `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}. You cannot CashUp more than your balance.`);
       return;
     }
     if (amount < 5) {
@@ -113,31 +134,25 @@ export default function Home() {
       await api.cashup({ amount, type: cashUpType });
       setCashUpModal(false);
       setCashUpAmount("");
-      Alert.alert(
-        "CashUp submitted ✓",
-        `R${amount.toFixed(2)} is being paid to ${cashUpType === "self" ? "your bank account" : "the owner's account"}. Allow a few minutes for processing.`
-      );
+      Alert.alert("CashUp submitted ✓",
+        `R${amount.toFixed(2)} is being paid to ${cashUpType === "self" ? "your bank account" : "the owner's account"}. Allow a few minutes for processing.`);
       load();
     } catch (e: any) {
       const msg = e?.message || "";
       if (msg.includes("payout account") || msg.includes("No '")) {
         const accountType = cashUpType === "self" ? "My Account" : "Owner Account";
-        Alert.alert(
-          `${accountType} not set up`,
+        Alert.alert(`${accountType} not set up`,
           `You need to add your ${accountType} bank details before you can CashUp.\n\nGo to Profile → ${accountType} to add it.`,
           [
             { text: "Go to Profile", onPress: () => { setCashUpModal(false); router.push("/(app)/profile"); } },
             { text: "Cancel", style: "cancel" },
-          ]
-        );
+          ]);
       } else if (msg.includes("Insufficient") || msg.includes("balance")) {
         Alert.alert("Insufficient balance", `You do not have enough in your wallet to CashUp R${amount.toFixed(2)}.`);
       } else {
         Alert.alert("Failed", msg || "Could not process CashUp. Please try again.");
       }
-    } finally {
-      setCashUpLoading(false);
-    }
+    } finally { setCashUpLoading(false); }
   };
 
   return (
@@ -145,11 +160,9 @@ export default function Home() {
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
+          <RefreshControl refreshing={refreshing}
             onRefresh={() => { setRefreshing(true); load(); }}
-            tintColor={colors.cyan}
-          />
+            tintColor={colors.cyan} />
         }>
 
         <View style={styles.headerRow}>
@@ -162,8 +175,7 @@ export default function Home() {
           <View style={styles.headerActions}>
             <TouchableOpacity
               onPress={() => router.push("/(app)/notifications")}
-              style={styles.headerBtn}
-              testID="home-notif-btn">
+              style={styles.headerBtn} testID="home-notif-btn">
               <Ionicons name="notifications-outline" size={22} color={colors.text} />
               {unreadCount > 0 && (
                 <View style={styles.badge}>
@@ -173,8 +185,7 @@ export default function Home() {
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => router.push("/(app)/profile")}
-              testID="home-profile-btn"
-              style={styles.avatar}>
+              testID="home-profile-btn" style={styles.avatar}>
               <Ionicons name={isDriver ? "car-sport" : "person"} size={22} color={colors.cyan} />
             </TouchableOpacity>
           </View>
@@ -261,7 +272,9 @@ export default function Home() {
           </View>
         ) : (
           <View style={{ gap: 10 }}>
-            {txns.map((t) => <TxnRow key={t.id} t={t} />)}
+            {txns.map((t) => (
+              <TxnRow key={t.id} t={t} onHide={handleHideTxn} />
+            ))}
           </View>
         )}
       </ScrollView>
@@ -281,21 +294,13 @@ export default function Home() {
             </Text>
             {wallet && (
               <View style={styles.balancePill}>
-                <Text style={styles.balancePillText}>
-                  Available: {formatZAR(wallet.balance)}
-                </Text>
+                <Text style={styles.balancePillText}>Available: {formatZAR(wallet.balance)}</Text>
               </View>
             )}
             <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
-            <TextInput
-              style={styles.input}
-              value={fuelAmount}
-              onChangeText={setFuelAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={colors.textDim}
-              testID="fuel-amount-input"
-            />
+            <TextInput style={styles.input} value={fuelAmount} onChangeText={setFuelAmount}
+              keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim}
+              testID="fuel-amount-input" />
             <View style={styles.modalActions}>
               <View style={{ flex: 1 }}>
                 <Button label="Cancel" variant="secondary"
@@ -323,16 +328,13 @@ export default function Home() {
             <Text style={styles.modalSub}>Choose which account to cash out to.</Text>
             {wallet && (
               <View style={styles.balancePill}>
-                <Text style={styles.balancePillText}>
-                  Available: {formatZAR(wallet.balance)}
-                </Text>
+                <Text style={styles.balancePillText}>Available: {formatZAR(wallet.balance)}</Text>
               </View>
             )}
             <View style={styles.toggleRow}>
               <TouchableOpacity
                 style={[styles.toggleBtn, cashUpType === "self" && styles.toggleBtnActive]}
-                onPress={() => setCashUpType("self")}
-                testID="cashup-type-self">
+                onPress={() => setCashUpType("self")} testID="cashup-type-self">
                 <Ionicons name="person-outline" size={16}
                   color={cashUpType === "self" ? colors.bg : colors.textMuted} />
                 <Text style={[styles.toggleText, cashUpType === "self" && styles.toggleTextActive]}>
@@ -341,8 +343,7 @@ export default function Home() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.toggleBtn, cashUpType === "owner" && styles.toggleBtnActive]}
-                onPress={() => setCashUpType("owner")}
-                testID="cashup-type-owner">
+                onPress={() => setCashUpType("owner")} testID="cashup-type-owner">
                 <Ionicons name="car-outline" size={16}
                   color={cashUpType === "owner" ? colors.bg : colors.textMuted} />
                 <Text style={[styles.toggleText, cashUpType === "owner" && styles.toggleTextActive]}>
@@ -351,15 +352,9 @@ export default function Home() {
               </TouchableOpacity>
             </View>
             <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
-            <TextInput
-              style={styles.input}
-              value={cashUpAmount}
-              onChangeText={setCashUpAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={colors.textDim}
-              testID="cashup-amount-input"
-            />
+            <TextInput style={styles.input} value={cashUpAmount} onChangeText={setCashUpAmount}
+              keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim}
+              testID="cashup-amount-input" />
             <View style={styles.modalActions}>
               <View style={{ flex: 1 }}>
                 <Button label="Cancel" variant="secondary"
@@ -401,7 +396,7 @@ const QA: React.FC<{
   );
 };
 
-const TxnRow: React.FC<{ t: Txn }> = ({ t }) => {
+const TxnRow: React.FC<{ t: Txn; onHide: (id: string) => void }> = ({ t, onHide }) => {
   const isIn = t.direction === "in" || t.type === "topup";
   const isWithdraw = t.type === "withdrawal";
   const sign = isIn ? "+" : "-";
@@ -413,20 +408,25 @@ const TxnRow: React.FC<{ t: Txn }> = ({ t }) => {
     : isWithdraw ? "Withdrawal"
     : t.counterparty_name || "Transfer";
   return (
-    <View style={styles.txnRow} testID={`txn-${t.id}`}>
-      <View style={[styles.txnIcon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
-        <Ionicons name={icon as any} size={18} color={isIn ? colors.green : colors.cyan} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.txnTitle}>{title}</Text>
-        <Text style={styles.txnSub}>{formatDate(t.created_at)} · {t.reference}</Text>
-      </View>
-      <View style={{ alignItems: "flex-end" }}>
-        <Text style={[styles.txnAmt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
-        <View style={{ marginTop: 4 }}>
-          <Pill label={t.status}
-            tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
+    <View style={styles.txnWrap}>
+      <View style={styles.txnRow} testID={`txn-${t.id}`}>
+        <View style={[styles.txnIcon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
+          <Ionicons name={icon as any} size={18} color={isIn ? colors.green : colors.cyan} />
         </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.txnTitle}>{title}</Text>
+          <Text style={styles.txnSub}>{formatDate(t.created_at)} · {t.reference}</Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={[styles.txnAmt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
+          <View style={{ marginTop: 4 }}>
+            <Pill label={t.status}
+              tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
+          </View>
+        </View>
+        <TouchableOpacity onPress={() => onHide(t.id)} style={styles.txnHideBtn}>
+          <Ionicons name="eye-off-outline" size={15} color={colors.textDim} />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -460,11 +460,13 @@ const styles = StyleSheet.create({
   empty: { padding: 32, alignItems: "center", borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, borderRadius: radius.md },
   emptyText: { color: colors.text, fontWeight: "700", marginTop: 10 },
   emptySub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 6 },
-  txnRow: { flexDirection: "row", alignItems: "center", padding: 14, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 12 },
+  txnWrap: { position: "relative" },
+  txnRow: { flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 38, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 12 },
   txnIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   txnTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
   txnSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   txnAmt: { fontWeight: "800", fontSize: 15 },
+  txnHideBtn: { position: "absolute", top: 14, right: 10, padding: 4 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.border },
   modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 },
