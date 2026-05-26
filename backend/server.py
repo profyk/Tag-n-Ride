@@ -23,6 +23,7 @@ import bcrypt
 import jwt
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, File, UploadFile
 from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 import base64
@@ -967,6 +968,27 @@ async def kyc_status(user: dict = Depends(get_current_user)):
         doc = await conn.fetchrow("SELECT status,rejection_reason,submitted_at FROM kyc_documents WHERE user_id=$1", user["id"])
     if not doc: return {"status": "not_submitted"}
     return {"status": doc["status"], "rejection_reason": doc["rejection_reason"], "submitted_at": iso(doc["submitted_at"])}
+
+@app.get("/api/kyc/selfie-url")
+async def get_kyc_selfie_url(current_user: dict = Depends(get_current_user), conn=Depends(get_db)):
+    row = conn.execute(
+        "SELECT selfie_path FROM kyc_documents WHERE user_id = ? AND status = 'approved'",
+        (current_user["id"],)
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "No approved KYC found")
+    # Return the path as a URL — adjust base URL to match your storage
+    return { "url": f"https://tag-n-ride-production.up.railway.app/api/kyc/selfie/{current_user['id']}" }
+
+@app.get("/api/kyc/selfie/{user_id}")
+async def serve_kyc_selfie(user_id: str, conn=Depends(get_db)):
+    row = conn.execute(
+        "SELECT selfie_path FROM kyc_documents WHERE user_id = ? AND status = 'approved'",
+        (user_id,)
+    ).fetchone()
+    if not row or not row["selfie_path"]:
+        raise HTTPException(404, "Not found")
+    return FileResponse(row["selfie_path"])
 
 # ── Admin: Dashboard ─────────────────────────────────────────
 @api.get("/admin/dashboard")
