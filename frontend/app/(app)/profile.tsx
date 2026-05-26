@@ -28,9 +28,7 @@ const SA_BANKS = [
   "Bidvest", "Grindrod", "HBZ", "Mercantile",
 ];
 
-const APP_VERSION = "1.0.0";
-
-export default function Profile() {
+const APP_VERSION = "1.0.0";export default function Profile() {
   const router = useRouter();
   const { state, signOut, refresh } = useAuth();
   const { colors } = useTheme();
@@ -59,6 +57,7 @@ export default function Profile() {
   const [kycStatus, setKycStatus] = useState<
     "not_submitted" | "pending" | "approved" | "rejected" | null
   >(null);
+  const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (state.status === "authed") {
@@ -95,6 +94,10 @@ export default function Profile() {
     try {
       const res = await api.kycStatus();
       setKycStatus(res.status);
+      if (res.status === "approved") {
+        const selfie = await api.kycSelfieUrl().catch(() => null);
+        if (selfie?.url) setSelfieUrl(selfie.url);
+      }
     } catch { setKycStatus("not_submitted"); }
   };
 
@@ -153,7 +156,7 @@ export default function Profile() {
       setPayoutModal(false);
       setPayoutBank(""); setPayoutAccount(""); setPayoutName("");
       Alert.alert("Saved ✓",
-        `${payoutType === "self" ? "My Account" : "Owner Account"} saved. You can now CashUp to this account.`);
+        `${payoutType === "self" ? "My Account" : "Owner Account"} saved.`);
     } catch (e: any) { Alert.alert("Failed", e?.message || "Could not save account."); }
     finally { setSavingPayout(false); }
   };
@@ -212,11 +215,7 @@ export default function Profile() {
 
   const selfAccount = payoutAccounts.find((p) => p.type === "self");
   const ownerAccount = payoutAccounts.find((p) => p.type === "owner");
-
-  // Dynamic styles using live theme colors
-  const s = makeStyles(colors);
-
-  return (
+  const s = makeStyles(colors);return (
     <SafeAreaView style={s.root} edges={["top"]} testID="profile-screen">
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
 
@@ -224,9 +223,26 @@ export default function Profile() {
           <Image source={require("../../assets/images/icon.png")} style={s.logo} resizeMode="contain" />
         </View>
 
+        {/* Profile card */}
         <View style={s.card}>
           <View style={s.avatar}>
-            <Ionicons name={isDriver ? "car-sport" : isOwner ? "business" : "person"} size={32} color={colors.cyan} />
+            {selfieUrl ? (
+              <Image
+                source={{ uri: selfieUrl }}
+                style={{ width: "100%", height: "100%", borderRadius: 36 }}
+                resizeMode="cover"
+              />
+            ) : (
+              <Ionicons
+                name={isDriver ? "car-sport" : isOwner ? "business" : "person"}
+                size={32} color={colors.cyan}
+              />
+            )}
+            {kycStatus === "approved" && (
+              <View style={s.verifiedBadge}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.green} />
+              </View>
+            )}
           </View>
           <Text style={s.name} testID="profile-name">{u.full_name}</Text>
           <Text style={s.phone}>{u.phone_number}</Text>
@@ -539,7 +555,8 @@ const makeStyles = (colors: any) => StyleSheet.create({
   header: { alignItems: "center", marginBottom: 8 },
   logo: { width: 80, height: 40 },
   card: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, alignItems: "center", padding: 24, marginBottom: 8 },
-  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.cyan, marginBottom: 12 },
+  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.cyan, marginBottom: 12, overflow: "hidden", position: "relative" },
+  verifiedBadge: { position: "absolute", bottom: 0, right: 0, backgroundColor: colors.bg2, borderRadius: 10, padding: 1 },
   name: { color: colors.text, fontSize: 20, fontWeight: "800" },
   phone: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
   rolePill: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8, backgroundColor: colors.cyanDim, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.cyan },
