@@ -14,9 +14,12 @@ type Filter = "all" | "in" | "out" | "topup" | "withdrawal";
 const HIDDEN_KEY = "tnr_hidden_transactions";
 
 async function getHidden(): Promise<string[]> {
-  try { const raw = await AsyncStorage.getItem(HIDDEN_KEY); return raw ? JSON.parse(raw) : []; }
-  catch { return []; }
+  try {
+    const raw = await AsyncStorage.getItem(HIDDEN_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
 }
+
 async function addHidden(ids: string[]) {
   try {
     const existing = await getHidden();
@@ -36,7 +39,8 @@ export default function Transactions() {
   const load = useCallback(async () => {
     try {
       const [t, h] = await Promise.all([api.transactions(), getHidden()]);
-      setItems(t); setHidden(h);
+      setItems(t);
+      setHidden(h);
     } catch {}
     finally { setRefreshing(false); setLoading(false); }
   }, []);
@@ -49,23 +53,23 @@ export default function Transactions() {
   };
 
   const handleClearAll = () => {
-  Alert.alert(
-    "Clear all transactions?",
-    "All transactions will be removed from this device permanently.",
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete all", style: "destructive",
-        onPress: async () => {
-          const allIds = items.map(t => t.id);
-          await addHidden(allIds);
-          setItems([]);
-          setHidden(allIds);
+    Alert.alert(
+      "Clear all transactions?",
+      "All transactions will be removed from this device permanently.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete all", style: "destructive",
+          onPress: async () => {
+            const allIds = items.map(t => t.id);
+            await addHidden(allIds);
+            setItems([]);
+            setHidden(allIds);
+          },
         },
-      },
-    ]
-  );
-};
+      ]
+    );
+  };
 
   const filtered = items
     .filter(t => !hidden.includes(t.id))
@@ -86,9 +90,9 @@ export default function Transactions() {
     <SafeAreaView style={s.root} edges={["top"]} testID="transactions-screen">
       <View style={s.header}>
         <Text style={s.title}>Transactions</Text>
-        {filtered.length > 0 && (
+        {items.length > 0 && (
           <TouchableOpacity onPress={handleClearAll} style={s.clearBtn}>
-            <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
+            <Ionicons name="trash-outline" size={14} color={colors.red} />
             <Text style={s.clearText}>Clear all</Text>
           </TouchableOpacity>
         )}
@@ -99,7 +103,11 @@ export default function Transactions() {
           <TouchableOpacity key={f} onPress={() => setFilter(f)}
             style={[s.filter, filter === f && s.filterActive]} testID={`filter-${f}`}>
             <Text style={[s.filterText, filter === f && s.filterTextActive]}>
-              {f === "all" ? "All" : f === "in" ? "Received" : f === "out" ? "Paid" : f === "topup" ? "Top-ups" : "Withdrawals"}
+              {f === "all" ? "All"
+                : f === "in" ? "Received"
+                : f === "out" ? "Paid"
+                : f === "topup" ? "Top-ups"
+                : "Withdrawals"}
             </Text>
           </TouchableOpacity>
         ))}
@@ -109,14 +117,24 @@ export default function Transactions() {
         data={filtered}
         keyExtractor={(t) => t.id}
         contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 10 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(); }}
+            tintColor={colors.cyan}
+          />
+        }
         renderItem={({ item: t }) => {
           const isIn = t.direction === "in" || t.type === "topup";
           const isWithdraw = t.type === "withdrawal";
           const sign = isIn ? "+" : "-";
           const color = isIn ? colors.green : colors.text;
-          const icon = t.type === "topup" ? "arrow-down" : isWithdraw ? "cash-outline" : isIn ? "arrow-down-circle" : "arrow-up-circle";
-          const title = t.type === "topup" ? "Wallet top-up" : isWithdraw ? "Withdrawal" : t.counterparty_name || "Transfer";
+          const icon = t.type === "topup" ? "arrow-down"
+            : isWithdraw ? "cash-outline"
+            : isIn ? "arrow-down-circle" : "arrow-up-circle";
+          const title = t.type === "topup" ? "Wallet top-up"
+            : isWithdraw ? "Withdrawal"
+            : t.counterparty_name || "Transfer";
           return (
             <View style={{ position: "relative" }}>
               <View style={s.row} testID={`txn-row-${t.id}`}>
@@ -131,10 +149,16 @@ export default function Transactions() {
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={[s.amt, { color }]}>{sign}{formatZAR(t.amount)}</Text>
                   <View style={{ marginTop: 6 }}>
-                    <Pill label={t.status} tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
+                    <Pill
+                      label={t.status}
+                      tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"}
+                    />
                   </View>
                 </View>
-                <TouchableOpacity onPress={() => handleHide(t.id)} style={s.hideBtn} testID={`hide-txn-${t.id}`}>
+                <TouchableOpacity
+                  onPress={() => handleHide(t.id)}
+                  style={s.hideBtn}
+                  testID={`hide-txn-${t.id}`}>
                   <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
                 </TouchableOpacity>
               </View>
@@ -144,7 +168,9 @@ export default function Transactions() {
         ListEmptyComponent={!loading ? (
           <View style={s.empty}>
             <Ionicons name="receipt-outline" size={36} color={colors.textDim} />
-            <Text style={s.emptyTxt}>No transactions</Text>
+            <Text style={s.emptyTxt}>
+              {items.length > 0 ? "No transactions match this filter" : "No transactions yet"}
+            </Text>
           </View>
         ) : null}
       />
@@ -154,16 +180,30 @@ export default function Transactions() {
 
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, paddingBottom: 8 },
+  header: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", padding: 20, paddingBottom: 8,
+  },
   title: { color: colors.text, fontSize: 24, fontWeight: "800" },
-  clearBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
-  clearText: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  clearBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+    backgroundColor: colors.redDim, borderWidth: 1, borderColor: colors.red + "40",
+  },
+  clearText: { color: colors.red, fontSize: 11, fontWeight: "700" },
   filterRow: { flexDirection: "row", paddingHorizontal: 20, gap: 8, paddingVertical: 8 },
-  filter: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
+  filter: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2,
+  },
   filterActive: { borderColor: colors.cyan, backgroundColor: colors.cyanDim },
   filterText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
   filterTextActive: { color: colors.cyan },
-  row: { flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 40, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 12 },
+  row: {
+    flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 40,
+    backgroundColor: colors.bg2, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border, gap: 12,
+  },
   icon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   rowTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
   rowSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
