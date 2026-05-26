@@ -49,15 +49,23 @@ export default function Transactions() {
   };
 
   const handleClearAll = () => {
-    Alert.alert("Clear all transactions?", "They will be removed from your device. This cannot be undone.", [
+  Alert.alert(
+    "Clear all transactions?",
+    "All transactions will be removed from this device permanently.",
+    [
       { text: "Cancel", style: "cancel" },
-      { text: "Clear all", style: "destructive", onPress: async () => {
-        const allIds = items.map(t => t.id);
-        await addHidden(allIds);
-        setHidden(prev => Array.from(new Set([...prev, ...allIds])));
-      }},
-    ]);
-  };
+      {
+        text: "Delete all", style: "destructive",
+        onPress: async () => {
+          const allIds = items.map(t => t.id);
+          await addHidden(allIds);
+          setItems([]);
+          setHidden(allIds);
+        },
+      },
+    ]
+  );
+};
 
   const filtered = items
     .filter(t => !hidden.includes(t.id))
