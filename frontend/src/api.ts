@@ -270,6 +270,9 @@ export const api = {
       submitted_at?: string;
     }>("/api/kyc/status"),
 
+  kycSelfieUrl: () =>
+    request<{ url: string }>("/api/kyc/selfie-url"),
+
   // ── Notifications ──
   getNotifications: () =>
     request<Notification[]>("/api/user/notifications"),
