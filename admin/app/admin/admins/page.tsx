@@ -5,18 +5,23 @@ import { Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select, Card } fro
 import { api, AdminUser } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
 import { isSuperAdmin } from "@/lib/api";
-import { PlusCircle, Trash2, ShieldOff, ShieldCheck, LogOut, Edit2, Key } from "lucide-react";
+import { PlusCircle, Trash2, ShieldOff, ShieldCheck, LogOut, Edit2, Key, Clock, Activity } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
 const ROLES = [
-  { value: "admin", label: "Admin", desc: "Users, drivers, verification" },
-  { value: "finance", label: "Finance", desc: "Withdrawals, payouts, balances" },
-  { value: "support", label: "Support", desc: "PIN reset, view data" },
-  { value: "cfo", label: "CFO", desc: "Full financial control" },
-  { value: "cto", label: "CTO", desc: "System & audit access" },
-  { value: "ceo", label: "CEO", desc: "Near-full access" },
+  { value: "admin",     label: "Admin",     desc: "Users, drivers, verification",    color: "text-cyan" },
+  { value: "finance",   label: "Finance",   desc: "Withdrawals, payouts, balances",  color: "text-green" },
+  { value: "support",   label: "Support",   desc: "PIN reset, view data",            color: "text-purple" },
+  { value: "cfo",       label: "CFO",       desc: "Full financial control",          color: "text-yellow" },
+  { value: "cto",       label: "CTO",       desc: "System & audit access",           color: "text-cyan" },
+  { value: "ceo",       label: "CEO",       desc: "Near-full access",                color: "text-orange-400" },
 ];
+
+function daysSince(date: string | null) {
+  if (!date) return null;
+  return Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
+}
 
 export default function AdminsPage() {
   const router = useRouter();
@@ -34,6 +39,7 @@ export default function AdminsPage() {
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [newPw, setNewPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -49,11 +55,12 @@ export default function AdminsPage() {
 
   const handleCreate = async () => {
     if (!newName || !newEmail || !newPassword) { toast.error("All fields required"); return; }
+    if (newPassword.length < 8) { toast.error("Password must be at least 8 characters"); return; }
     try {
       await api.createAdmin({ full_name: newName, email: newEmail, password: newPassword, role: newRole });
       toast.success("Admin created");
       setCreateModal(false);
-      setNewName(""); setNewEmail(""); setNewPassword(""); setNewRole("admin");
+      setNewName(""); setNewEmail(""); setNewPassword(""); setNewRole("admin"); setShowPw(false);
       load();
     } catch (e: any) { toast.error(e.message); }
   };
@@ -89,6 +96,7 @@ export default function AdminsPage() {
   };
 
   const handleForceLogout = async (a: AdminUser) => {
+    if (!confirm(`Force logout ${a.full_name}? All their sessions will be revoked.`)) return;
     try { await api.forceLogout(a.id); toast.success(`${a.full_name} logged out`); }
     catch (e: any) { toast.error(e.message); }
   };
@@ -98,13 +106,43 @@ export default function AdminsPage() {
     try {
       await api.resetAdminPassword(pwModal.id, newPw);
       toast.success("Password reset — sessions revoked");
-      setPwModal(null); setNewPw("");
+      setPwModal(null); setNewPw(""); setShowPw(false);
     } catch (e: any) { toast.error(e.message); }
   };
+
+  const activeCount = admins.filter(a => a.is_active).length;
+  const suspendedCount = admins.filter(a => !a.is_active).length;
+  const neverLogged = admins.filter(a => !a.last_login).length;
 
   return (
     <AdminShell title="Admin Accounts">
       <div className="space-y-6">
+
+        {/* Summary stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="text-center">
+            <p className="text-2xl font-extrabold text-cyan">{admins.length}</p>
+            <p className="text-xs text-textMuted mt-1">Total Admins</p>
+          </Card>
+          <Card className="text-center">
+            <p className="text-2xl font-extrabold text-green">{activeCount}</p>
+            <p className="text-xs text-textMuted mt-1">Active</p>
+          </Card>
+          <Card className={`text-center ${suspendedCount > 0 ? "border-red/30" : ""}`}>
+            <p className={`text-2xl font-extrabold ${suspendedCount > 0 ? "text-red" : "text-textMuted"}`}>
+              {suspendedCount}
+            </p>
+            <p className="text-xs text-textMuted mt-1">Suspended</p>
+          </Card>
+          <Card className={`text-center ${neverLogged > 0 ? "border-yellow/30" : ""}`}>
+            <p className={`text-2xl font-extrabold ${neverLogged > 0 ? "text-yellow" : "text-textMuted"}`}>
+              {neverLogged}
+            </p>
+            <p className="text-xs text-textMuted mt-1">Never Logged In</p>
+          </Card>
+        </div>
+
+        {/* Role key */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {ROLES.map((r) => (
             <Card key={r.value} className="p-3">
@@ -112,6 +150,9 @@ export default function AdminsPage() {
                 {r.label}
               </span>
               <p className="text-[11px] text-textMuted leading-tight">{r.desc}</p>
+              <p className="text-[10px] text-textDim mt-1 font-bold">
+                {admins.filter(a => a.role === r.value).length} account{admins.filter(a => a.role === r.value).length !== 1 ? "s" : ""}
+              </p>
             </Card>
           ))}
         </div>
@@ -124,53 +165,73 @@ export default function AdminsPage() {
 
         {loading ? <Spinner /> : (
           <Table
-            headers={["Name", "Email", "Role", "Status", "Last Login", "Created By", "Actions"]}
+            headers={["Name", "Email", "Role", "Status", "Last Login", "Inactivity", "Created By", "Actions"]}
             empty={!admins.length}>
-            {admins.map((a) => (
-              <Tr key={a.id}>
-                <Td className="font-semibold">{a.full_name}</Td>
-                <Td className="text-textMuted text-sm">{a.email}</Td>
-                <Td>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(a.role)}`}>
-                    {a.role}
-                  </span>
-                </Td>
-                <Td>
-                  <Badge label={a.is_active ? "Active" : "Suspended"} tone={a.is_active ? "green" : "red"} />
-                </Td>
-                <Td className="text-textMuted text-xs">{a.last_login ? formatDate(a.last_login) : "Never"}</Td>
-                <Td className="text-textMuted text-xs">{a.created_by_name || "—"}</Td>
-                <Td>
-                  {a.role !== "superadmin" && (
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" onClick={() => {
-                        setEditModal(a); setEditRole(a.role);
-                        setEditName(a.full_name); setEditEmail(a.email);
-                      }}>
-                        <Edit2 size={12} />
-                      </Button>
-                      <Button variant="ghost" onClick={() => setPwModal(a)}>
-                        <Key size={12} />
-                      </Button>
-                      <Button variant="ghost" onClick={() => handleForceLogout(a)}>
-                        <LogOut size={12} />
-                      </Button>
-                      <Button variant={a.is_active ? "danger" : "secondary"} onClick={() => handleSuspend(a)}>
-                        {a.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
-                      </Button>
-                      <Button variant="danger" onClick={() => handleDelete(a)}>
-                        <Trash2 size={12} />
-                      </Button>
-                    </div>
-                  )}
-                </Td>
-              </Tr>
-            ))}
+            {admins.map((a) => {
+              const lastLoginDays = daysSince(a.last_login);
+              const stale = lastLoginDays !== null && lastLoginDays > 30;
+              return (
+                <Tr key={a.id} className={!a.is_active ? "opacity-60" : ""}>
+                  <Td className="font-semibold">{a.full_name}</Td>
+                  <Td className="text-textMuted text-sm">{a.email}</Td>
+                  <Td>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(a.role)}`}>
+                      {a.role}
+                    </span>
+                  </Td>
+                  <Td>
+                    <Badge label={a.is_active ? "Active" : "Suspended"} tone={a.is_active ? "green" : "red"} />
+                  </Td>
+                  <Td className="text-textMuted text-xs">
+                    {a.last_login ? formatDate(a.last_login) : (
+                      <span className="text-yellow font-bold text-[10px]">Never</span>
+                    )}
+                  </Td>
+                  <Td>
+                    {lastLoginDays === null ? (
+                      <span className="text-yellow text-xs">—</span>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <Clock size={10} className={stale ? "text-yellow" : "text-textDim"} />
+                        <span className={`text-xs ${stale ? "text-yellow font-bold" : "text-textMuted"}`}>
+                          {lastLoginDays}d ago
+                        </span>
+                      </div>
+                    )}
+                  </Td>
+                  <Td className="text-textMuted text-xs">{a.created_by_name || "—"}</Td>
+                  <Td>
+                    {a.role !== "superadmin" && (
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" onClick={() => {
+                          setEditModal(a); setEditRole(a.role);
+                          setEditName(a.full_name); setEditEmail(a.email);
+                        }}>
+                          <Edit2 size={12} />
+                        </Button>
+                        <Button variant="ghost" onClick={() => setPwModal(a)}>
+                          <Key size={12} />
+                        </Button>
+                        <Button variant="ghost" onClick={() => handleForceLogout(a)}>
+                          <LogOut size={12} />
+                        </Button>
+                        <Button variant={a.is_active ? "danger" : "secondary"} onClick={() => handleSuspend(a)}>
+                          {a.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
+                        </Button>
+                        <Button variant="danger" onClick={() => handleDelete(a)}>
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
+                    )}
+                  </Td>
+                </Tr>
+              );
+            })}
           </Table>
         )}
       </div>
 
-      <Modal open={createModal} onClose={() => setCreateModal(false)} title="Create Admin">
+      <Modal open={createModal} onClose={() => { setCreateModal(false); setShowPw(false); }} title="Create Admin">
         <div className="space-y-4">
           <div>
             <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Full Name</label>
@@ -182,7 +243,23 @@ export default function AdminsPage() {
           </div>
           <div>
             <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Password</label>
-            <Input type="password" placeholder="Min 8 characters" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            <div className="relative">
+              <Input
+                type={showPw ? "text" : "password"}
+                placeholder="Min 8 characters"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-textDim hover:text-text text-[10px] font-bold">
+                {showPw ? "HIDE" : "SHOW"}
+              </button>
+            </div>
+            {newPassword.length > 0 && newPassword.length < 8 && (
+              <p className="text-red text-[10px] mt-1">Min 8 characters ({newPassword.length}/8)</p>
+            )}
           </div>
           <div>
             <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Role</label>
@@ -220,21 +297,35 @@ export default function AdminsPage() {
         </div>
       </Modal>
 
-      <Modal open={!!pwModal} onClose={() => { setPwModal(null); setNewPw(""); }}
+      <Modal
+        open={!!pwModal}
+        onClose={() => { setPwModal(null); setNewPw(""); setShowPw(false); }}
         title={`Reset Password — ${pwModal?.full_name}`}>
         <div className="space-y-4">
-          <p className="text-textMuted text-sm">This will immediately revoke all active sessions.</p>
+          <p className="text-textMuted text-sm">This will immediately revoke all active sessions for this admin.</p>
           <div>
             <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">New Password</label>
-            <Input type="password" placeholder="Min 8 characters" value={newPw}
-              onChange={(e) => setNewPw(e.target.value)} />
+            <div className="relative">
+              <Input
+                type={showPw ? "text" : "password"}
+                placeholder="Min 8 characters"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-textDim hover:text-text text-[10px] font-bold">
+                {showPw ? "HIDE" : "SHOW"}
+              </button>
+            </div>
           </div>
           <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => { setPwModal(null); setNewPw(""); }}>Cancel</Button>
+            <Button variant="secondary" onClick={() => { setPwModal(null); setNewPw(""); setShowPw(false); }}>Cancel</Button>
             <Button variant="danger" onClick={handleResetPw}>Reset Password</Button>
           </div>
         </div>
       </Modal>
     </AdminShell>
   );
-      }
+}

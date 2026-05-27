@@ -1,10 +1,10 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal } from "@/components/ui";
+import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal, Select } from "@/components/ui";
 import { api, User, hasPermission, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
-import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, FlaskConical } from "lucide-react";
+import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, FlaskConical, Copy, Download, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
@@ -15,13 +15,34 @@ const authHeaders = (dangerToken?: string) => ({
   ...(dangerToken ? { "X-Danger-Token": dangerToken } : {}),
 });
 
+const FLAG_PRESETS = [
+  "Suspicious transaction pattern",
+  "Multiple failed PIN attempts",
+  "Reported by another user",
+  "Potential fraudulent activity",
+  "Account sharing suspected",
+  "Velocity limit exceeded",
+];
+
+const BLOCK_REASONS = [
+  "Fraudulent activity confirmed",
+  "Chargeback filed",
+  "Terms of service violation",
+  "Failed identity verification",
+  "Unresolved dispute",
+];
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [flagModal, setFlagModal] = useState<User | null>(null);
   const [flagReason, setFlagReason] = useState("");
+  const [blockModal, setBlockModal] = useState<User | null>(null);
+  const [blockReason, setBlockReason] = useState("");
   const [pinModal, setPinModal] = useState<{ name: string; pin: string } | null>(null);
   const superAdmin = isSuperAdmin();
   const canManageTest = hasPermission("manage_test_users");
@@ -34,10 +55,13 @@ export default function UsersPage() {
 
   useEffect(() => { load(); }, []);
 
-  const handleBlock = async (u: User) => {
+  const handleBlock = async () => {
+    if (!blockModal) return;
+    const u = blockModal;
     try {
       if (u.is_active) { await api.blockUser(u.id); toast.success(`${u.full_name} blocked`); }
       else { await api.unblockUser(u.id); toast.success(`${u.full_name} unblocked`); }
+      setBlockModal(null); setBlockReason("");
       load(query);
     } catch (e: any) { toast.error(e.message); }
   };
@@ -70,10 +94,7 @@ export default function UsersPage() {
     const token = await dangerPin.request();
     if (!token) return;
     try {
-      const res = await fetch(`${BASE}/api/admin/users/${u.id}`, {
-        method: "DELETE",
-        headers: authHeaders(token),
-      });
+      const res = await fetch(`${BASE}/api/admin/users/${u.id}`, { method: "DELETE", headers: authHeaders(token) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Delete failed");
       toast.success(`${u.full_name} deleted`);
@@ -85,47 +106,88 @@ export default function UsersPage() {
     const isTest = !u.is_test;
     try {
       const res = await fetch(`${BASE}/api/admin/test-users/${u.id}/mark`, {
-        method: "PATCH",
-        headers: authHeaders(),
-        body: JSON.stringify({ is_test: isTest }),
+        method: "PATCH", headers: authHeaders(), body: JSON.stringify({ is_test: isTest }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed");
-      toast.success(isTest ? `${u.full_name} marked as test account` : `${u.full_name} unmarked`);
+      toast.success(isTest ? `${u.full_name} marked as test` : `${u.full_name} unmarked`);
       load(query);
     } catch (e: any) { toast.error(e.message); }
   };
 
+  const doSearch = () => { setQuery(search); load(search); };
+  const clearAll = () => { setSearch(""); setQuery(""); setRoleFilter(""); setStatusFilter(""); load(""); };
+
+  const filtered = users.filter((u: any) => {
+    if (roleFilter && u.role !== roleFilter) return false;
+    if (statusFilter === "active" && !u.is_active) return false;
+    if (statusFilter === "blocked" && u.is_active) return false;
+    if (statusFilter === "flagged" && !u.flagged) return false;
+    return true;
+  });
+
   return (
     <AdminShell title="User Management">
       <div className="space-y-4">
-        <div className="flex gap-3">
-          <Input placeholder="Search by phone or name..." value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { setQuery(search); load(search); } }} />
-          <Button onClick={() => { setQuery(search); load(search); }}>
-            <Search size={13} /> Search
+
+        {/* Search + filters */}
+        <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-2 flex-1 min-w-0">
+            <Input
+              placeholder="Search by phone or name..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && doSearch()}
+            />
+            <Button onClick={doSearch}><Search size={13} /> Search</Button>
+          </div>
+          <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="w-36">
+            <option value="">All roles</option>
+            <option value="passenger">Passenger</option>
+            <option value="driver">Driver</option>
+            <option value="owner">Owner</option>
+          </Select>
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-36">
+            <option value="">All status</option>
+            <option value="active">Active</option>
+            <option value="blocked">Blocked</option>
+            <option value="flagged">Flagged</option>
+          </Select>
+          {(query || roleFilter || statusFilter) && (
+            <Button variant="ghost" onClick={clearAll}><X size={13} /> Clear</Button>
+          )}
+        </div>
+
+        {/* Results bar */}
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-textMuted">
+            {loading ? "Loading…" : `${filtered.length} user${filtered.length !== 1 ? "s" : ""}${query ? ` matching "${query}"` : ""}`}
+          </p>
+          <Button variant="secondary" onClick={() => { api.exportUsers(); toast.success("Export queued"); }}>
+            <Download size={13} /> Export CSV
           </Button>
         </div>
 
         {loading ? <Spinner /> : (
           <Table
             headers={["Name", "Phone", "Role", "Status", "Joined", "Actions"]}
-            empty={!users.length}>
-            {users.map((u: any) => (
+            empty={!filtered.length}
+          >
+            {filtered.map((u: any) => (
               <Tr key={u.id}>
                 <Td>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-semibold">{u.full_name}</span>
                     {u.is_test && (
                       <span className="flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 bg-purple/10 border border-purple/20 rounded text-purple uppercase">
                         <FlaskConical size={9} /> TEST
                       </span>
                     )}
+                    {u.flagged && (
+                      <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>
+                    )}
                   </div>
-                  {u.flagged && (
-                    <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>
-                  )}
+                  <p className="text-[10px] text-textDim font-mono">{u.id.slice(0, 8)}…</p>
                 </Td>
                 <Td className="font-mono text-xs text-textMuted">{u.phone_number}</Td>
                 <Td>
@@ -139,9 +201,14 @@ export default function UsersPage() {
                 <Td className="text-textMuted text-xs">{formatDate(u.created_at)}</Td>
                 <Td>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <Button variant={u.is_active ? "danger" : "secondary"} onClick={() => handleBlock(u)}>
-                      {u.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
-                      {u.is_active ? "Block" : "Unblock"}
+                    <Button
+                      variant={u.is_active ? "danger" : "secondary"}
+                      onClick={() => {
+                        if (u.is_active) setBlockModal(u);
+                        else handleBlock();
+                      }}
+                    >
+                      {u.is_active ? <><ShieldOff size={12} /> Block</> : <><ShieldCheck size={12} /> Unblock</>}
                     </Button>
                     <Button variant="secondary" onClick={() => handleResetPin(u)}>
                       <Key size={12} /> PIN
@@ -157,8 +224,7 @@ export default function UsersPage() {
                     )}
                     {canManageTest && (
                       <Button variant="ghost" onClick={() => handleToggleTest(u)}>
-                        <FlaskConical size={12} />
-                        {u.is_test ? "Unmark" : "Test"}
+                        <FlaskConical size={12} /> {u.is_test ? "Unmark" : "Test"}
                       </Button>
                     )}
                     {superAdmin && (
@@ -174,34 +240,76 @@ export default function UsersPage() {
         )}
       </div>
 
-      <Modal open={!!flagModal} onClose={() => { setFlagModal(null); setFlagReason(""); }}
-        title={`Flag ${flagModal?.full_name}`}>
+      {/* Block Modal with reason */}
+      <Modal open={!!blockModal} onClose={() => { setBlockModal(null); setBlockReason(""); }} title={`Block ${blockModal?.full_name}`}>
         <div className="space-y-4">
-          <p className="text-textMuted text-sm">Provide a reason for flagging this account.</p>
-          <Input placeholder="Reason for flagging..." value={flagReason}
-            onChange={(e) => setFlagReason(e.target.value)} />
+          <p className="text-textMuted text-sm">Select a reason for blocking this account.</p>
+          <div className="flex flex-wrap gap-2">
+            {BLOCK_REASONS.map((r) => (
+              <button
+                key={r}
+                onClick={() => setBlockReason(r)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${blockReason === r ? "bg-red/10 text-red border-red/20" : "text-textMuted border-border hover:border-red/30"}`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          <Input placeholder="Or type a custom reason..." value={blockReason} onChange={(e) => setBlockReason(e.target.value)} />
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" onClick={() => { setFlagModal(null); setFlagReason(""); }}>
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={handleFlag}>Flag Account</Button>
+            <Button variant="secondary" onClick={() => { setBlockModal(null); setBlockReason(""); }}>Cancel</Button>
+            <Button variant="danger" onClick={handleBlock}><ShieldOff size={12} /> Block Account</Button>
           </div>
         </div>
       </Modal>
 
+      {/* Flag Modal with presets */}
+      <Modal open={!!flagModal} onClose={() => { setFlagModal(null); setFlagReason(""); }} title={`Flag ${flagModal?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">Select a preset or enter a custom reason.</p>
+          <div className="flex flex-wrap gap-2">
+            {FLAG_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                onClick={() => setFlagReason(preset)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${flagReason === preset ? "bg-yellow/10 text-yellow border-yellow/20" : "text-textMuted border-border hover:border-yellow/30"}`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          <Input placeholder="Custom reason..." value={flagReason} onChange={(e) => setFlagReason(e.target.value)} />
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => { setFlagModal(null); setFlagReason(""); }}>Cancel</Button>
+            <Button variant="danger" onClick={handleFlag}><Flag size={12} /> Flag Account</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* PIN Modal with copy */}
       <Modal open={!!pinModal} onClose={() => setPinModal(null)} title="Temporary PIN">
         <div className="space-y-4">
           <p className="text-textMuted text-sm">
             Share this temporary PIN with <strong className="text-text">{pinModal?.name}</strong>.
-            They should change it immediately.
+            They must change it immediately after logging in.
           </p>
-          <div className="bg-bg border border-border rounded-lg p-4 text-center">
-            <span className="text-cyan font-mono text-3xl font-black tracking-widest">
+          <div className="bg-bg border border-cyan/20 rounded-xl p-5 text-center relative">
+            <span className="text-cyan font-mono text-4xl font-black tracking-[0.5em]">
               {pinModal?.pin}
             </span>
           </div>
-          <p className="text-xs text-red text-center">This PIN is shown once. Save it now.</p>
-          <Button className="w-full justify-center" onClick={() => setPinModal(null)}>Done</Button>
+          <div className="flex gap-3">
+            <Button
+              className="flex-1 justify-center"
+              onClick={() => { navigator.clipboard.writeText(pinModal?.pin || ""); toast.success("PIN copied!"); }}
+            >
+              <Copy size={13} /> Copy PIN
+            </Button>
+            <Button variant="secondary" className="flex-1 justify-center" onClick={() => setPinModal(null)}>
+              Done
+            </Button>
+          </div>
+          <p className="text-xs text-red text-center font-semibold">This PIN is shown only once.</p>
         </div>
       </Modal>
 

@@ -10,6 +10,8 @@ import {
   UserCheck, Users2, Truck, Scale, MapPin, BookOpen,
   Terminal, Sun, Moon, FlaskConical, RefreshCw,
   DollarSign, Lock, RotateCcw, PieChart, Banknote,
+  ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
+  Zap, Globe, Star, ToggleRight, Key, MessageCircle,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -30,7 +32,8 @@ const nav = [
   { label: "Analytics",    href: "/admin/analytics",     icon: BarChart3,       permission: "view_analytics" },
   { label: "Payouts",      href: "/admin/payouts",       icon: CreditCard,      permission: "approve_withdrawals" },
   { label: "Audit Log",    href: "/admin/audit",         icon: FileText,        permission: "view_audit" },
-  { label: "Support",      href: "/admin/support",       icon: HelpCircle,      permission: "reset_pin" },
+  { label: "Support",      href: "/admin/support",          icon: HelpCircle,      permission: "reset_pin" },
+  { label: "WA Support",  href: "/admin/whatsapp-support", icon: MessageCircle,   permission: "reset_pin" },
 ];
 
 const advancedNav = [
@@ -43,23 +46,36 @@ const advancedNav = [
   { label: "System Health",       href: "/admin/health",            icon: Activity,      permission: "view_audit" },
   { label: "Passenger Analytics", href: "/admin/passengers",        icon: Users2,        permission: "view_analytics" },
   { label: "Fleet Reports",       href: "/admin/fleet",             icon: Truck,         permission: "view_analytics" },
-  { label: "Driver Performance",  href: "/admin/driver-performance",icon: PieChart,      permission: "view_analytics" },
+  { label: "Driver Performance",  href: "/admin/performance",       icon: PieChart,      permission: "view_analytics" },
   { label: "Onboarding",          href: "/admin/onboarding",        icon: UserCheck,     permission: "manage_drivers" },
   { label: "Statements",          href: "/admin/statements",        icon: FileText,      permission: "download_statements" },
   { label: "Revenue & Fees",      href: "/admin/revenue",           icon: DollarSign,    permission: "view_analytics" },
-  { label: "Refunds",             href: "/admin/refunds",           icon: RotateCcw,     permission: "view_analytics" },
+  { label: "Refunds",             href: "/admin/refunds",           icon: RotateCcw,     permission: "manage_refunds" },
   { label: "Reconciliation",      href: "/admin/reconciliation",    icon: RefreshCw,     permission: "view_ledger" },
   { label: "Wallet Operations",   href: "/admin/wallet-ops",        icon: Banknote,      permission: "view_audit" },
+  { label: "Risk & Fraud",        href: "/admin/risk",              icon: ShieldAlert,   permission: "view_risk" },
+  { label: "Chargebacks",         href: "/admin/chargebacks",       icon: AlertOctagon,  permission: "manage_refunds" },
+  { label: "Tx Limits",           href: "/admin/limits",            icon: Gauge,         permission: "manage_limits" },
+  { label: "Promotions",          href: "/admin/promotions",        icon: Tag,           permission: "manage_promotions" },
+  { label: "Referrals",           href: "/admin/referrals",         icon: Users2,        permission: "view_analytics" },
+  { label: "Broadcast",           href: "/admin/broadcast",         icon: Megaphone,     permission: "broadcast_messages" },
+  { label: "WhatsApp",            href: "/admin/whatsapp",          icon: MessageCircle, permission: "broadcast_messages" },
+  { label: "Pricing Rules",       href: "/admin/pricing",           icon: Zap,           permission: "manage_pricing" },
+  { label: "Coverage Zones",      href: "/admin/geography",         icon: Globe,         permission: "view_analytics" },
+  { label: "User Feedback",       href: "/admin/feedback",          icon: Star,          permission: "view_analytics" },
 ];
 
 const superAdminNav = [
   { label: "Admin Accounts", href: "/admin/admins",     icon: Shield },
   { label: "Roles & Perms",  href: "/admin/roles",      icon: Lock },
   { label: "Sessions",       href: "/admin/sessions",   icon: Monitor },
-  { label: "Settings",       href: "/admin/settings",   icon: Settings },
-  { label: "System Console", href: "/admin/console",    icon: Terminal },
-  { label: "Superadmin",     href: "/admin/superadmin", icon: ShieldCheck },
-  { label: "Test Users",     href: "/admin/test-users", icon: FlaskConical },
+  { label: "Settings",       href: "/admin/settings",       icon: Settings },
+  { label: "System Console", href: "/admin/console",        icon: Terminal },
+  { label: "Superadmin",     href: "/admin/superadmin",     icon: ShieldCheck },
+  { label: "Test Users",     href: "/admin/test-users",     icon: FlaskConical },
+  { label: "Feature Flags",  href: "/admin/feature-flags",  icon: ToggleRight },
+  { label: "API Keys",       href: "/admin/api-keys",       icon: Key },
+  { label: "GDPR & Privacy", href: "/admin/gdpr",           icon: ShieldCheck },
 ];
 
 function ThemeToggleCompact() {

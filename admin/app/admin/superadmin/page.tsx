@@ -4,16 +4,25 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Button, Spinner, Badge, Input } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatZAR } from "@/lib/utils";
-import { ArrowLeftRight, PlusCircle, MinusCircle, Snowflake, Wallet, Trash2 } from "lucide-react";
+import { ArrowLeftRight, PlusCircle, MinusCircle, Snowflake, Wallet, Trash2, Search, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { isSuperAdmin } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
+
+const BASE = "https://tag-n-ride-production.up.railway.app";
+const authHeaders = (dangerToken?: string | null) => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
+  ...(dangerToken ? { "X-Danger-Token": dangerToken } : {}),
+});
 
 export default function SuperAdminPage() {
   const router = useRouter();
   const superAdmin = isSuperAdmin();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteSearch, setDeleteSearch] = useState("");
 
   const [fromUser, setFromUser] = useState("");
   const [toUser, setToUser] = useState("");
@@ -30,11 +39,15 @@ export default function SuperAdminPage() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [freezeReason, setFreezeReason] = useState("");
 
+  const [pinAction, setPinAction] = useState<"transfer" | "adjust" | "delete" | "freeze" | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
+
   useEffect(() => {
     if (!superAdmin) { router.push("/admin/dashboard"); return; }
     api.users().then((r) => setUsers(
       r.data.filter((u: any) =>
-        !["admin","superadmin","finance","support","ceo","cto","cfo"].includes(u.role)
+        !["admin", "superadmin", "finance", "support", "ceo", "cto", "cfo"].includes(u.role)
       )
     )).finally(() => setLoading(false));
   }, []);
@@ -43,30 +56,38 @@ export default function SuperAdminPage() {
     const amount = parseFloat(transferAmt);
     if (!fromUser || !toUser || !amount) { toast.error("Fill all fields"); return; }
     if (fromUser === toUser) { toast.error("Cannot transfer to same account"); return; }
-    if (!confirm(`Transfer ${formatZAR(amount)} between users?`)) return;
+    if (!transferNote.trim()) { toast.error("Note is required for fund transfers"); return; }
+    setPinAction("transfer");
+    const token = await requestPin();
+    if (!token) return;
     try {
       const res = await api.transferFunds({
         from_user_id: fromUser, to_user_id: toUser,
-        amount, note: transferNote || undefined,
-      });
+        amount, note: transferNote,
+      }, token);
       toast.success(`Transferred — Ref: ${res.data.reference}`);
       setFromUser(""); setToUser(""); setTransferAmt(""); setTransferNote("");
     } catch (e: any) { toast.error(e.message); }
+    finally { setPinAction(null); }
   };
 
   const handleAdjust = async () => {
     const amount = parseFloat(adjustAmt);
     if (!adjustUser || !amount) { toast.error("Fill all fields"); return; }
+    if (!adjustNote.trim()) { toast.error("Note is required for balance adjustments"); return; }
+    setPinAction("adjust");
+    const token = await requestPin();
+    if (!token) return;
     const finalAmount = adjustType === "debit" ? -amount : amount;
-    if (!confirm(`${adjustType === "credit" ? "Credit" : "Debit"} ${formatZAR(amount)} ${adjustType === "credit" ? "to" : "from"} wallet?`)) return;
     try {
       const res = await api.adjustBalance({
         user_id: adjustUser, amount: finalAmount,
-        note: adjustNote || undefined,
-      });
+        note: adjustNote,
+      }, token);
       toast.success(`Balance updated. New balance: ${formatZAR(res.data.new_balance)}`);
       setAdjustAmt(""); setAdjustNote("");
     } catch (e: any) { toast.error(e.message); }
+    finally { setPinAction(null); }
   };
 
   const handleViewWallet = async () => {
@@ -82,22 +103,31 @@ export default function SuperAdminPage() {
   const handleFreeze = async (freeze: boolean) => {
     if (!walletUserId) return;
     if (freeze && !freezeReason.trim()) { toast.error("Freeze reason required"); return; }
+    setPinAction("freeze");
+    const token = await requestPin();
+    if (!token) return;
     try {
-      if (freeze) await api.freezeWallet(walletUserId, freezeReason.trim());
-      else await api.unfreezeWallet(walletUserId);
+      if (freeze) await api.freezeWallet(walletUserId, freezeReason.trim(), token);
+      else await api.unfreezeWallet(walletUserId, token);
       toast.success(freeze ? "Wallet frozen" : "Wallet unfrozen");
       setFreezeReason("");
       handleViewWallet();
     } catch (e: any) { toast.error(e.message); }
+    finally { setPinAction(null); }
   };
 
-  const handleDeleteUser = async (userId: string, name: string) => {
-    if (!confirm(`Delete ${name}? This is permanent and cannot be undone.`)) return;
-    try {
-      await api.deleteUser(userId);
-      toast.success("User deleted");
-      api.users().then((r) => setUsers(r.data));
-    } catch (e: any) { toast.error(e.message); }
+  const initiateDelete = (userId: string, name: string) => {
+    setPendingDelete({ id: userId, name });
+    setPinAction("delete");
+    requestPin().then(async (token) => {
+      if (!token) { setPendingDelete(null); return; }
+      try {
+        await api.deleteUser(userId, token);
+        toast.success(`${name} deleted`);
+        api.users().then((r) => setUsers(r.data));
+      } catch (e: any) { toast.error(e.message); }
+      finally { setPendingDelete(null); setPinAction(null); }
+    });
   };
 
   if (!superAdmin) return null;
@@ -112,8 +142,27 @@ export default function SuperAdminPage() {
     </select>
   );
 
+  const filteredDeleteUsers = users.filter(u =>
+    !deleteSearch ||
+    u.full_name?.toLowerCase().includes(deleteSearch.toLowerCase()) ||
+    u.phone_number?.includes(deleteSearch)
+  );
+
+  const pinLabel =
+    pinAction === "delete" ? `permanently delete ${pendingDelete?.name}`
+    : pinAction === "transfer" ? "transfer funds between wallets"
+    : pinAction === "adjust" ? `${adjustType} wallet balance`
+    : "freeze/unfreeze wallet";
+
   return (
     <AdminShell title="Superadmin Controls">
+      <DangerPinModal
+        open={pinOpen}
+        onSuccess={pinSuccess}
+        onCancel={pinCancel}
+        actionLabel={pinLabel}
+      />
+
       <div className="space-y-6">
 
         {/* Transfer Funds */}
@@ -137,14 +186,21 @@ export default function SuperAdminPage() {
                 onChange={(e) => setTransferAmt(e.target.value)} />
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Note (optional)</label>
+              <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">
+                Note <span className="text-red text-[9px]">REQUIRED</span>
+              </label>
               <Input placeholder="Reason for transfer" value={transferNote}
                 onChange={(e) => setTransferNote(e.target.value)} />
             </div>
           </div>
-          <Button onClick={handleTransfer}>
-            <ArrowLeftRight size={13} /> Transfer Funds
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button onClick={handleTransfer}>
+              <ArrowLeftRight size={13} /> Transfer Funds
+            </Button>
+            <p className="text-textDim text-xs flex items-center gap-1">
+              <AlertTriangle size={11} className="text-yellow" /> Requires danger PIN
+            </p>
+          </div>
         </Card>
 
         {/* Adjust Balance */}
@@ -183,15 +239,22 @@ export default function SuperAdminPage() {
                 onChange={(e) => setAdjustAmt(e.target.value)} />
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Note (optional)</label>
+              <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">
+                Note <span className="text-red text-[9px]">REQUIRED</span>
+              </label>
               <Input placeholder="Reason for adjustment" value={adjustNote}
                 onChange={(e) => setAdjustNote(e.target.value)} />
             </div>
           </div>
-          <Button variant={adjustType === "debit" ? "danger" : "primary"} onClick={handleAdjust}>
-            {adjustType === "credit" ? <PlusCircle size={13} /> : <MinusCircle size={13} />}
-            {adjustType === "credit" ? "Credit Wallet" : "Debit Wallet"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button variant={adjustType === "debit" ? "danger" : "primary"} onClick={handleAdjust}>
+              {adjustType === "credit" ? <PlusCircle size={13} /> : <MinusCircle size={13} />}
+              {adjustType === "credit" ? "Credit Wallet" : "Debit Wallet"}
+            </Button>
+            <p className="text-textDim text-xs flex items-center gap-1">
+              <AlertTriangle size={11} className="text-yellow" /> Requires danger PIN
+            </p>
+          </div>
         </Card>
 
         {/* Wallet Control */}
@@ -233,14 +296,24 @@ export default function SuperAdminPage() {
                     value={freezeReason}
                     onChange={(e) => setFreezeReason(e.target.value)}
                   />
-                  <Button variant="danger" onClick={() => handleFreeze(true)}>
-                    <Snowflake size={13} /> Freeze Wallet
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    <Button variant="danger" onClick={() => handleFreeze(true)}>
+                      <Snowflake size={13} /> Freeze Wallet
+                    </Button>
+                    <p className="text-textDim text-xs flex items-center gap-1">
+                      <AlertTriangle size={11} className="text-yellow" /> Requires danger PIN
+                    </p>
+                  </div>
                 </div>
               ) : (
-                <Button variant="secondary" onClick={() => handleFreeze(false)}>
-                  <Snowflake size={13} /> Unfreeze Wallet
-                </Button>
+                <div className="flex items-center gap-3">
+                  <Button variant="secondary" onClick={() => handleFreeze(false)}>
+                    <Snowflake size={13} /> Unfreeze Wallet
+                  </Button>
+                  <p className="text-textDim text-xs flex items-center gap-1">
+                    <AlertTriangle size={11} className="text-yellow" /> Requires danger PIN
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -248,28 +321,48 @@ export default function SuperAdminPage() {
 
         {/* Delete Users */}
         <Card>
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-2">
             <Trash2 size={16} className="text-red" />
             <h2 className="text-text font-bold">Delete User</h2>
           </div>
-          <p className="text-textMuted text-sm mb-4">
-            Permanently delete a user and all their data. This cannot be undone.
-          </p>
+          <div className="flex items-center gap-2 px-4 py-3 bg-red/10 border border-red/20 rounded-xl mb-4">
+            <AlertTriangle size={14} className="text-red flex-shrink-0" />
+            <p className="text-red text-sm font-semibold">
+              Permanently deletes user and all their data. Cannot be undone. Requires danger PIN.
+            </p>
+          </div>
+          <div className="mb-4">
+            <Input
+              placeholder="Search by name or phone..."
+              value={deleteSearch}
+              onChange={(e) => setDeleteSearch(e.target.value)}
+            />
+          </div>
           {loading ? <Spinner /> : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {users.map((u) => (
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {filteredDeleteUsers.length === 0 ? (
+                <p className="text-textMuted text-center py-6 text-sm">No users match your search</p>
+              ) : filteredDeleteUsers.map((u) => (
                 <div key={u.id}
-                  className="flex items-center justify-between p-3 bg-bg border border-border rounded-lg">
+                  className="flex items-center justify-between p-3 bg-bg border border-border rounded-lg hover:border-red/20 transition-colors">
                   <div>
                     <p className="text-text font-semibold text-sm">{u.full_name}</p>
-                    <p className="text-textMuted text-xs">{u.phone_number} · {u.role}</p>
+                    <p className="text-textMuted text-xs font-mono">{u.phone_number}
+                      <span className="ml-2 text-textDim">· {u.role}</span>
+                    </p>
                   </div>
-                  <Button variant="danger" onClick={() => handleDeleteUser(u.id, u.full_name)}>
+                  <Button
+                    variant="danger"
+                    loading={pendingDelete?.id === u.id}
+                    onClick={() => initiateDelete(u.id, u.full_name)}>
                     <Trash2 size={12} /> Delete
                   </Button>
                 </div>
               ))}
             </div>
+          )}
+          {filteredDeleteUsers.length > 0 && (
+            <p className="text-textDim text-xs mt-3">{filteredDeleteUsers.length} user{filteredDeleteUsers.length !== 1 ? "s" : ""} shown</p>
           )}
         </Card>
 

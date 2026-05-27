@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner } from "@/components/ui";
+import { Card, Spinner, Input, Button } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Activity, Users, TrendingUp, Clock, MapPin, RefreshCw } from "lucide-react";
+import { Activity, Users, TrendingUp, Clock, MapPin, RefreshCw, Download, Search, X } from "lucide-react";
+import toast from "react-hot-toast";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}` });
@@ -24,6 +25,7 @@ export default function RoutesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "active" | "ended">("all");
   const [dateFilter, setDateFilter] = useState("");
+  const [search, setSearch] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -43,10 +45,36 @@ export default function RoutesPage() {
 
   useEffect(() => { load(); }, [filter, dateFilter]);
 
+  const filteredRoutes = routes.filter(r =>
+    !search ||
+    r.driver_name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.phone_number?.includes(search) ||
+    r.vehicle_plate?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const exportCsv = () => {
+    const rows = [
+      ["Driver", "Phone", "Plate", "Fare", "Started", "Duration (min)", "App Passengers", "Cash Passengers", "Total Passengers", "Collected", "Status"],
+      ...filteredRoutes.map(r => [
+        r.driver_name, r.phone_number, r.vehicle_plate || "",
+        r.fare || 0, formatDate(r.started_at), r.duration_mins,
+        r.app_count, r.cash_count, r.total_passengers,
+        r.total_collected, r.status,
+      ]),
+    ];
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `routes-${dateFilter || new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    URL.revokeObjectURL(url); toast.success("Exported");
+  };
+
   return (
     <AdminShell title="Routes and Trips">
       <div className="space-y-6">
 
+        {/* Top stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "Active Routes", value: stats?.active_routes ?? 0, icon: Activity, color: "text-green" },
@@ -64,9 +92,10 @@ export default function RoutesPage() {
           ))}
         </div>
 
+        {/* Secondary stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <Card>
-            <p className="text-[10px] text-textMuted font-bold uppercase tracking-widest mb-1">Avg Passengers per Route</p>
+            <p className="text-[10px] text-textMuted font-bold uppercase tracking-widest mb-1">Avg Passengers / Route</p>
             <p className="text-xl font-extrabold text-cyan">{stats?.avg_passengers_per_route ?? 0}</p>
           </Card>
           <Card>
@@ -79,6 +108,7 @@ export default function RoutesPage() {
           </Card>
         </div>
 
+        {/* Hourly chart */}
         {stats?.hourly_today?.length > 0 && (
           <Card>
             <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest mb-4">Today Routes by Hour</h2>
@@ -94,6 +124,7 @@ export default function RoutesPage() {
           </Card>
         )}
 
+        {/* On duty now */}
         {onDuty.length > 0 && (
           <Card>
             <div className="flex items-center gap-2 mb-4">
@@ -114,7 +145,7 @@ export default function RoutesPage() {
                     <p className="text-green font-bold text-sm">{formatDuration(d.duration_mins)}</p>
                     <p className="text-textMuted text-xs">{d.total_passengers} passengers</p>
                     <p className="text-textDim text-xs">{d.app_count} app · {d.cash_count} cash</p>
-                    {d.fare > 0 && <p className="text-textDim text-xs">R{d.fare} fare</p>}
+                    {d.fare > 0 && <p className="text-cyan text-xs font-bold">R{d.fare} fare</p>}
                   </div>
                 </div>
               ))}
@@ -122,7 +153,8 @@ export default function RoutesPage() {
           </Card>
         )}
 
-        <div className="flex flex-wrap gap-3 items-center justify-between">
+        {/* Filters + search */}
+        <div className="flex flex-wrap gap-3 items-center">
           <div className="flex gap-2">
             {(["all", "active", "ended"] as const).map(f => (
               <button key={f} onClick={() => setFilter(f)}
@@ -131,21 +163,37 @@ export default function RoutesPage() {
               </button>
             ))}
           </div>
-          <div className="flex gap-2 items-center">
-            <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}
-              className="bg-bg2 border border-border rounded-lg px-3 py-1.5 text-text text-xs focus:outline-none focus:border-cyan" />
-            {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-textMuted hover:text-red transition-colors">Clear</button>}
-            <button onClick={load} className="text-xs text-textMuted hover:text-cyan flex items-center gap-1 transition-colors">
-              <RefreshCw size={12} /> Refresh
-            </button>
+          <div className="flex-1 min-w-36">
+            <Input
+              placeholder="Search driver, phone, plate..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            className="bg-bg2 border border-border rounded-lg px-3 py-2 text-text text-xs focus:outline-none focus:border-cyan"
+          />
+          {(search || dateFilter) && (
+            <Button variant="ghost" onClick={() => { setSearch(""); setDateFilter(""); }}>
+              <X size={13} /> Clear
+            </Button>
+          )}
+          <button onClick={load} className="text-xs text-textMuted hover:text-cyan flex items-center gap-1 transition-colors">
+            <RefreshCw size={12} /> Refresh
+          </button>
+          <Button variant="secondary" onClick={exportCsv}>
+            <Download size={13} /> Export
+          </Button>
         </div>
 
         {loading ? <Spinner /> : (
           <>
             <Card>
               <div className="overflow-x-auto">
-                {routes.length === 0 ? (
+                {filteredRoutes.length === 0 ? (
                   <div className="text-center py-12">
                     <MapPin size={32} className="text-textDim mx-auto mb-3" />
                     <p className="text-textMuted font-bold">No routes found</p>
@@ -161,16 +209,18 @@ export default function RoutesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {routes.map((r: any) => (
+                      {filteredRoutes.map((r: any) => (
                         <tr key={r.id} className="border-b border-border/50 hover:bg-bg3/30 transition-colors">
                           <td className="py-3 px-3">
                             <p className="text-text font-semibold text-xs">{r.driver_name}</p>
                             <p className="text-textDim text-[10px]">{r.phone_number}</p>
                           </td>
                           <td className="py-3 px-3">
-                            {r.vehicle_plate ? <span className="font-mono text-[10px] bg-yellow/10 text-yellow px-2 py-0.5 rounded">{r.vehicle_plate}</span> : <span className="text-textDim">-</span>}
+                            {r.vehicle_plate
+                              ? <span className="font-mono text-[10px] bg-yellow/10 text-yellow px-2 py-0.5 rounded">{r.vehicle_plate}</span>
+                              : <span className="text-textDim">—</span>}
                           </td>
-                          <td className="py-3 px-3 text-textMuted text-xs">{r.fare > 0 ? `R${r.fare}` : "-"}</td>
+                          <td className="py-3 px-3 text-textMuted text-xs">{r.fare > 0 ? `R${r.fare}` : "—"}</td>
                           <td className="py-3 px-3 text-textMuted text-xs whitespace-nowrap">{formatDate(r.started_at)}</td>
                           <td className="py-3 px-3 text-textMuted text-xs whitespace-nowrap">{formatDuration(r.duration_mins)}</td>
                           <td className="py-3 px-3 text-cyan font-bold text-xs">{r.app_count}</td>
@@ -190,13 +240,13 @@ export default function RoutesPage() {
               </div>
             </Card>
 
-            {routes.length > 0 && (
+            {filteredRoutes.length > 0 && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: "Routes shown", value: routes.length, color: "text-cyan" },
-                  { label: "Total passengers", value: routes.reduce((s, r) => s + r.total_passengers, 0), color: "text-purple" },
-                  { label: "Cash passengers", value: routes.reduce((s, r) => s + r.cash_count, 0), color: "text-yellow" },
-                  { label: "Total collected", value: formatZAR(routes.reduce((s, r) => s + r.total_collected, 0)), color: "text-green" },
+                  { label: "Routes shown", value: filteredRoutes.length, color: "text-cyan" },
+                  { label: "Total passengers", value: filteredRoutes.reduce((s, r) => s + r.total_passengers, 0), color: "text-purple" },
+                  { label: "App passengers", value: filteredRoutes.reduce((s, r) => s + r.app_count, 0), color: "text-cyan" },
+                  { label: "Total collected", value: formatZAR(filteredRoutes.reduce((s, r) => s + r.total_collected, 0)), color: "text-green" },
                 ].map(s => (
                   <Card key={s.label} className="text-center">
                     <p className={`text-2xl font-extrabold ${s.color}`}>{s.value}</p>

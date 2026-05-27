@@ -1,17 +1,194 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
+import { Table, Tr, Td, Badge, Button, Spinner, Input, Select } from "@/components/ui";
 import { api, Driver } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ExternalLink, CheckCircle, Star } from "lucide-react";
+import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff } from "lucide-react";
 import toast from "react-hot-toast";
+
+const KYC_TONE: Record<string, any> = { approved: "green", pending: "yellow", rejected: "red" };
+
+// ── QR code modal ─────────────────────────────────────────────────────────────
+
+function QrModal({ driver, onClose }: { driver: Driver; onClose: () => void }) {
+  const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // qr_code may be a Cloudinary/HTTP URL, a data: URI, or raw base64 without prefix
+  const qrSrc = (() => {
+    const v = driver.qr_code;
+    if (!v) return "";
+    if (v.startsWith("data:") || v.startsWith("http")) return v;
+    // raw base64 — add PNG prefix
+    return `data:image/png;base64,${v}`;
+  })();
+
+  const safeName = driver.full_name.replace(/[^a-zA-Z0-9]/g, "-");
+
+  const handleDownload = async () => {
+    if (!qrSrc) return;
+    try {
+      if (qrSrc.startsWith("data:")) {
+        const a = document.createElement("a");
+        a.href = qrSrc;
+        a.download = `qr-${safeName}.png`;
+        a.click();
+        return;
+      }
+      const res = await fetch(qrSrc);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `qr-${safeName}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("QR code downloaded");
+    } catch {
+      toast.error("Download failed");
+    }
+  };
+
+  const handlePrint = () => {
+    if (!qrSrc) return;
+    const pw = window.open("", "_blank", "width=500,height=600");
+    if (!pw) { toast.error("Allow pop-ups to print"); return; }
+    pw.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Tag-n-Ride Driver QR Code</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #fff; color: #111;
+      padding: 32px;
+    }
+    .logo { font-size: 13px; font-weight: 800; letter-spacing: 2px;
+            color: #888; text-transform: uppercase; margin-bottom: 24px; }
+    .name { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .id   { font-size: 11px; color: #888; font-family: monospace;
+            margin-bottom: 24px; }
+    img   { width: 260px; height: 260px; display: block; }
+    .note { font-size: 11px; color: #aaa; margin-top: 20px; text-align: center; }
+    @media print {
+      @page { margin: 0; size: A5; }
+      body { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <p class="logo">Tag-n-Ride</p>
+  <p class="name">${driver.full_name}</p>
+  <p class="id">ID: ${driver.user_id}</p>
+  <img src="${qrSrc}" alt="QR Code" />
+  <p class="note">Scan to identify this driver</p>
+  <script>window.onload = function() { window.print(); }<\/script>
+</body>
+</html>`);
+    pw.document.close();
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}>
+      <div
+        className="bg-bg2 border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6"
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-text font-bold text-base">{driver.full_name}</h3>
+            <p className="text-textDim text-[10px] font-mono mt-0.5">ID: {driver.user_id}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-textDim hover:text-text transition-colors p-1 rounded-lg hover:bg-bg3">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* QR image */}
+        <div className="flex items-center justify-center mb-5">
+          <div className="relative w-56 h-56 bg-white rounded-2xl p-3 shadow-inner">
+            {imgStatus === "loading" && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white">
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
+              </div>
+            )}
+            {imgStatus === "error" || !qrSrc ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50">
+                <ImageOff size={24} className="text-gray-400" />
+                <p className="text-gray-400 text-xs">QR code unavailable</p>
+              </div>
+            ) : (
+              <img
+                ref={imgRef}
+                src={qrSrc}
+                alt={`QR code for ${driver.full_name}`}
+                className={`w-full h-full object-contain transition-opacity duration-200 ${imgStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
+                onLoad={() => setImgStatus("loaded")}
+                onError={() => setImgStatus("error")}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Plate badge */}
+        {driver.vehicle_plate && (
+          <div className="flex justify-center mb-5">
+            <span className="font-mono text-sm bg-yellow/10 text-yellow px-3 py-1 rounded-lg border border-yellow/20 font-bold">
+              {driver.vehicle_plate}
+            </span>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <Button
+            variant="secondary"
+            className="flex-1 justify-center"
+            onClick={handleDownload}
+            disabled={!qrSrc || imgStatus === "error"}>
+            <Download size={13} /> Download PNG
+          </Button>
+          <Button
+            className="flex-1 justify-center"
+            onClick={handlePrint}
+            disabled={!qrSrc || imgStatus === "error"}>
+            <Printer size={13} /> Print
+          </Button>
+        </div>
+
+        <p className="text-textDim text-[10px] text-center mt-3">
+          Phone number is excluded from this QR code for driver privacy.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function DriversPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "pending" | "verified">("all");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"default" | "earnings" | "rating" | "newest">("default");
+  const [qrDriver, setQrDriver] = useState<Driver | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -28,79 +205,109 @@ export default function DriversPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const filtered = drivers.filter((d) => {
-    if (filter === "pending") return !d.is_verified;
-    if (filter === "verified") return d.is_verified;
-    return true;
-  });
+  const filtered = drivers
+    .filter((d) => {
+      if (filter === "pending") return !d.is_verified;
+      if (filter === "verified") return d.is_verified;
+      return true;
+    })
+    .filter((d) =>
+      !search ||
+      d.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      d.phone_number.includes(search) ||
+      (d.vehicle_plate || "").toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (sortBy === "earnings") return b.total_earnings - a.total_earnings;
+      if (sortBy === "rating")   return (b.rating_avg || 0) - (a.rating_avg || 0);
+      if (sortBy === "newest")   return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      return 0;
+    });
 
-  const kycTone = (s: string) =>
-    s === "approved" ? "green"
-    : s === "pending" ? "yellow"
-    : s === "rejected" ? "red"
-    : "muted";
+  const verified  = drivers.filter((d) => d.is_verified).length;
+  const pending   = drivers.filter((d) => !d.is_verified).length;
+  const avgRating = drivers.filter((d) => d.rating_count > 0)
+    .reduce((s, d, _, arr) => s + d.rating_avg / arr.length, 0);
 
   return (
     <AdminShell title="Driver Management">
       <div className="space-y-4">
 
         {/* Summary cards */}
-        <div className="grid grid-cols-3 gap-4">
-          <div
-            className="bg-bg2 border border-border rounded-xl p-5 text-center cursor-pointer hover:border-cyan transition-colors"
-            onClick={() => setFilter("all")}>
-            <p className="text-2xl font-extrabold text-cyan">{drivers.length}</p>
-            <p className="text-xs text-textMuted mt-1">Total Drivers</p>
-          </div>
-          <div
-            className="bg-bg2 border border-border rounded-xl p-5 text-center cursor-pointer hover:border-green transition-colors"
-            onClick={() => setFilter("verified")}>
-            <p className="text-2xl font-extrabold text-green">
-              {drivers.filter((d) => d.is_verified).length}
-            </p>
-            <p className="text-xs text-textMuted mt-1">Verified</p>
-          </div>
-          <div
-            className="bg-bg2 border border-border rounded-xl p-5 text-center cursor-pointer hover:border-yellow transition-colors"
-            onClick={() => setFilter("pending")}>
-            <p className="text-2xl font-extrabold text-yellow">
-              {drivers.filter((d) => !d.is_verified).length}
-            </p>
-            <p className="text-xs text-textMuted mt-1">Pending</p>
-          </div>
-        </div>
-
-        {/* Filter tabs */}
-        <div className="flex gap-2">
-          {(["all", "pending", "verified"] as const).map((f) => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all capitalize
-                ${filter === f
-                  ? "bg-cyanDim text-cyan border-cyan/20"
-                  : "bg-bg2 text-textMuted border-border hover:text-text"}`}>
-              {f}
-            </button>
+        <div className="grid grid-cols-4 gap-4">
+          {[
+            { label: "Total Drivers", value: drivers.length,          color: "text-cyan",   filter: "all"      as const },
+            { label: "Verified",      value: verified,                color: "text-green",  filter: "verified" as const },
+            { label: "Pending",       value: pending,                 color: "text-yellow", filter: "pending"  as const },
+            { label: "Avg Rating",    value: `${avgRating.toFixed(1)} ★`, color: "text-yellow", filter: null },
+          ].map(({ label, value, color, filter: f }) => (
+            <div
+              key={label}
+              className={`bg-bg2 border border-border rounded-xl p-5 text-center ${f ? "cursor-pointer hover:border-cyan transition-colors" : ""}`}
+              onClick={() => f && setFilter(f)}>
+              <p className={`text-2xl font-extrabold ${color}`}>{value}</p>
+              <p className="text-xs text-textMuted mt-1">{label}</p>
+            </div>
           ))}
         </div>
 
+        {/* Controls */}
+        <div className="flex gap-3 flex-wrap items-center">
+          <div className="flex gap-2 flex-1 min-w-0">
+            <Input
+              placeholder="Search name, phone, plate..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <Button variant="ghost" onClick={() => setSearch("")}><X size={13} /></Button>
+            )}
+          </div>
+
+          <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="w-40">
+            <option value="default">Sort: Default</option>
+            <option value="earnings">Sort: Top Earners</option>
+            <option value="rating">Sort: Best Rated</option>
+            <option value="newest">Sort: Newest</option>
+          </Select>
+
+          <div className="flex gap-2">
+            {(["all", "pending", "verified"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all capitalize ${
+                  filter === f ? "bg-cyanDim text-cyan border-cyan/20" : "bg-bg2 text-textMuted border-border hover:text-text"
+                }`}>
+                {f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Results count */}
+        <p className="text-xs text-textMuted">
+          {loading ? "Loading…" : `${filtered.length} driver${filtered.length !== 1 ? "s" : ""}`}
+        </p>
+
         {loading ? <Spinner /> : (
           <Table
-            headers={["Driver", "Plate", "Earnings", "Rating", "KYC", "Verified", "Actions"]}
+            headers={["Driver", "Plate", "Earnings", "Rating", "KYC", "Status", "Joined", "Actions"]}
             empty={!filtered.length}>
             {filtered.map((d) => (
               <Tr key={d.user_id}>
+                {/* Name only — phone number removed for security */}
                 <Td>
-                  <div>
-                    <p className="font-semibold">{d.full_name}</p>
-                    <p className="text-textMuted text-xs font-mono">{d.phone_number}</p>
-                  </div>
+                  <p className="font-semibold">{d.full_name}</p>
                 </Td>
                 <Td>
                   {d.vehicle_plate ? (
                     <span className="font-mono text-xs bg-yellow/10 text-yellow px-2 py-0.5 rounded border border-yellow/20">
                       {d.vehicle_plate}
                     </span>
-                  ) : "—"}
+                  ) : (
+                    <span className="text-textDim text-xs">No plate</span>
+                  )}
                 </Td>
                 <Td className="font-bold text-green">{formatZAR(d.total_earnings)}</Td>
                 <Td>
@@ -111,25 +318,26 @@ export default function DriversPage() {
                       <span className="text-textMuted font-normal">({d.rating_count})</span>
                     </span>
                   ) : (
-                    <span className="text-textMuted text-xs">New</span>
+                    <span className="text-textMuted text-xs italic">New</span>
                   )}
                 </Td>
                 <Td>
-                  <Badge label={d.kyc_status || "none"} tone={kycTone(d.kyc_status) as any} />
+                  <Badge label={d.kyc_status || "none"} tone={KYC_TONE[d.kyc_status] || "muted"} />
                 </Td>
                 <Td>
-                  <Badge
-                    label={d.is_verified ? "Verified" : "Pending"}
-                    tone={d.is_verified ? "green" : "yellow"}
-                  />
+                  <Badge label={d.is_verified ? "Verified" : "Pending"} tone={d.is_verified ? "green" : "yellow"} />
                 </Td>
+                <Td className="text-textMuted text-xs">{d.created_at ? formatDate(d.created_at) : "—"}</Td>
                 <Td>
                   <div className="flex items-center gap-2">
                     {!d.is_verified && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => handleVerify(d.user_id, d.full_name)}>
+                      <Button variant="secondary" onClick={() => handleVerify(d.user_id, d.full_name)}>
                         <CheckCircle size={13} /> Verify
+                      </Button>
+                    )}
+                    {d.qr_code && (
+                      <Button variant="ghost" onClick={() => setQrDriver(d)} title="Download / Print QR code">
+                        <QrCode size={13} />
                       </Button>
                     )}
                     <Link href={`/admin/drivers/${d.user_id}`}>
@@ -144,6 +352,8 @@ export default function DriversPage() {
           </Table>
         )}
       </div>
+
+      {qrDriver && <QrModal driver={qrDriver} onClose={() => setQrDriver(null)} />}
     </AdminShell>
   );
 }
