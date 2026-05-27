@@ -6,7 +6,7 @@ import { formatZAR, formatDate } from "@/lib/utils";
 import { Users2, Award } from "lucide-react";
 import { api, Referral } from "@/lib/api";
 
-const STATUS_TONE: Record<string, string> = { pending: "yellow", rewarded: "green", cancelled: "red" };
+const STATUS_TONE: Record<string, "yellow" | "green" | "red" | "muted"> = { pending: "yellow", rewarded: "green", cancelled: "red" };
 
 export default function ReferralsPage() {
   const [data, setData] = useState<{ items: Referral[]; stats: { total: number; rewarded: number; total_rewards: number } }>({

@@ -8,8 +8,8 @@ import toast from "react-hot-toast";
 import { api, GDPRRequest } from "@/lib/api";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
-const TYPE_TONE: Record<string, string> = { deletion: "red", export: "cyan", correction: "yellow", restriction: "purple" };
-const STATUS_TONE: Record<string, string> = { pending: "yellow", resolved: "green", rejected: "red" };
+const TYPE_TONE: Record<string, "red" | "cyan" | "yellow" | "purple" | "muted"> = { deletion: "red", export: "cyan", correction: "yellow", restriction: "purple" };
+const STATUS_TONE: Record<string, "yellow" | "green" | "red" | "muted"> = { pending: "yellow", resolved: "green", rejected: "red" };
 const TYPE_LABELS: Record<string, string> = {
   deletion: "Right to Erasure", export: "Data Portability", correction: "Right to Rectification", restriction: "Processing Restriction",
 };

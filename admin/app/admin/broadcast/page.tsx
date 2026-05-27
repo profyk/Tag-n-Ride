@@ -7,7 +7,7 @@ import { Megaphone, Send, Users, Car } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, Broadcast } from "@/lib/api";
 
-const AUD_TONE: Record<string, string> = { all: "cyan", role: "purple" };
+const AUD_TONE: Record<string, "cyan" | "purple" | "muted"> = { all: "cyan", role: "purple" };
 
 export default function BroadcastPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);

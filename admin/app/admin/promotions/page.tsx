@@ -7,7 +7,7 @@ import { Tag, Plus, Trash2, Copy, ToggleLeft, ToggleRight } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, Promotion } from "@/lib/api";
 
-const TYPE_TONE: Record<string, string> = { percent: "cyan", fixed: "green" };
+const TYPE_TONE: Record<string, "cyan" | "green" | "muted"> = { percent: "cyan", fixed: "green" };
 const TYPE_LABELS: Record<string, string> = { percent: "% Discount", fixed: "Fixed Off" };
 
 export default function PromotionsPage() {

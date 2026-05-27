@@ -7,7 +7,7 @@ import { AlertOctagon, CheckCircle, XCircle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, Chargeback } from "@/lib/api";
 
-const STATUS_TONE: Record<string, string> = {
+const STATUS_TONE: Record<string, "yellow" | "cyan" | "green" | "red" | "muted"> = {
   pending: "yellow", under_review: "cyan", won: "green", lost: "red",
 };
 

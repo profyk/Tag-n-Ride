@@ -7,7 +7,7 @@ import { Gauge, Edit2, Save, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, TxLimit } from "@/lib/api";
 
-const ROLE_TONE: Record<string, string> = {
+const ROLE_TONE: Record<string, "cyan" | "green" | "yellow" | "purple" | "muted"> = {
   passenger: "cyan", driver: "green", new_user: "yellow", owner: "purple",
 };
 
