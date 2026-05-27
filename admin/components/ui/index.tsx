@@ -6,10 +6,10 @@ import React from "react";
 type BtnVariant = "primary" | "secondary" | "danger" | "ghost";
 
 export function Button({
-  children, onClick, loading, disabled, variant = "primary", className,
+  children, onClick, loading, disabled, variant = "primary", className, title,
 }: {
   children: React.ReactNode; onClick?: () => void; loading?: boolean;
-  disabled?: boolean; variant?: BtnVariant; className?: string;
+  disabled?: boolean; variant?: BtnVariant; className?: string; title?: string;
 }) {
   const base = "inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed";
   const variants: Record<BtnVariant, string> = {
@@ -19,7 +19,7 @@ export function Button({
     ghost: "text-textMuted hover:text-text hover:bg-bg3",
   };
   return (
-    <button onClick={onClick} disabled={disabled || loading}
+    <button onClick={onClick} disabled={disabled || loading} title={title}
       className={cn(base, variants[variant], className)}>
       {loading && <Loader2 size={12} className="animate-spin" />}
       {children}
