@@ -114,16 +114,28 @@ ROLE_PERMISSIONS = {
     "admin": [
         "manage_users", "manage_drivers", "reset_pin",
         "view_audit", "flag_accounts", "view_analytics", "review_kyc",
+        "manage_promotions", "broadcast_messages", "view_risk",
     ],
     "finance": [
         "approve_withdrawals", "view_analytics", "export_data",
         "view_audit", "freeze_wallet",
-        # Ledger (view + refund only)
         "view_ledger", "process_refunds",
         "download_statements",
+        "manage_refunds",
     ],
     "support": ["reset_pin", "manage_users"],
 }
+
+# ── extend superadmin/ceo/cfo with new permissions ────────────────
+ROLE_PERMISSIONS["superadmin"] += [
+    "manage_refunds", "manage_pricing", "manage_promotions",
+    "broadcast_messages", "manage_limits", "view_risk",
+]
+ROLE_PERMISSIONS["ceo"] += [
+    "manage_refunds", "manage_pricing", "manage_promotions",
+    "broadcast_messages", "manage_limits", "view_risk",
+]
+ROLE_PERMISSIONS["cfo"] += ["manage_refunds", "manage_limits", "view_risk"]
 
 def has_permission(user: dict, permission: str) -> bool:
     return permission in ROLE_PERMISSIONS.get(user.get("role", ""), [])
@@ -1982,6 +1994,273 @@ async def create_new_tables():
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                # ── New feature tables ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS feature_flags (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        description TEXT DEFAULT '',
+                        enabled BOOLEAN DEFAULT FALSE,
+                        rollout_pct INTEGER DEFAULT 100,
+                        target_roles TEXT DEFAULT '[]',
+                        metadata TEXT DEFAULT '{}',
+                        updated_by TEXT REFERENCES users(id),
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS pricing_rules (
+                        id TEXT PRIMARY KEY,
+                        zone_id TEXT,
+                        vehicle_type TEXT DEFAULT 'all',
+                        base_fare NUMERIC(10,2) DEFAULT 8.00,
+                        per_km NUMERIC(10,2) DEFAULT 2.50,
+                        per_minute NUMERIC(10,2) DEFAULT 0.50,
+                        surge_multiplier NUMERIC(5,2) DEFAULT 1.0,
+                        surge_active BOOLEAN DEFAULT FALSE,
+                        min_fare NUMERIC(10,2) DEFAULT 15.00,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS promotions (
+                        id TEXT PRIMARY KEY,
+                        code TEXT UNIQUE NOT NULL,
+                        description TEXT DEFAULT '',
+                        discount_type TEXT NOT NULL DEFAULT 'percent',
+                        discount_value NUMERIC(10,2) NOT NULL DEFAULT 0,
+                        min_ride_amount NUMERIC(10,2) DEFAULT 0,
+                        max_uses INTEGER DEFAULT 1000,
+                        uses_per_user INTEGER DEFAULT 1,
+                        total_used INTEGER DEFAULT 0,
+                        valid_from TIMESTAMPTZ DEFAULT NOW(),
+                        valid_to TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 days',
+                        active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS gdpr_requests (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT REFERENCES users(id),
+                        request_type TEXT NOT NULL DEFAULT 'export',
+                        status TEXT DEFAULT 'pending',
+                        resolution_note TEXT,
+                        resolved_by TEXT REFERENCES users(id),
+                        resolved_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS coverage_zones (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        city TEXT,
+                        province TEXT,
+                        country TEXT DEFAULT 'ZA',
+                        lat NUMERIC(10,6),
+                        lng NUMERIC(10,6),
+                        radius_km NUMERIC(10,2),
+                        active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS chargebacks (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT REFERENCES users(id),
+                        transaction_id TEXT REFERENCES transactions(id),
+                        amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        reason TEXT NOT NULL DEFAULT '',
+                        status TEXT DEFAULT 'pending',
+                        resolution_note TEXT,
+                        amount_recovered NUMERIC(14,2) DEFAULT 0,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tx_limit_configs (
+                        id TEXT PRIMARY KEY,
+                        role TEXT NOT NULL UNIQUE DEFAULT 'passenger',
+                        daily_limit NUMERIC(14,2) DEFAULT 5000,
+                        single_txn_limit NUMERIC(14,2) DEFAULT 2000,
+                        monthly_limit NUMERIC(14,2) DEFAULT 30000,
+                        min_topup NUMERIC(14,2) DEFAULT 10,
+                        max_topup NUMERIC(14,2) DEFAULT 5000,
+                        max_withdrawal NUMERIC(14,2) DEFAULT 0,
+                        min_withdrawal NUMERIC(14,2) DEFAULT 50,
+                        enabled BOOLEAN DEFAULT TRUE,
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS refund_requests (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT REFERENCES users(id),
+                        transaction_id TEXT REFERENCES transactions(id),
+                        amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        reason TEXT NOT NULL DEFAULT '',
+                        status TEXT DEFAULT 'pending',
+                        resolution_note TEXT,
+                        reviewed_by TEXT REFERENCES users(id),
+                        reviewed_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS referrals (
+                        id TEXT PRIMARY KEY,
+                        referrer_id TEXT REFERENCES users(id),
+                        invitee_id TEXT REFERENCES users(id),
+                        status TEXT DEFAULT 'pending',
+                        reward_amount NUMERIC(10,2) DEFAULT 25.00,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS reconciliation_batches (
+                        id TEXT PRIMARY KEY,
+                        period_start TIMESTAMPTZ NOT NULL DEFAULT NOW() - INTERVAL '30 days',
+                        period_end TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        status TEXT DEFAULT 'balanced',
+                        total_topups NUMERIC(14,2) DEFAULT 0,
+                        total_payments NUMERIC(14,2) DEFAULT 0,
+                        total_fees NUMERIC(14,2) DEFAULT 0,
+                        total_withdrawals NUMERIC(14,2) DEFAULT 0,
+                        total_wallets NUMERIC(14,2) DEFAULT 0,
+                        variance NUMERIC(14,2) DEFAULT 0,
+                        discrepancy_count INTEGER DEFAULT 0,
+                        run_by TEXT REFERENCES users(id),
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
+                        id TEXT PRIMARY KEY,
+                        batch_id TEXT REFERENCES reconciliation_batches(id),
+                        type TEXT NOT NULL DEFAULT 'variance',
+                        description TEXT DEFAULT '',
+                        amount NUMERIC(14,2) DEFAULT 0,
+                        expected NUMERIC(14,2) DEFAULT 0,
+                        actual NUMERIC(14,2) DEFAULT 0,
+                        resolved BOOLEAN DEFAULT FALSE,
+                        resolution_note TEXT,
+                        resolved_by TEXT REFERENCES users(id),
+                        resolved_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                # Migrate existing tables with ADD COLUMN IF NOT EXISTS
+                await conn.execute("ALTER TABLE ratings ADD COLUMN IF NOT EXISTS is_flagged BOOLEAN DEFAULT FALSE")
+                await conn.execute("ALTER TABLE ratings ADD COLUMN IF NOT EXISTS flag_reason TEXT")
+                # feature_flags migrations
+                await conn.execute("ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS target_roles TEXT DEFAULT '[]'")
+                await conn.execute("ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS metadata TEXT DEFAULT '{}'")
+                await conn.execute("ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS updated_by TEXT")
+                await conn.execute("ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS rollout_pct INTEGER DEFAULT 100")
+                # pricing_rules migrations
+                await conn.execute("ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS zone_id TEXT")
+                await conn.execute("ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS vehicle_type TEXT DEFAULT 'all'")
+                await conn.execute("ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS per_km NUMERIC(10,2) DEFAULT 2.50")
+                await conn.execute("ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS per_minute NUMERIC(10,2) DEFAULT 0.50")
+                # promotions migrations
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS discount_type TEXT DEFAULT 'percent'")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS discount_value NUMERIC(10,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS min_ride_amount NUMERIC(10,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS total_used INTEGER DEFAULT 0")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS uses_per_user INTEGER DEFAULT 1")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS valid_from TIMESTAMPTZ DEFAULT NOW()")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS valid_to TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 days'")
+                await conn.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE")
+                # gdpr_requests migrations
+                await conn.execute("ALTER TABLE gdpr_requests ADD COLUMN IF NOT EXISTS resolution_note TEXT")
+                await conn.execute("ALTER TABLE gdpr_requests ADD COLUMN IF NOT EXISTS resolved_by TEXT")
+                await conn.execute("ALTER TABLE gdpr_requests ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ")
+                await conn.execute("ALTER TABLE gdpr_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()")
+                # coverage_zones migrations
+                await conn.execute("ALTER TABLE coverage_zones ADD COLUMN IF NOT EXISTS lat NUMERIC(10,6)")
+                await conn.execute("ALTER TABLE coverage_zones ADD COLUMN IF NOT EXISTS lng NUMERIC(10,6)")
+                await conn.execute("ALTER TABLE coverage_zones ADD COLUMN IF NOT EXISTS radius_km NUMERIC(10,2)")
+                await conn.execute("ALTER TABLE coverage_zones ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'ZA'")
+                await conn.execute("ALTER TABLE coverage_zones ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE")
+                await conn.execute("ALTER TABLE coverage_zones ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()")
+                # chargebacks migrations
+                await conn.execute("ALTER TABLE chargebacks ADD COLUMN IF NOT EXISTS resolution_note TEXT")
+                await conn.execute("ALTER TABLE chargebacks ADD COLUMN IF NOT EXISTS amount_recovered NUMERIC(14,2) DEFAULT 0")
+                # tx_limit_configs migrations
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'passenger'")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS daily_limit NUMERIC(14,2) DEFAULT 5000")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS monthly_limit NUMERIC(14,2) DEFAULT 30000")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS min_topup NUMERIC(14,2) DEFAULT 10")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS max_topup NUMERIC(14,2) DEFAULT 5000")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS max_withdrawal NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS min_withdrawal NUMERIC(14,2) DEFAULT 50")
+                await conn.execute("ALTER TABLE tx_limit_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE")
+                # refund_requests migrations
+                await conn.execute("ALTER TABLE refund_requests ADD COLUMN IF NOT EXISTS reviewed_by TEXT")
+                await conn.execute("ALTER TABLE refund_requests ADD COLUMN IF NOT EXISTS resolution_note TEXT")
+                await conn.execute("ALTER TABLE refund_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()")
+                # referrals migrations
+                await conn.execute("ALTER TABLE referrals ADD COLUMN IF NOT EXISTS invitee_id TEXT")
+                await conn.execute("ALTER TABLE referrals ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'")
+                await conn.execute("ALTER TABLE referrals ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()")
+                # reconciliation_batches migrations
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS period_start TIMESTAMPTZ DEFAULT NOW() - INTERVAL '30 days'")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS period_end TIMESTAMPTZ DEFAULT NOW()")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS total_topups NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS total_payments NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS total_fees NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS total_withdrawals NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS total_wallets NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS variance NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_batches ADD COLUMN IF NOT EXISTS discrepancy_count INTEGER DEFAULT 0")
+                # reconciliation_discrepancies migrations
+                await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''")
+                await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS amount NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS expected NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS actual NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS resolution_note TEXT")
+                # Seed default tx limits
+                for lid, role, dl, stl, ml, mint, maxt, maxw, minw in [
+                    ("lim-pass-std","passenger",5000,2000,30000,10,5000,0,50),
+                    ("lim-drv-std","driver",50000,5000,200000,10,10000,10000,50),
+                    ("lim-own-std","owner",100000,10000,500000,10,20000,20000,50),
+                    ("lim-new-usr","new_user",1000,500,5000,10,1000,0,50),
+                ]:
+                    await conn.execute(
+                        """INSERT INTO tx_limit_configs (id,role,daily_limit,single_txn_limit,monthly_limit,min_topup,max_topup,max_withdrawal,min_withdrawal,enabled)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE) ON CONFLICT (role) DO NOTHING""",
+                        lid,role,dl,stl,ml,mint,maxt,maxw,minw
+                    )
+                # Seed default pricing rules
+                for pid, vtype, zid, bf, pkm, pmin, surge, son, mf in [
+                    ("pr-std","all",None,8.0,2.5,0.5,1.0,False,15.0),
+                    ("pr-peak","all",None,8.0,2.5,0.5,1.8,False,20.0),
+                    ("pr-night","all",None,12.0,3.0,0.75,1.5,False,25.0),
+                    ("pr-airport","all",None,50.0,3.5,0.6,1.0,False,120.0),
+                ]:
+                    await conn.execute(
+                        """INSERT INTO pricing_rules (id,vehicle_type,zone_id,base_fare,per_km,per_minute,surge_multiplier,surge_active,min_fare)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING""",
+                        pid,vtype,zid,bf,pkm,pmin,surge,son,mf
+                    )
+                # Seed default coverage zones
+                for zid, zn, city, prov in [
+                    ("zone-jhb-cbd","Johannesburg CBD","Johannesburg","Gauteng"),
+                    ("zone-sandton","Sandton / Rosebank","Johannesburg","Gauteng"),
+                    ("zone-soweto","Soweto","Johannesburg","Gauteng"),
+                    ("zone-pta-cbd","Pretoria Central","Pretoria","Gauteng"),
+                    ("zone-cpt-cbd","Cape Town CBD","Cape Town","Western Cape"),
+                    ("zone-dbn-cbd","Durban CBD","Durban","KwaZulu-Natal"),
+                ]:
+                    await conn.execute(
+                        "INSERT INTO coverage_zones (id,name,city,province,country,active) VALUES ($1,$2,$3,$4,'ZA',TRUE) ON CONFLICT DO NOTHING",
+                        zid,zn,city,prov
+                    )
                 # Seed platform accounts
                 platform_accounts_defaults = [
                     ('user_wallets', 0, 'Total balance held in user wallets'),
@@ -5294,6 +5573,1230 @@ async def clear_user_notifications(user: dict = Depends(get_current_user)):
             user["id"]
         )
     return {"ok": True, "message": "Personal notifications cleared"}
+
+# ════════════════════════════════════════════════════════════════
+# WALLET OPERATIONS
+# ════════════════════════════════════════════════════════════════
+
+class WalletAdjustIn(BaseModel):
+    amount: float
+    note: Optional[str] = None
+
+class WalletFreezeIn(BaseModel):
+    reason: str
+
+@api.get("/admin/wallets")
+async def admin_list_wallets(
+    search: Optional[str] = None,
+    frozen: Optional[bool] = None,
+    admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "freeze_wallet"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        q = """
+            SELECT u.id, u.full_name, u.phone_number, u.role, u.is_active,
+                   w.balance, w.is_frozen, w.freeze_reason, w.updated_at
+            FROM users u
+            JOIN wallets w ON w.user_id=u.id
+            WHERE u.is_test IS NOT TRUE
+        """
+        params: list = []
+        if search:
+            params.append(f"%{search}%")
+            q += f" AND (u.full_name ILIKE ${len(params)} OR u.phone_number ILIKE ${len(params)})"
+        if frozen is not None:
+            params.append(frozen)
+            q += f" AND w.is_frozen=${len(params)}"
+        q += " ORDER BY w.balance DESC LIMIT 500"
+        rows = await conn.fetch(q, *params)
+    return [
+        {
+            "user_id": r["id"], "full_name": r["full_name"],
+            "phone_number": r["phone_number"], "role": r["role"],
+            "is_active": r["is_active"], "balance": float(r["balance"] or 0),
+            "is_frozen": r["is_frozen"], "freeze_reason": r["freeze_reason"],
+            "updated_at": iso(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/wallets/{user_id}/freeze")
+async def admin_freeze_wallet(
+    user_id: str, body: WalletFreezeIn, admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "freeze_wallet"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id,full_name FROM users WHERE id=$1", user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        await conn.execute(
+            "UPDATE wallets SET is_frozen=TRUE, freeze_reason=$2 WHERE user_id=$1",
+            user_id, body.reason
+        )
+        await audit(conn, admin["id"], "freeze_wallet", user_id, "user",
+                    {"reason": body.reason, "target_name": user["full_name"]})
+    return {"ok": True}
+
+@api.post("/admin/wallets/{user_id}/unfreeze")
+async def admin_unfreeze_wallet(user_id: str, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "freeze_wallet"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id,full_name FROM users WHERE id=$1", user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        await conn.execute(
+            "UPDATE wallets SET is_frozen=FALSE, freeze_reason=NULL WHERE user_id=$1", user_id
+        )
+        await audit(conn, admin["id"], "unfreeze_wallet", user_id, "user",
+                    {"target_name": user["full_name"]})
+    return {"ok": True}
+
+@api.post("/admin/wallets/{user_id}/adjust")
+async def admin_adjust_wallet(
+    user_id: str, body: WalletAdjustIn, admin: dict = Depends(require_superadmin)
+):
+    async with pool.acquire() as conn:
+        wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user_id)
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        new_bal = float(wallet["balance"] or 0) + body.amount
+        if new_bal < 0:
+            raise HTTPException(status_code=400, detail="Adjustment would result in negative balance")
+        ref = f"ADJ-{uuid.uuid4().hex[:10].upper()}"
+        await conn.execute(
+            "UPDATE wallets SET balance=$2 WHERE user_id=$1", user_id, new_bal
+        )
+        await conn.execute(
+            """INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note)
+               VALUES ($1,$2,'adjustment','completed',$3,$4,$5,$6)""",
+            str(uuid.uuid4()), ref, abs(body.amount),
+            admin["id"] if body.amount < 0 else None,
+            user_id if body.amount > 0 else None,
+            body.note or "Admin balance adjustment"
+        )
+        await audit(conn, admin["id"], "adjust_balance", user_id, "wallet",
+                    {"amount": body.amount, "new_balance": new_bal, "ref": ref})
+    return {"ok": True, "new_balance": new_bal, "reference": ref}
+
+
+# ════════════════════════════════════════════════════════════════
+# REFUND REQUESTS
+# ════════════════════════════════════════════════════════════════
+
+class RefundCreateIn(BaseModel):
+    user_id: str
+    transaction_id: str
+    amount: float
+    reason: str
+
+class RefundRejectIn(BaseModel):
+    reason: str
+
+@api.get("/admin/refunds")
+async def admin_list_refunds(
+    status: Optional[str] = None,
+    admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        q = """
+            SELECT r.*, u.full_name as user_name, u.phone_number,
+                   t.reference as txn_ref, t.type as txn_type
+            FROM refund_requests r
+            JOIN users u ON u.id=r.user_id
+            LEFT JOIN transactions t ON t.id=r.transaction_id
+            WHERE 1=1
+        """
+        params: list = []
+        if status:
+            params.append(status)
+            q += f" AND r.status=${len(params)}"
+        q += " ORDER BY r.created_at DESC LIMIT 200"
+        rows = await conn.fetch(q, *params)
+    return [
+        {
+            "id": r["id"], "user_id": r["user_id"], "user_name": r["user_name"],
+            "phone_number": r["phone_number"], "transaction_id": r["transaction_id"],
+            "txn_ref": r["txn_ref"], "txn_type": r["txn_type"],
+            "amount": float(r["amount"]), "reason": r["reason"],
+            "status": r["status"], "resolution_note": r["resolution_note"],
+            "reviewed_by": r["reviewed_by"], "reviewed_at": iso(r["reviewed_at"]),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/refunds")
+async def admin_create_refund(body: RefundCreateIn, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        txn = await conn.fetchrow(
+            "SELECT id,amount,status FROM transactions WHERE id=$1", body.transaction_id
+        )
+        if not txn:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        rid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO refund_requests (id,user_id,transaction_id,amount,reason,status,created_at)
+               VALUES ($1,$2,$3,$4,$5,'pending',NOW())""",
+            rid, body.user_id, body.transaction_id, body.amount, body.reason
+        )
+        await audit(conn, admin["id"], "create_refund", rid, "refund",
+                    {"amount": body.amount, "reason": body.reason})
+    return {"ok": True, "id": rid}
+
+@api.post("/admin/refunds/{refund_id}/approve")
+async def admin_approve_refund(refund_id: str, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        ref = await conn.fetchrow(
+            "SELECT * FROM refund_requests WHERE id=$1", refund_id
+        )
+        if not ref:
+            raise HTTPException(status_code=404, detail="Refund not found")
+        if ref["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Refund is already {ref['status']}")
+        wallet = await conn.fetchrow("SELECT balance,is_frozen FROM wallets WHERE user_id=$1", ref["user_id"])
+        if not wallet or wallet["is_frozen"]:
+            raise HTTPException(status_code=400, detail="Wallet frozen or not found")
+        ref_code = f"RFD-{uuid.uuid4().hex[:10].upper()}"
+        await conn.execute(
+            "UPDATE wallets SET balance=balance+$2 WHERE user_id=$1", ref["user_id"], ref["amount"]
+        )
+        await conn.execute(
+            """INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note)
+               VALUES ($1,$2,'refund','completed',$3,NULL,$4,'Refund approved by admin')""",
+            str(uuid.uuid4()), ref_code, ref["amount"], ref["user_id"]
+        )
+        await conn.execute(
+            """UPDATE refund_requests SET status='approved', reviewed_by=$2, reviewed_at=NOW()
+               WHERE id=$1""",
+            refund_id, admin["id"]
+        )
+        await audit(conn, admin["id"], "approve_refund", refund_id, "refund",
+                    {"amount": float(ref["amount"]), "ref": ref_code})
+    return {"ok": True, "reference": ref_code}
+
+@api.post("/admin/refunds/{refund_id}/reject")
+async def admin_reject_refund(
+    refund_id: str, body: RefundRejectIn, admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        ref = await conn.fetchrow("SELECT id,status FROM refund_requests WHERE id=$1", refund_id)
+        if not ref:
+            raise HTTPException(status_code=404, detail="Refund not found")
+        if ref["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Refund is already {ref['status']}")
+        await conn.execute(
+            """UPDATE refund_requests SET status='rejected', resolution_note=$2,
+               reviewed_by=$3, reviewed_at=NOW() WHERE id=$1""",
+            refund_id, body.reason, admin["id"]
+        )
+        await audit(conn, admin["id"], "reject_refund", refund_id, "refund",
+                    {"reason": body.reason})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# FEATURE FLAGS
+# ════════════════════════════════════════════════════════════════
+
+class FeatureFlagIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    enabled: bool = False
+    rollout_pct: int = 100
+    target_roles: Optional[list] = None
+    metadata: Optional[dict] = None
+
+class FeatureFlagUpdateIn(BaseModel):
+    description: Optional[str] = None
+    enabled: Optional[bool] = None
+    rollout_pct: Optional[int] = None
+    target_roles: Optional[list] = None
+    metadata: Optional[dict] = None
+
+@api.get("/admin/feature-flags")
+async def admin_list_flags(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM feature_flags ORDER BY name"
+        )
+    return [
+        {
+            "id": r["id"], "name": r["name"], "description": r["description"],
+            "enabled": r["enabled"], "rollout_pct": r["rollout_pct"],
+            "target_roles": json.loads(r["target_roles"] or "[]"), "metadata": json.loads(r["metadata"] or "{}"),
+            "updated_by": r["updated_by"], "updated_at": iso(r["updated_at"]),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/feature-flags")
+async def admin_create_flag(body: FeatureFlagIn, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        existing = await conn.fetchval("SELECT id FROM feature_flags WHERE name=$1", body.name)
+        if existing:
+            raise HTTPException(status_code=409, detail="Flag with this name already exists")
+        fid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO feature_flags (id,name,description,enabled,rollout_pct,target_roles,metadata,updated_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+            fid, body.name, body.description, body.enabled, body.rollout_pct,
+            json.dumps(body.target_roles or []), json.dumps(body.metadata or {}), admin["id"]
+        )
+        await audit(conn, admin["id"], "create_feature_flag", fid, "feature_flag",
+                    {"name": body.name, "enabled": body.enabled})
+    return {"ok": True, "id": fid}
+
+@api.patch("/admin/feature-flags/{flag_id}")
+async def admin_update_flag(
+    flag_id: str, body: FeatureFlagUpdateIn, admin: dict = Depends(require_superadmin)
+):
+    async with pool.acquire() as conn:
+        flag = await conn.fetchrow("SELECT id,name FROM feature_flags WHERE id=$1", flag_id)
+        if not flag:
+            raise HTTPException(status_code=404, detail="Flag not found")
+        updates, params = [], [flag_id]
+        if body.enabled is not None:
+            params.append(body.enabled); updates.append(f"enabled=${len(params)}")
+        if body.rollout_pct is not None:
+            params.append(body.rollout_pct); updates.append(f"rollout_pct=${len(params)}")
+        if body.description is not None:
+            params.append(body.description); updates.append(f"description=${len(params)}")
+        if body.target_roles is not None:
+            params.append(json.dumps(body.target_roles)); updates.append(f"target_roles=${len(params)}")
+        if body.metadata is not None:
+            params.append(json.dumps(body.metadata)); updates.append(f"metadata=${len(params)}")
+        if not updates:
+            return {"ok": True}
+        params.append(admin["id"]); updates.append(f"updated_by=${len(params)}")
+        await conn.execute(
+            f"UPDATE feature_flags SET {', '.join(updates)}, updated_at=NOW() WHERE id=$1", *params
+        )
+        await audit(conn, admin["id"], "update_feature_flag", flag_id, "feature_flag",
+                    {"name": flag["name"], "changes": body.dict(exclude_none=True)})
+    return {"ok": True}
+
+@api.delete("/admin/feature-flags/{flag_id}")
+async def admin_delete_flag(flag_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        flag = await conn.fetchrow("SELECT id,name FROM feature_flags WHERE id=$1", flag_id)
+        if not flag:
+            raise HTTPException(status_code=404, detail="Flag not found")
+        await conn.execute("DELETE FROM feature_flags WHERE id=$1", flag_id)
+        await audit(conn, admin["id"], "delete_feature_flag", flag_id, "feature_flag",
+                    {"name": flag["name"]})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# PRICING RULES
+# ════════════════════════════════════════════════════════════════
+
+class PricingRuleIn(BaseModel):
+    zone_id: Optional[str] = None
+    vehicle_type: str = "all"
+    base_fare: float
+    per_km: float
+    per_minute: float
+    min_fare: float
+    surge_multiplier: float = 1.0
+    surge_active: bool = False
+
+class PricingRuleUpdateIn(BaseModel):
+    base_fare: Optional[float] = None
+    per_km: Optional[float] = None
+    per_minute: Optional[float] = None
+    min_fare: Optional[float] = None
+    surge_multiplier: Optional[float] = None
+    surge_active: Optional[bool] = None
+
+@api.get("/admin/pricing-rules")
+async def admin_list_pricing(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_pricing"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT pr.*, cz.name as zone_name FROM pricing_rules pr LEFT JOIN coverage_zones cz ON cz.id=pr.zone_id ORDER BY pr.created_at"
+        )
+    return [
+        {
+            "id": r["id"], "zone_id": r["zone_id"], "zone_name": r["zone_name"],
+            "vehicle_type": r["vehicle_type"], "base_fare": float(r["base_fare"]),
+            "per_km": float(r["per_km"]), "per_minute": float(r["per_minute"]),
+            "min_fare": float(r["min_fare"]), "surge_multiplier": float(r["surge_multiplier"]),
+            "surge_active": r["surge_active"], "updated_at": iso(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/pricing-rules")
+async def admin_create_pricing(body: PricingRuleIn, admin: dict = Depends(require_superadmin)):
+    if not has_permission(admin, "manage_pricing"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO pricing_rules (id,zone_id,vehicle_type,base_fare,per_km,per_minute,min_fare,surge_multiplier,surge_active)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+            rid, body.zone_id, body.vehicle_type, body.base_fare, body.per_km,
+            body.per_minute, body.min_fare, body.surge_multiplier, body.surge_active
+        )
+        await audit(conn, admin["id"], "create_pricing_rule", rid, "pricing",
+                    {"vehicle_type": body.vehicle_type, "base_fare": body.base_fare})
+    return {"ok": True, "id": rid}
+
+@api.patch("/admin/pricing-rules/{rule_id}")
+async def admin_update_pricing(
+    rule_id: str, body: PricingRuleUpdateIn, admin: dict = Depends(require_superadmin)
+):
+    if not has_permission(admin, "manage_pricing"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rule = await conn.fetchrow("SELECT id FROM pricing_rules WHERE id=$1", rule_id)
+        if not rule:
+            raise HTTPException(status_code=404, detail="Pricing rule not found")
+        updates, params = [], [rule_id]
+        for field in ["base_fare","per_km","per_minute","min_fare","surge_multiplier","surge_active"]:
+            val = getattr(body, field)
+            if val is not None:
+                params.append(val); updates.append(f"{field}=${len(params)}")
+        if not updates:
+            return {"ok": True}
+        await conn.execute(
+            f"UPDATE pricing_rules SET {', '.join(updates)}, updated_at=NOW() WHERE id=$1", *params
+        )
+        await audit(conn, admin["id"], "update_pricing_rule", rule_id, "pricing",
+                    body.dict(exclude_none=True))
+    return {"ok": True}
+
+@api.delete("/admin/pricing-rules/{rule_id}")
+async def admin_delete_pricing(rule_id: str, admin: dict = Depends(require_superadmin)):
+    if not has_permission(admin, "manage_pricing"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM pricing_rules WHERE id=$1", rule_id)
+        await audit(conn, admin["id"], "delete_pricing_rule", rule_id, "pricing", {})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# PROMOTIONS
+# ════════════════════════════════════════════════════════════════
+
+class PromotionIn(BaseModel):
+    code: str
+    description: Optional[str] = None
+    discount_type: str  # "percent" or "fixed"
+    discount_value: float
+    min_ride_amount: float = 0
+    max_uses: int = 100
+    uses_per_user: int = 1
+    valid_from: str
+    valid_to: str
+    active: bool = True
+
+class PromotionUpdateIn(BaseModel):
+    description: Optional[str] = None
+    discount_value: Optional[float] = None
+    max_uses: Optional[int] = None
+    valid_to: Optional[str] = None
+    active: Optional[bool] = None
+
+@api.get("/admin/promotions")
+async def admin_list_promos(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_promotions"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM promotions ORDER BY created_at DESC"
+        )
+    return [
+        {
+            "id": r["id"], "code": r["code"], "description": r["description"],
+            "discount_type": r["discount_type"], "discount_value": float(r["discount_value"]),
+            "min_ride_amount": float(r["min_ride_amount"]),
+            "max_uses": r["max_uses"], "uses_per_user": r["uses_per_user"],
+            "total_used": r["total_used"], "active": r["active"],
+            "valid_from": iso(r["valid_from"]), "valid_to": iso(r["valid_to"]),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/promotions")
+async def admin_create_promo(body: PromotionIn, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_promotions"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        existing = await conn.fetchval("SELECT id FROM promotions WHERE code=$1", body.code.upper())
+        if existing:
+            raise HTTPException(status_code=409, detail="Promo code already exists")
+        pid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO promotions (id,code,description,discount_type,discount_value,min_ride_amount,max_uses,uses_per_user,valid_from,valid_to,active)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+            pid, body.code.upper(), body.description, body.discount_type, body.discount_value,
+            body.min_ride_amount, body.max_uses, body.uses_per_user,
+            body.valid_from, body.valid_to, body.active
+        )
+        await audit(conn, admin["id"], "create_promotion", pid, "promotion",
+                    {"code": body.code, "discount_type": body.discount_type})
+    return {"ok": True, "id": pid}
+
+@api.patch("/admin/promotions/{promo_id}")
+async def admin_update_promo(
+    promo_id: str, body: PromotionUpdateIn, admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_promotions"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        promo = await conn.fetchrow("SELECT id,code FROM promotions WHERE id=$1", promo_id)
+        if not promo:
+            raise HTTPException(status_code=404, detail="Promotion not found")
+        updates, params = [], [promo_id]
+        for field in ["description","discount_value","max_uses","valid_to","active"]:
+            val = getattr(body, field)
+            if val is not None:
+                params.append(val); updates.append(f"{field}=${len(params)}")
+        if not updates:
+            return {"ok": True}
+        await conn.execute(
+            f"UPDATE promotions SET {', '.join(updates)} WHERE id=$1", *params
+        )
+        await audit(conn, admin["id"], "update_promotion", promo_id, "promotion",
+                    {"code": promo["code"], "changes": body.dict(exclude_none=True)})
+    return {"ok": True}
+
+@api.delete("/admin/promotions/{promo_id}")
+async def admin_delete_promo(promo_id: str, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_promotions"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        promo = await conn.fetchrow("SELECT id,code FROM promotions WHERE id=$1", promo_id)
+        if not promo:
+            raise HTTPException(status_code=404, detail="Promotion not found")
+        await conn.execute("DELETE FROM promotions WHERE id=$1", promo_id)
+        await audit(conn, admin["id"], "delete_promotion", promo_id, "promotion",
+                    {"code": promo["code"]})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# GDPR DATA REQUESTS
+# ════════════════════════════════════════════════════════════════
+
+class GDPRResolutionIn(BaseModel):
+    resolution_note: str
+
+@api.get("/admin/gdpr/requests")
+async def admin_list_gdpr(admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT g.*, u.full_name, u.phone_number, u.email
+               FROM gdpr_requests g
+               JOIN users u ON u.id=g.user_id
+               ORDER BY g.created_at DESC"""
+        )
+    return [
+        {
+            "id": r["id"], "user_id": r["user_id"], "full_name": r["full_name"],
+            "phone_number": r["phone_number"], "email": r["email"],
+            "request_type": r["request_type"], "status": r["status"],
+            "resolution_note": r["resolution_note"],
+            "resolved_by": r["resolved_by"], "resolved_at": iso(r["resolved_at"]),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/gdpr/requests/{request_id}/resolve")
+async def admin_resolve_gdpr(
+    request_id: str, body: GDPRResolutionIn, admin: dict = Depends(require_superadmin)
+):
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow(
+            "SELECT id,user_id,request_type,status FROM gdpr_requests WHERE id=$1", request_id
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="GDPR request not found")
+        if req["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Request already {req['status']}")
+        await conn.execute(
+            """UPDATE gdpr_requests SET status='resolved', resolution_note=$2,
+               resolved_by=$3, resolved_at=NOW() WHERE id=$1""",
+            request_id, body.resolution_note, admin["id"]
+        )
+        if req["request_type"] == "deletion":
+            await conn.execute(
+                """UPDATE users SET full_name='[Deleted]', phone_number=CONCAT('deleted-',id),
+                   email=NULL, is_active=FALSE WHERE id=$1""",
+                req["user_id"]
+            )
+        await audit(conn, admin["id"], "resolve_gdpr", request_id, "gdpr",
+                    {"type": req["request_type"], "note": body.resolution_note})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# COVERAGE ZONES / GEOGRAPHY
+# ════════════════════════════════════════════════════════════════
+
+class ZoneIn(BaseModel):
+    name: str
+    city: Optional[str] = None
+    province: Optional[str] = None
+    country: str = "ZA"
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    radius_km: Optional[float] = None
+    active: bool = True
+
+class ZoneUpdateIn(BaseModel):
+    name: Optional[str] = None
+    city: Optional[str] = None
+    province: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    radius_km: Optional[float] = None
+    active: Optional[bool] = None
+
+@api.get("/admin/zones")
+async def admin_list_zones(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM coverage_zones ORDER BY name")
+    driver_counts: dict = {}
+    return [
+        {
+            "id": r["id"], "name": r["name"], "city": r["city"],
+            "province": r["province"], "country": r["country"],
+            "lat": float(r["lat"]) if r["lat"] else None,
+            "lng": float(r["lng"]) if r["lng"] else None,
+            "radius_km": float(r["radius_km"]) if r["radius_km"] else None,
+            "active": r["active"],
+            "driver_count": driver_counts.get(str(r["id"]), 0),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/zones")
+async def admin_create_zone(body: ZoneIn, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        zid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO coverage_zones (id,name,city,province,country,lat,lng,radius_km,active)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+            zid, body.name, body.city, body.province, body.country,
+            body.lat, body.lng, body.radius_km, body.active
+        )
+        await audit(conn, admin["id"], "create_zone", zid, "zone", {"name": body.name})
+    return {"ok": True, "id": zid}
+
+@api.patch("/admin/zones/{zone_id}")
+async def admin_update_zone(
+    zone_id: str, body: ZoneUpdateIn, admin: dict = Depends(require_superadmin)
+):
+    async with pool.acquire() as conn:
+        zone = await conn.fetchrow("SELECT id,name FROM coverage_zones WHERE id=$1", zone_id)
+        if not zone:
+            raise HTTPException(status_code=404, detail="Zone not found")
+        updates, params = [], [zone_id]
+        for field in ["name","city","province","lat","lng","radius_km","active"]:
+            val = getattr(body, field)
+            if val is not None:
+                params.append(val); updates.append(f"{field}=${len(params)}")
+        if not updates:
+            return {"ok": True}
+        await conn.execute(
+            f"UPDATE coverage_zones SET {', '.join(updates)}, updated_at=NOW() WHERE id=$1", *params
+        )
+        await audit(conn, admin["id"], "update_zone", zone_id, "zone",
+                    {"name": zone["name"], "changes": body.dict(exclude_none=True)})
+    return {"ok": True}
+
+@api.delete("/admin/zones/{zone_id}")
+async def admin_delete_zone(zone_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        zone = await conn.fetchrow("SELECT id,name FROM coverage_zones WHERE id=$1", zone_id)
+        if not zone:
+            raise HTTPException(status_code=404, detail="Zone not found")
+        await conn.execute("DELETE FROM coverage_zones WHERE id=$1", zone_id)
+        await audit(conn, admin["id"], "delete_zone", zone_id, "zone", {"name": zone["name"]})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# CHARGEBACKS
+# ════════════════════════════════════════════════════════════════
+
+class ChargebackUpdateIn(BaseModel):
+    status: str  # "won" | "lost" | "under_review"
+    resolution_note: Optional[str] = None
+    amount_recovered: Optional[float] = None
+
+@api.get("/admin/chargebacks")
+async def admin_list_chargebacks(
+    status: Optional[str] = None,
+    admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        q = """
+            SELECT c.*, u.full_name as user_name, u.phone_number,
+                   t.reference as txn_ref, t.amount as txn_amount
+            FROM chargebacks c
+            JOIN users u ON u.id=c.user_id
+            LEFT JOIN transactions t ON t.id=c.transaction_id
+            WHERE 1=1
+        """
+        params: list = []
+        if status:
+            params.append(status)
+            q += f" AND c.status=${len(params)}"
+        q += " ORDER BY c.created_at DESC LIMIT 200"
+        rows = await conn.fetch(q, *params)
+    return [
+        {
+            "id": r["id"], "user_id": r["user_id"], "user_name": r["user_name"],
+            "phone_number": r["phone_number"], "transaction_id": r["transaction_id"],
+            "txn_ref": r["txn_ref"], "txn_amount": float(r["txn_amount"] or 0),
+            "amount": float(r["amount"]), "reason": r["reason"],
+            "status": r["status"], "resolution_note": r["resolution_note"],
+            "amount_recovered": float(r["amount_recovered"] or 0),
+            "created_at": iso(r["created_at"]), "updated_at": iso(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+@api.patch("/admin/chargebacks/{chargeback_id}")
+async def admin_update_chargeback(
+    chargeback_id: str, body: ChargebackUpdateIn, admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    valid_statuses = {"won", "lost", "under_review", "pending"}
+    if body.status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+    async with pool.acquire() as conn:
+        cb = await conn.fetchrow("SELECT id,user_id,amount FROM chargebacks WHERE id=$1", chargeback_id)
+        if not cb:
+            raise HTTPException(status_code=404, detail="Chargeback not found")
+        await conn.execute(
+            """UPDATE chargebacks SET status=$2, resolution_note=$3, amount_recovered=$4,
+               updated_at=NOW() WHERE id=$1""",
+            chargeback_id, body.status, body.resolution_note,
+            body.amount_recovered or 0
+        )
+        await audit(conn, admin["id"], "update_chargeback", chargeback_id, "chargeback",
+                    {"status": body.status, "amount": float(cb["amount"])})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# TRANSACTION LIMITS
+# ════════════════════════════════════════════════════════════════
+
+class LimitUpdateIn(BaseModel):
+    daily_limit: Optional[float] = None
+    single_txn_limit: Optional[float] = None
+    monthly_limit: Optional[float] = None
+    min_topup: Optional[float] = None
+    max_topup: Optional[float] = None
+    max_withdrawal: Optional[float] = None
+    min_withdrawal: Optional[float] = None
+    enabled: Optional[bool] = None
+
+@api.get("/admin/limits")
+async def admin_list_limits(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_limits"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM tx_limit_configs ORDER BY role")
+    return [
+        {
+            "id": r["id"], "role": r["role"],
+            "daily_limit": float(r["daily_limit"] or 0),
+            "single_txn_limit": float(r["single_txn_limit"] or 0),
+            "monthly_limit": float(r["monthly_limit"] or 0),
+            "min_topup": float(r["min_topup"] or 0),
+            "max_topup": float(r["max_topup"] or 0),
+            "max_withdrawal": float(r["max_withdrawal"] or 0),
+            "min_withdrawal": float(r["min_withdrawal"] or 0),
+            "enabled": r["enabled"], "updated_at": iso(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+@api.patch("/admin/limits/{limit_id}")
+async def admin_update_limit(
+    limit_id: str, body: LimitUpdateIn, admin: dict = Depends(require_superadmin)
+):
+    if not has_permission(admin, "manage_limits"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        lim = await conn.fetchrow("SELECT id,role FROM tx_limit_configs WHERE id=$1", limit_id)
+        if not lim:
+            raise HTTPException(status_code=404, detail="Limit config not found")
+        updates, params = [], [limit_id]
+        for field in ["daily_limit","single_txn_limit","monthly_limit","min_topup",
+                      "max_topup","max_withdrawal","min_withdrawal","enabled"]:
+            val = getattr(body, field)
+            if val is not None:
+                params.append(val); updates.append(f"{field}=${len(params)}")
+        if not updates:
+            return {"ok": True}
+        await conn.execute(
+            f"UPDATE tx_limit_configs SET {', '.join(updates)}, updated_at=NOW() WHERE id=$1", *params
+        )
+        await audit(conn, admin["id"], "update_tx_limit", limit_id, "limit",
+                    {"role": lim["role"], "changes": body.dict(exclude_none=True)})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# REFERRALS
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/referrals")
+async def admin_list_referrals(
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    admin: dict = Depends(require_admin)
+):
+    async with pool.acquire() as conn:
+        q = """
+            SELECT r.*,
+                   ref.full_name as referrer_name, ref.phone_number as referrer_phone,
+                   inv.full_name as invitee_name, inv.phone_number as invitee_phone
+            FROM referrals r
+            JOIN users ref ON ref.id=r.referrer_id
+            JOIN users inv ON inv.id=r.invitee_id
+            WHERE 1=1
+        """
+        params: list = []
+        if status:
+            params.append(status)
+            q += f" AND r.status=${len(params)}"
+        if search:
+            params.append(f"%{search}%")
+            q += f" AND (ref.full_name ILIKE ${len(params)} OR inv.full_name ILIKE ${len(params)} OR ref.phone_number ILIKE ${len(params)})"
+        q += " ORDER BY r.created_at DESC LIMIT 300"
+        rows = await conn.fetch(q, *params)
+
+        stats = await conn.fetchrow(
+            """SELECT COUNT(*) as total,
+                      SUM(CASE WHEN status='rewarded' THEN 1 ELSE 0 END) as rewarded,
+                      SUM(COALESCE(reward_amount,0)) as total_rewards
+               FROM referrals"""
+        )
+    return {
+        "items": [
+            {
+                "id": r["id"], "referrer_id": r["referrer_id"],
+                "referrer_name": r["referrer_name"], "referrer_phone": r["referrer_phone"],
+                "invitee_id": r["invitee_id"], "invitee_name": r["invitee_name"],
+                "invitee_phone": r["invitee_phone"], "status": r["status"],
+                "reward_amount": float(r["reward_amount"] or 0),
+                "created_at": iso(r["created_at"]),
+            }
+            for r in rows
+        ],
+        "stats": {
+            "total": stats["total"], "rewarded": stats["rewarded"],
+            "total_rewards": float(stats["total_rewards"] or 0),
+        }
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# FEEDBACK / RATINGS
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/feedback")
+async def admin_list_feedback(
+    flagged: Optional[bool] = None,
+    min_stars: Optional[int] = None,
+    max_stars: Optional[int] = None,
+    admin: dict = Depends(require_admin)
+):
+    async with pool.acquire() as conn:
+        q = """
+            SELECT rt.id, rt.stars as rating, rt.comment, rt.is_flagged, rt.flag_reason, rt.created_at,
+                   rater.full_name as rater_name, rater.role as rater_role,
+                   rated.full_name as rated_name, rated.role as rated_role
+            FROM ratings rt
+            JOIN users rater ON rater.id=rt.passenger_user_id
+            JOIN users rated ON rated.id=rt.driver_user_id
+            WHERE 1=1
+        """
+        params: list = []
+        if flagged is not None:
+            params.append(flagged)
+            q += f" AND rt.is_flagged=${len(params)}"
+        if min_stars is not None:
+            params.append(min_stars)
+            q += f" AND rt.rating >= ${len(params)}"
+        if max_stars is not None:
+            params.append(max_stars)
+            q += f" AND rt.rating <= ${len(params)}"
+        q += " ORDER BY rt.created_at DESC LIMIT 500"
+        rows = await conn.fetch(q, *params)
+
+        stats = await conn.fetchrow(
+            """SELECT COUNT(*) as total, AVG(stars) as avg_rating,
+                      SUM(CASE WHEN is_flagged THEN 1 ELSE 0 END) as flagged_count
+               FROM ratings"""
+        )
+    return {
+        "items": [
+            {
+                "id": r["id"], "rating": r["rating"], "comment": r["comment"],
+                "is_flagged": r["is_flagged"], "flag_reason": r["flag_reason"],
+                "rater_name": r["rater_name"], "rater_role": r["rater_role"],
+                "rated_name": r["rated_name"], "rated_role": r["rated_role"],
+                "created_at": iso(r["created_at"]),
+            }
+            for r in rows
+        ],
+        "stats": {
+            "total": stats["total"],
+            "avg_rating": round(float(stats["avg_rating"] or 0), 2),
+            "flagged_count": stats["flagged_count"],
+        }
+    }
+
+@api.post("/admin/feedback/{rating_id}/flag")
+async def admin_flag_feedback(
+    rating_id: str,
+    body: FlagAccountIn,
+    admin: dict = Depends(require_admin)
+):
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("SELECT id FROM ratings WHERE id=$1", rating_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Rating not found")
+        await conn.execute(
+            "UPDATE ratings SET is_flagged=TRUE, flag_reason=$2 WHERE id=$1",
+            rating_id, body.reason
+        )
+        await audit(conn, admin["id"], "flag_rating", rating_id, "rating",
+                    {"reason": body.reason})
+    return {"ok": True}
+
+@api.post("/admin/feedback/{rating_id}/unflag")
+async def admin_unflag_feedback(rating_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("SELECT id FROM ratings WHERE id=$1", rating_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Rating not found")
+        await conn.execute(
+            "UPDATE ratings SET is_flagged=FALSE, flag_reason=NULL WHERE id=$1", rating_id
+        )
+        await audit(conn, admin["id"], "unflag_rating", rating_id, "rating", {})
+    return {"ok": True}
+
+@api.delete("/admin/feedback/{rating_id}")
+async def admin_delete_feedback(rating_id: str, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow("SELECT id FROM ratings WHERE id=$1", rating_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Rating not found")
+        await conn.execute("DELETE FROM ratings WHERE id=$1", rating_id)
+        await audit(conn, admin["id"], "delete_rating", rating_id, "rating", {})
+    return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# BROADCAST / NOTIFICATIONS
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/broadcasts")
+async def admin_list_broadcasts(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "broadcast_messages"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT n.*, u.full_name as sent_by_name
+               FROM notifications n
+               LEFT JOIN users u ON u.id=n.sent_by
+               WHERE n.target IN ('all','role')
+               ORDER BY n.sent_at DESC LIMIT 200"""
+        )
+    return [
+        {
+            "id": r["id"], "title": r["title"], "body": r["message"],
+            "target": r["target"], "target_role": r["target_role"],
+            "sent_by": r["sent_by"], "sent_by_name": r["sent_by_name"],
+            "sent_at": iso(r["sent_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/notifications/broadcast")
+async def admin_broadcast(body: SendNotificationIn, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "broadcast_messages"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        nid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO notifications (id,title,message,target,target_role,sent_by,sent_at)
+               VALUES ($1,$2,$3,$4,$5,$6,NOW())""",
+            nid, body.title, body.message,
+            body.target or "all",
+            body.target_role if body.target == "role" else None,
+            admin["id"]
+        )
+        await audit(conn, admin["id"], "broadcast_notification", nid, "notification",
+                    {"title": body.title, "target": body.target or "all"})
+    return {"ok": True, "id": nid}
+
+
+# ════════════════════════════════════════════════════════════════
+# RISK / SUSPICIOUS USERS
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/risk/users")
+async def admin_risk_users(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_risk"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                u.id, u.full_name, u.phone_number, u.role, u.is_active,
+                u.flagged, u.flag_reason,
+                w.balance, w.is_frozen,
+                COUNT(DISTINCT t.id) as txn_count,
+                COALESCE(SUM(CASE WHEN t.status='failed' THEN 1 ELSE 0 END),0) as failed_txns,
+                COALESCE(SUM(CASE WHEN t.created_at > NOW()-INTERVAL '24 hours' THEN 1 ELSE 0 END),0) as txns_24h,
+                COALESCE(SUM(CASE WHEN t.created_at > NOW()-INTERVAL '24 hours' THEN t.amount ELSE 0 END),0) as volume_24h,
+                COUNT(DISTINCT d.id) as dispute_count,
+                u.created_at
+            FROM users u
+            LEFT JOIN wallets w ON w.user_id=u.id
+            LEFT JOIN transactions t ON (t.sender_id=u.id OR t.receiver_id=u.id)
+            LEFT JOIN disputes d ON (d.user_id=u.id)
+            WHERE u.is_test IS NOT TRUE
+            GROUP BY u.id, u.full_name, u.phone_number, u.role, u.is_active,
+                     u.flagged, u.flag_reason, w.balance, w.is_frozen, u.created_at
+            HAVING (
+                u.flagged = TRUE
+                OR w.is_frozen = TRUE
+                OR COUNT(DISTINCT d.id) > 0
+                OR COALESCE(SUM(CASE WHEN t.status='failed' THEN 1 ELSE 0 END),0) > 3
+                OR COALESCE(SUM(CASE WHEN t.created_at > NOW()-INTERVAL '24 hours' THEN t.amount ELSE 0 END),0) > 5000
+            )
+            ORDER BY (CASE WHEN u.flagged THEN 3 WHEN w.is_frozen THEN 2 ELSE 1 END) DESC,
+                     u.created_at DESC
+            LIMIT 200
+            """
+        )
+
+    def risk_score(r) -> int:
+        score = 0
+        if r["flagged"]: score += 40
+        if r["is_frozen"]: score += 30
+        if r["dispute_count"] > 0: score += r["dispute_count"] * 10
+        if r["failed_txns"] > 3: score += min(r["failed_txns"] * 3, 20)
+        if float(r["volume_24h"] or 0) > 5000: score += 20
+        return min(score, 100)
+
+    return [
+        {
+            "user_id": r["id"], "full_name": r["full_name"],
+            "phone_number": r["phone_number"], "role": r["role"],
+            "is_active": r["is_active"], "flagged": r["flagged"],
+            "flag_reason": r["flag_reason"], "balance": float(r["balance"] or 0),
+            "is_frozen": r["is_frozen"], "txn_count": r["txn_count"],
+            "failed_txns": r["failed_txns"], "txns_24h": r["txns_24h"],
+            "volume_24h": float(r["volume_24h"] or 0),
+            "dispute_count": r["dispute_count"],
+            "risk_score": risk_score(r),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+# ════════════════════════════════════════════════════════════════
+# RECONCILIATION
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/reconciliation/batches")
+async def admin_recon_batches(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT b.*, u.full_name as run_by_name
+               FROM reconciliation_batches b
+               LEFT JOIN users u ON u.id=b.run_by
+               ORDER BY b.created_at DESC LIMIT 100"""
+        )
+    return [
+        {
+            "id": r["id"], "period_start": iso(r["period_start"]),
+            "period_end": iso(r["period_end"]), "status": r["status"],
+            "total_topups": float(r["total_topups"] or 0),
+            "total_payments": float(r["total_payments"] or 0),
+            "total_fees": float(r["total_fees"] or 0),
+            "total_withdrawals": float(r["total_withdrawals"] or 0),
+            "total_wallets": float(r["total_wallets"] or 0),
+            "variance": float(r["variance"] or 0),
+            "discrepancy_count": r["discrepancy_count"],
+            "run_by": r["run_by"], "run_by_name": r["run_by_name"],
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.get("/admin/reconciliation/discrepancies")
+async def admin_recon_discrepancies(
+    batch_id: Optional[str] = None,
+    resolved: Optional[bool] = None,
+    admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        q = "SELECT * FROM reconciliation_discrepancies WHERE 1=1"
+        params: list = []
+        if batch_id:
+            params.append(batch_id); q += f" AND batch_id=${len(params)}"
+        if resolved is not None:
+            params.append(resolved); q += f" AND resolved=${len(params)}"
+        q += " ORDER BY created_at DESC LIMIT 300"
+        rows = await conn.fetch(q, *params)
+    return [
+        {
+            "id": r["id"], "batch_id": r["batch_id"], "type": r["type"],
+            "description": r["description"], "amount": float(r["amount"] or 0),
+            "expected": float(r["expected"] or 0), "actual": float(r["actual"] or 0),
+            "resolved": r["resolved"], "resolution_note": r["resolution_note"],
+            "resolved_by": r["resolved_by"], "resolved_at": iso(r["resolved_at"]),
+            "created_at": iso(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+@api.post("/admin/reconciliation/run")
+async def admin_run_reconciliation(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        now = datetime.now(timezone.utc)
+        period_end = now
+        last_batch = await conn.fetchrow(
+            "SELECT period_end FROM reconciliation_batches ORDER BY created_at DESC LIMIT 1"
+        )
+        period_start = last_batch["period_end"] if last_batch else (now - timedelta(days=30))
+
+        total_topups = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='topup' AND status='completed' AND created_at BETWEEN $1 AND $2 AND is_test IS NOT TRUE",
+            period_start, period_end
+        ) or 0)
+        total_payments = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed' AND created_at BETWEEN $1 AND $2 AND is_test IS NOT TRUE",
+            period_start, period_end
+        ) or 0)
+        total_fees = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(platform_fee),0) FROM transactions WHERE type='payment' AND status='completed' AND created_at BETWEEN $1 AND $2 AND is_test IS NOT TRUE",
+            period_start, period_end
+        ) or 0)
+        total_withdrawals = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE status IN ('approved','paid') AND created_at BETWEEN $1 AND $2",
+            period_start, period_end
+        ) or 0)
+        total_wallets = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(w.balance),0) FROM wallets w JOIN users u ON u.id=w.user_id WHERE u.is_test IS NOT TRUE"
+        ) or 0)
+
+        variance = total_topups - total_payments - total_withdrawals - total_wallets
+        discrepancies = []
+
+        if abs(variance) > 0.01:
+            discrepancies.append({
+                "type": "variance",
+                "description": f"Balance variance detected: R{variance:.2f}",
+                "amount": abs(variance),
+                "expected": total_topups - total_payments - total_withdrawals,
+                "actual": total_wallets
+            })
+
+        failed_unpaid = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE status='pending' AND created_at < NOW()-INTERVAL '7 days'"
+        ) or 0)
+        if failed_unpaid > 0:
+            discrepancies.append({
+                "type": "stale_withdrawal",
+                "description": f"Stale pending withdrawals older than 7 days: R{failed_unpaid:.2f}",
+                "amount": failed_unpaid,
+                "expected": 0,
+                "actual": failed_unpaid
+            })
+
+        bid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO reconciliation_batches
+               (id,period_start,period_end,status,total_topups,total_payments,total_fees,
+                total_withdrawals,total_wallets,variance,discrepancy_count,run_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
+            bid, period_start, period_end,
+            "balanced" if abs(variance) < 0.01 else "discrepancy",
+            total_topups, total_payments, total_fees, total_withdrawals,
+            total_wallets, variance, len(discrepancies), admin["id"]
+        )
+        for d in discrepancies:
+            await conn.execute(
+                """INSERT INTO reconciliation_discrepancies
+                   (id,batch_id,type,description,amount,expected,actual)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+                str(uuid.uuid4()), bid, d["type"], d["description"],
+                d["amount"], d["expected"], d["actual"]
+            )
+        await audit(conn, admin["id"], "run_reconciliation", bid, "reconciliation",
+                    {"variance": variance, "discrepancies": len(discrepancies)})
+
+    return {
+        "ok": True, "batch_id": bid,
+        "status": "balanced" if abs(variance) < 0.01 else "discrepancy",
+        "variance": variance,
+        "discrepancy_count": len(discrepancies),
+        "period_start": iso(period_start),
+        "period_end": iso(period_end),
+    }
+
+@api.post("/admin/reconciliation/discrepancies/{disc_id}/resolve")
+async def admin_resolve_discrepancy(
+    disc_id: str, body: GDPRResolutionIn, admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        d = await conn.fetchrow("SELECT id FROM reconciliation_discrepancies WHERE id=$1", disc_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Discrepancy not found")
+        await conn.execute(
+            """UPDATE reconciliation_discrepancies SET resolved=TRUE, resolution_note=$2,
+               resolved_by=$3, resolved_at=NOW() WHERE id=$1""",
+            disc_id, body.resolution_note, admin["id"]
+        )
+        await audit(conn, admin["id"], "resolve_discrepancy", disc_id, "reconciliation",
+                    {"note": body.resolution_note})
+    return {"ok": True}
+
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line

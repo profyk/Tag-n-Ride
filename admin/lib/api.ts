@@ -156,6 +156,7 @@ export type KYCDocument = {
   phone_number?: string;
   selfie_url?: string;
   licence_front_url?: string;
+  licence_back_url?: string;
   status: string;
   reviewed_by?: string;
   reviewed_at?: string;
@@ -172,6 +173,225 @@ export type Session = {
   ip_address?: string;
   created_at: string;
   expires_at: string;
+};
+
+export type WalletEntry = {
+  user_id: string;
+  full_name: string;
+  phone_number: string;
+  role: string;
+  is_active: boolean;
+  balance: number;
+  is_frozen: boolean;
+  freeze_reason?: string;
+  updated_at: string;
+};
+
+export type RefundRequest = {
+  id: string;
+  user_id: string;
+  user_name: string;
+  phone_number: string;
+  transaction_id: string;
+  txn_ref?: string;
+  txn_type?: string;
+  amount: number;
+  reason: string;
+  status: string;
+  resolution_note?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at: string;
+};
+
+export type FeatureFlag = {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  rollout_pct: number;
+  target_roles?: string[];
+  metadata?: Record<string, unknown>;
+  updated_by?: string;
+  updated_at: string;
+  created_at: string;
+};
+
+export type PricingRule = {
+  id: string;
+  zone_id?: string;
+  zone_name?: string;
+  vehicle_type: string;
+  base_fare: number;
+  per_km: number;
+  per_minute: number;
+  min_fare: number;
+  surge_multiplier: number;
+  surge_active: boolean;
+  updated_at: string;
+};
+
+export type Promotion = {
+  id: string;
+  code: string;
+  description?: string;
+  discount_type: string;
+  discount_value: number;
+  min_ride_amount: number;
+  max_uses: number;
+  uses_per_user: number;
+  total_used: number;
+  active: boolean;
+  valid_from: string;
+  valid_to: string;
+  created_at: string;
+};
+
+export type GDPRRequest = {
+  id: string;
+  user_id: string;
+  full_name: string;
+  phone_number: string;
+  email?: string;
+  request_type: string;
+  status: string;
+  resolution_note?: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  created_at: string;
+};
+
+export type CoverageZone = {
+  id: string;
+  name: string;
+  city?: string;
+  province?: string;
+  country: string;
+  lat?: number;
+  lng?: number;
+  radius_km?: number;
+  active: boolean;
+  driver_count: number;
+  created_at: string;
+};
+
+export type Chargeback = {
+  id: string;
+  user_id: string;
+  user_name: string;
+  phone_number: string;
+  transaction_id?: string;
+  txn_ref?: string;
+  txn_amount: number;
+  amount: number;
+  reason: string;
+  status: string;
+  resolution_note?: string;
+  amount_recovered: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TxLimit = {
+  id: string;
+  role: string;
+  daily_limit: number;
+  single_txn_limit: number;
+  monthly_limit: number;
+  min_topup: number;
+  max_topup: number;
+  max_withdrawal: number;
+  min_withdrawal: number;
+  enabled: boolean;
+  updated_at: string;
+};
+
+export type Referral = {
+  id: string;
+  referrer_id: string;
+  referrer_name: string;
+  referrer_phone: string;
+  invitee_id: string;
+  invitee_name: string;
+  invitee_phone: string;
+  status: string;
+  reward_amount: number;
+  created_at: string;
+};
+
+export type FeedbackItem = {
+  id: string;
+  rating: number;
+  comment?: string;
+  is_flagged: boolean;
+  flag_reason?: string;
+  rater_name: string;
+  rater_role: string;
+  rated_name: string;
+  rated_role: string;
+  created_at: string;
+};
+
+export type Broadcast = {
+  id: string;
+  title: string;
+  body: string;
+  target: string;
+  target_role?: string;
+  sent_by?: string;
+  sent_by_name?: string;
+  sent_at: string;
+};
+
+export type RiskUser = {
+  user_id: string;
+  full_name: string;
+  phone_number: string;
+  role: string;
+  is_active: boolean;
+  flagged: boolean;
+  flag_reason?: string;
+  balance: number;
+  is_frozen: boolean;
+  txn_count: number;
+  failed_txns: number;
+  txns_24h: number;
+  volume_24h: number;
+  dispute_count: number;
+  risk_score: number;
+  created_at: string;
+};
+
+export type ReconBatch = {
+  id: string;
+  period_start: string;
+  period_end: string;
+  status: string;
+  total_topups: number;
+  total_payments: number;
+  total_fees: number;
+  total_withdrawals: number;
+  total_wallets: number;
+  variance: number;
+  discrepancy_count: number;
+  run_by?: string;
+  run_by_name?: string;
+  created_at: string;
+};
+
+export type ReconDiscrepancy = {
+  id: string;
+  batch_id: string;
+  type: string;
+  description: string;
+  amount: number;
+  expected: number;
+  actual: number;
+  resolved: boolean;
+  resolution_note?: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  created_at: string;
 };
 
 export type DashboardStats = {
@@ -294,4 +514,111 @@ export const api = {
     window.open(`${BASE_URL}/api/admin/export/transactions`, "_blank"),
   exportUsers: () =>
     window.open(`${BASE_URL}/api/admin/export/users`, "_blank"),
+
+  // Wallet operations
+  wallets: (params?: { search?: string; frozen?: boolean }) =>
+    client.get<WalletEntry[]>("/api/admin/wallets", { params }),
+  freezeWalletAdmin: (userId: string, reason: string) =>
+    client.post(`/api/admin/wallets/${userId}/freeze`, { reason }),
+  unfreezeWalletAdmin: (userId: string) =>
+    client.post(`/api/admin/wallets/${userId}/unfreeze`),
+  adjustWallet: (userId: string, amount: number, note?: string) =>
+    client.post<{ ok: boolean; new_balance: number; reference: string }>(
+      `/api/admin/wallets/${userId}/adjust`, { amount, note }
+    ),
+
+  // Refunds
+  refunds: (status?: string) =>
+    client.get<RefundRequest[]>("/api/admin/refunds", { params: status ? { status } : {} }),
+  createRefund: (body: { user_id: string; transaction_id: string; amount: number; reason: string }) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/refunds", body),
+  approveRefund: (id: string) =>
+    client.post<{ ok: boolean; reference: string }>(`/api/admin/refunds/${id}/approve`),
+  rejectRefund: (id: string, reason: string) =>
+    client.post(`/api/admin/refunds/${id}/reject`, { reason }),
+
+  // Feature flags
+  featureFlags: () => client.get<FeatureFlag[]>("/api/admin/feature-flags"),
+  createFlag: (body: { name: string; description?: string; enabled: boolean; rollout_pct?: number }) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/feature-flags", body),
+  updateFlag: (id: string, body: { enabled?: boolean; rollout_pct?: number; description?: string }) =>
+    client.patch(`/api/admin/feature-flags/${id}`, body),
+  deleteFlag: (id: string) => client.delete(`/api/admin/feature-flags/${id}`),
+
+  // Pricing
+  pricingRules: () => client.get<PricingRule[]>("/api/admin/pricing-rules"),
+  createPricingRule: (body: Omit<PricingRule, "id" | "zone_name" | "updated_at">) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/pricing-rules", body),
+  updatePricingRule: (id: string, body: Partial<PricingRule>) =>
+    client.patch(`/api/admin/pricing-rules/${id}`, body),
+  deletePricingRule: (id: string) => client.delete(`/api/admin/pricing-rules/${id}`),
+
+  // Promotions
+  promotions: () => client.get<Promotion[]>("/api/admin/promotions"),
+  createPromotion: (body: Omit<Promotion, "id" | "total_used" | "created_at">) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/promotions", body),
+  updatePromotion: (id: string, body: Partial<Promotion>) =>
+    client.patch(`/api/admin/promotions/${id}`, body),
+  deletePromotion: (id: string) => client.delete(`/api/admin/promotions/${id}`),
+
+  // GDPR
+  gdprRequests: () => client.get<GDPRRequest[]>("/api/admin/gdpr/requests"),
+  resolveGDPR: (id: string, resolution_note: string) =>
+    client.post(`/api/admin/gdpr/requests/${id}/resolve`, { resolution_note }),
+
+  // Geography / Zones
+  zones: () => client.get<CoverageZone[]>("/api/admin/zones"),
+  createZone: (body: Omit<CoverageZone, "id" | "driver_count" | "created_at">) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/zones", body),
+  updateZone: (id: string, body: Partial<CoverageZone>) =>
+    client.patch(`/api/admin/zones/${id}`, body),
+  deleteZone: (id: string) => client.delete(`/api/admin/zones/${id}`),
+
+  // Chargebacks
+  chargebacks: (status?: string) =>
+    client.get<Chargeback[]>("/api/admin/chargebacks", { params: status ? { status } : {} }),
+  updateChargeback: (id: string, body: { status: string; resolution_note?: string; amount_recovered?: number }) =>
+    client.patch(`/api/admin/chargebacks/${id}`, body),
+
+  // Transaction limits
+  txLimits: () => client.get<TxLimit[]>("/api/admin/limits"),
+  updateTxLimit: (id: string, body: Partial<TxLimit>) =>
+    client.patch(`/api/admin/limits/${id}`, body),
+
+  // Referrals
+  referrals: (params?: { status?: string; search?: string }) =>
+    client.get<{ items: Referral[]; stats: { total: number; rewarded: number; total_rewards: number } }>(
+      "/api/admin/referrals", { params }
+    ),
+
+  // Feedback
+  feedback: (params?: { flagged?: boolean; min_stars?: number; max_stars?: number }) =>
+    client.get<{ items: FeedbackItem[]; stats: { total: number; avg_rating: number; flagged_count: number } }>(
+      "/api/admin/feedback", { params }
+    ),
+  flagFeedback: (id: string, reason: string) =>
+    client.post(`/api/admin/feedback/${id}/flag`, { reason }),
+  unflagFeedback: (id: string) => client.post(`/api/admin/feedback/${id}/unflag`),
+  deleteFeedback: (id: string) => client.delete(`/api/admin/feedback/${id}`),
+
+  // Broadcasts
+  broadcasts: () => client.get<Broadcast[]>("/api/admin/broadcasts"),
+  sendBroadcast: (body: { title: string; body?: string; message?: string; target?: string; target_role?: string }) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/notifications/broadcast", body),
+
+  // Risk
+  riskUsers: () => client.get<RiskUser[]>("/api/admin/risk/users"),
+
+  // Reconciliation
+  reconBatches: () => client.get<ReconBatch[]>("/api/admin/reconciliation/batches"),
+  reconDiscrepancies: (batchId?: string, resolved?: boolean) =>
+    client.get<ReconDiscrepancy[]>("/api/admin/reconciliation/discrepancies",
+      { params: { ...(batchId ? { batch_id: batchId } : {}), ...(resolved !== undefined ? { resolved } : {}) } }
+    ),
+  runReconciliation: () =>
+    client.post<{ ok: boolean; batch_id: string; status: string; variance: number; discrepancy_count: number; period_start: string; period_end: string }>(
+      "/api/admin/reconciliation/run"
+    ),
+  resolveDiscrepancy: (id: string, resolution_note: string) =>
+    client.post(`/api/admin/reconciliation/discrepancies/${id}/resolve`, { resolution_note }),
 };
