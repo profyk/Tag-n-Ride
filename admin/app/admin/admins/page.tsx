@@ -168,7 +168,7 @@ export default function AdminsPage() {
             headers={["Name", "Email", "Role", "Status", "Last Login", "Inactivity", "Created By", "Actions"]}
             empty={!admins.length}>
             {admins.map((a) => {
-              const lastLoginDays = daysSince(a.last_login);
+              const lastLoginDays = daysSince(a.last_login ?? null);
               const stale = lastLoginDays !== null && lastLoginDays > 30;
               return (
                 <Tr key={a.id} className={!a.is_active ? "opacity-60" : ""}>
