@@ -441,7 +441,8 @@ export const api = {
   flagUser: (id: string, reason: string) =>
     client.post(`/api/admin/flag/${id}`, { reason }),
   unflagUser: (id: string) => client.post(`/api/admin/unflag/${id}`),
-  deleteUser: (id: string) => client.delete(`/api/superadmin/users/${id}`),
+  deleteUser: (id: string, token?: string | null) =>
+    client.delete(`/api/superadmin/users/${id}`, token ? { headers: { "X-Danger-Token": token } } : undefined),
 
   drivers: () => client.get<Driver[]>("/api/admin/drivers"),
   verifyDriver: (id: string) => client.post(`/api/admin/verify-driver/${id}`),
@@ -497,18 +498,19 @@ export const api = {
   revokeSession: (id: string) => client.post(`/api/superadmin/sessions/${id}/revoke`),
 
   getUserWallet: (id: string) => client.get(`/api/superadmin/wallet/${id}`),
-  freezeWallet: (id: string, reason: string) =>
-    client.post(`/api/superadmin/freeze-wallet/${id}`, { reason }),
-  unfreezeWallet: (id: string) => client.post(`/api/superadmin/unfreeze-wallet/${id}`),
+  freezeWallet: (id: string, reason: string, token?: string | null) =>
+    client.post(`/api/superadmin/freeze-wallet/${id}`, { reason }, token ? { headers: { "X-Danger-Token": token } } : undefined),
+  unfreezeWallet: (id: string, token?: string | null) =>
+    client.post(`/api/superadmin/unfreeze-wallet/${id}`, undefined, token ? { headers: { "X-Danger-Token": token } } : undefined),
   transferFunds: (body: {
     from_user_id: string;
     to_user_id: string;
     amount: number;
     note?: string;
-  }) =>
-    client.post<{ ok: boolean; reference: string }>("/api/superadmin/transfer-funds", body),
-  adjustBalance: (body: { user_id: string; amount: number; note?: string }) =>
-    client.post<{ ok: boolean; new_balance: number }>("/api/superadmin/adjust-balance", body),
+  }, token?: string | null) =>
+    client.post<{ ok: boolean; reference: string }>("/api/superadmin/transfer-funds", body, token ? { headers: { "X-Danger-Token": token } } : undefined),
+  adjustBalance: (body: { user_id: string; amount: number; note?: string }, token?: string | null) =>
+    client.post<{ ok: boolean; new_balance: number }>("/api/superadmin/adjust-balance", body, token ? { headers: { "X-Danger-Token": token } } : undefined),
 
   exportTransactions: () =>
     window.open(`${BASE_URL}/api/admin/export/transactions`, "_blank"),
