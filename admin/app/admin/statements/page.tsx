@@ -47,57 +47,57 @@ const STATEMENTS: StatDef[] = [
   {
     key: "transactions",   label: "Transaction History",
     description: "All platform transactions — payments, top-ups, refunds. Excludes test data.",
-    icon: ArrowUpDown,  color: "text-cyan",    endpoint: "/admin/statements/transactions",     roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: ArrowUpDown,  color: "text-cyan",    endpoint: "/admin/statements/transactions",     roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "revenue",        label: "Revenue Statement",
     description: "Daily platform fee revenue, gross volume, and net margin breakdown.",
-    icon: TrendingUp,   color: "text-green",   endpoint: "/admin/statements/revenue",           roles: ["cfo","ceo","superadmin"],           printable: true,
+    icon: TrendingUp,   color: "text-green",   endpoint: "/admin/statements/revenue",           roles: ["finance","cfo","ceo","superadmin"],         printable: true,
   },
   {
     key: "driver-earnings",label: "Driver Earnings",
     description: "Per-driver earnings, platform fees deducted, and net payouts.",
-    icon: Car,          color: "text-yellow",  endpoint: "/admin/statements/driver-earnings",   roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: Car,          color: "text-yellow",  endpoint: "/admin/statements/driver-earnings",   roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "withdrawals",    label: "Withdrawal Report",
     description: "All withdrawal requests with bank details, amounts, and status.",
-    icon: Wallet,       color: "text-purple",  endpoint: "/admin/statements/withdrawals",       roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: Wallet,       color: "text-purple",  endpoint: "/admin/statements/withdrawals",       roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "reconciliation", label: "Reconciliation Report",
     description: "Platform-wide balance reconciliation with variance analysis.",
-    icon: BarChart3,    color: "text-cyan",    endpoint: "/admin/statements/reconciliation",    roles: ["cfo","ceo","superadmin"],           printable: true,
+    icon: BarChart3,    color: "text-cyan",    endpoint: "/admin/statements/reconciliation",    roles: ["finance","cfo","ceo","superadmin"],         printable: true,
   },
   {
     key: "passenger-topups",label: "Passenger Top-ups",
     description: "All passenger top-up transactions, gateway fees, and net received.",
-    icon: Users,        color: "text-cyan",    endpoint: "/admin/statements/passenger-topups",  roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: Users,        color: "text-cyan",    endpoint: "/admin/statements/passenger-topups",  roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "fleet-earnings", label: "Fleet Owner Report",
     description: "Fleet owner earnings aggregated by owner, with per-driver breakdown.",
-    icon: Building2,    color: "text-purple",  endpoint: "/admin/statements/fleet-earnings",    roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: Building2,    color: "text-purple",  endpoint: "/admin/statements/fleet-earnings",    roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "routes",         label: "Routes & Fare Collection",
     description: "All completed routes, fare amounts, app vs cash passenger split.",
-    icon: MapPin,       color: "text-green",   endpoint: "/admin/statements/routes",            roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: MapPin,       color: "text-green",   endpoint: "/admin/statements/routes",            roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "refunds",        label: "Refunds Report",
     description: "All processed refunds with amounts, requestor, and resolution notes.",
-    icon: RotateCcw,    color: "text-yellow",  endpoint: "/admin/statements/refunds",           roles: ["finance","cfo","ceo","superadmin"], printable: true,
+    icon: RotateCcw,    color: "text-yellow",  endpoint: "/admin/statements/refunds",           roles: ["admin","finance","cfo","ceo","superadmin"], printable: true,
   },
   {
     key: "kyc-decisions",  label: "KYC Decisions Log",
     description: "All KYC submissions, review decisions, rejection reasons, and reviewers.",
-    icon: Star,         color: "text-cyan",    endpoint: "/admin/statements/kyc-decisions",     roles: ["cfo","ceo","superadmin"],           printable: true,
+    icon: Star,         color: "text-cyan",    endpoint: "/admin/statements/kyc-decisions",     roles: ["finance","cfo","ceo","superadmin"],         printable: true,
   },
   {
     key: "audit-export",   label: "Audit Log Export",
     description: "Full audit trail of all admin actions — CEO and Superadmin only.",
-    icon: Shield,       color: "text-red",     endpoint: "/admin/statements/audit-export",      roles: ["ceo","superadmin"],                 printable: true,
+    icon: Shield,       color: "text-red",     endpoint: "/admin/statements/audit-export",      roles: ["ceo","superadmin"],                         printable: true,
   },
 ];
 
@@ -511,7 +511,10 @@ export default function StatementsPage() {
     finally { setHistoryLoading(false); }
   }, []);
 
-  const availableStatements = STATEMENTS.filter(s => s.roles.includes(userRole));
+  // Fall back to showing all statements if the role isn't explicitly listed
+  const availableStatements = userRole
+    ? STATEMENTS.filter(s => s.roles.includes(userRole))
+    : STATEMENTS;
 
   return (
     <AdminShell title="Statements & Reports">
@@ -565,8 +568,9 @@ export default function StatementsPage() {
           <div className="space-y-2">
             {availableStatements.length === 0 ? (
               <Card>
-                <div className="flex items-center justify-center py-8 gap-2">
-                  <Spinner /> <p className="text-textMuted text-sm">Loading…</p>
+                <div className="flex flex-col items-center justify-center py-10 gap-2">
+                  <p className="text-textMuted font-bold">No statements available for your role</p>
+                  <p className="text-textDim text-xs">Contact a Superadmin to adjust your permissions.</p>
                 </div>
               </Card>
             ) : availableStatements.map(stmt => {

@@ -5,25 +5,42 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Select } from "@/components/ui";
 import { api, Driver } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff } from "lucide-react";
+import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 
 const KYC_TONE: Record<string, any> = { approved: "green", pending: "yellow", rejected: "red" };
 
 // ── QR code modal ─────────────────────────────────────────────────────────────
 
-function QrModal({ driver, onClose }: { driver: Driver; onClose: () => void }) {
+function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: () => void; onQrGenerated: (qrCode: string) => void }) {
+  const [currentQr, setCurrentQr] = useState(driver.qr_code);
   const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [generating, setGenerating] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
   // qr_code may be a Cloudinary/HTTP URL, a data: URI, or raw base64 without prefix
   const qrSrc = (() => {
-    const v = driver.qr_code;
+    const v = currentQr;
     if (!v) return "";
     if (v.startsWith("data:") || v.startsWith("http")) return v;
-    // raw base64 — add PNG prefix
     return `data:image/png;base64,${v}`;
   })();
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await api.generateDriverQR(driver.user_id);
+      const newQr = res.data.qr_code;
+      setCurrentQr(newQr);
+      setImgStatus("loading");
+      onQrGenerated(newQr);
+      toast.success("QR code generated");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate QR code");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const safeName = driver.full_name.replace(/[^a-zA-Z0-9]/g, "-");
 
@@ -129,9 +146,18 @@ function QrModal({ driver, onClose }: { driver: Driver; onClose: () => void }) {
               </div>
             )}
             {imgStatus === "error" || !qrSrc ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-50 p-4">
                 <ImageOff size={24} className="text-gray-400" />
-                <p className="text-gray-400 text-xs">QR code unavailable</p>
+                <p className="text-gray-500 text-xs text-center font-medium">
+                  {!qrSrc ? "No QR code yet" : "Failed to load QR code"}
+                </p>
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
+                  {generating ? <RefreshCw size={11} className="animate-spin" /> : <QrCode size={11} />}
+                  {generating ? "Generating…" : "Generate QR"}
+                </button>
               </div>
             ) : (
               <img
@@ -161,13 +187,13 @@ function QrModal({ driver, onClose }: { driver: Driver; onClose: () => void }) {
             variant="secondary"
             className="flex-1 justify-center"
             onClick={handleDownload}
-            disabled={!qrSrc || imgStatus === "error"}>
+            disabled={!qrSrc || imgStatus === "error" || generating}>
             <Download size={13} /> Download PNG
           </Button>
           <Button
             className="flex-1 justify-center"
             onClick={handlePrint}
-            disabled={!qrSrc || imgStatus === "error"}>
+            disabled={!qrSrc || imgStatus === "error" || generating}>
             <Printer size={13} /> Print
           </Button>
         </div>
@@ -335,11 +361,9 @@ export default function DriversPage() {
                         <CheckCircle size={13} /> Verify
                       </Button>
                     )}
-                    {d.qr_code && (
-                      <Button variant="ghost" onClick={() => setQrDriver(d)} title="Download / Print QR code">
-                        <QrCode size={13} />
-                      </Button>
-                    )}
+                    <Button variant="ghost" onClick={() => setQrDriver(d)} title={d.qr_code ? "View / Print QR code" : "Generate QR code"}>
+                      <QrCode size={13} className={d.qr_code ? "" : "text-textDim"} />
+                    </Button>
                     <Link href={`/admin/drivers/${d.user_id}`}>
                       <Button variant="ghost">
                         <ExternalLink size={13} /> View
@@ -353,7 +377,16 @@ export default function DriversPage() {
         )}
       </div>
 
-      {qrDriver && <QrModal driver={qrDriver} onClose={() => setQrDriver(null)} />}
+      {qrDriver && (
+        <QrModal
+          driver={qrDriver}
+          onClose={() => setQrDriver(null)}
+          onQrGenerated={(qrCode) => {
+            setDrivers(prev => prev.map(d => d.user_id === qrDriver.user_id ? { ...d, qr_code: qrCode } : d));
+            setQrDriver(prev => prev ? { ...prev, qr_code: qrCode } : null);
+          }}
+        />
+      )}
     </AdminShell>
   );
 }

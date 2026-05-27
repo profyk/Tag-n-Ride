@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/utils";
 import {
   Eye, CheckCircle, XCircle, Clock, AlertTriangle,
   ZoomIn, Download, ChevronLeft, ChevronRight, X,
-  ImageOff, RefreshCw, ExternalLink, User,
+  ImageOff, RefreshCw, ExternalLink, User, Trash2,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -18,7 +18,7 @@ function cldTransform(url: string | undefined, transforms: string): string {
   if (url.includes("cloudinary.com")) {
     return url.replace("/upload/", `/upload/${transforms}/`);
   }
-  return url; // non-cloudinary URL — return as-is
+  return url;
 }
 
 const thumb  = (url?: string) => cldTransform(url, "w_80,h_80,c_fill,q_auto,f_auto");
@@ -165,7 +165,6 @@ function Lightbox({
         onClick={e => e.stopPropagation()}
       />
 
-      {/* Thumbnails strip */}
       {images.length > 1 && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10" onClick={e => e.stopPropagation()}>
           {images.map((img, i) => (
@@ -195,12 +194,11 @@ export default function KYCPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [rejectModal, setRejectModal] = useState<KYCDocument | null>(null);
   const [rejectReason, setRejectReason] = useState("");
-  const [approving, setApproving] = useState(false);
+  const [approving, setApproving] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  const [deletingDocs, setDeletingDocs] = useState(false);
 
-  // Active image tab in detail modal: 0=selfie, 1=front, 2=back
   const [imageTab, setImageTab] = useState(0);
-  // Lightbox state
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
@@ -211,7 +209,6 @@ export default function KYCPage() {
 
   useEffect(() => { load(); }, []);
 
-  // Keyboard shortcuts when detail modal is open
   useEffect(() => {
     if (!viewDoc || lightboxOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -226,7 +223,7 @@ export default function KYCPage() {
   const handleView = async (doc: KYCDocument) => {
     setImageTab(0);
     setLoadingDetail(true);
-    setViewDoc(doc); // open modal immediately with list data
+    setViewDoc(doc);
     try {
       const res = await api.kycDetail(doc.user_id);
       setViewDoc(res.data);
@@ -235,14 +232,14 @@ export default function KYCPage() {
   };
 
   const handleApprove = async (doc: KYCDocument) => {
-    setApproving(true);
+    setApproving(doc.user_id);
     try {
       await api.kycReview(doc.user_id, "approve");
       toast.success("KYC approved — driver verified");
       setViewDoc(null);
       load();
     } catch (e: any) { toast.error(e.message); }
-    finally { setApproving(false); }
+    finally { setApproving(null); }
   };
 
   const handleReject = async () => {
@@ -257,6 +254,18 @@ export default function KYCPage() {
     finally { setRejecting(false); }
   };
 
+  const handleDeleteDocuments = async (doc: KYCDocument) => {
+    if (!confirm(`Delete all KYC documents for ${doc.full_name} from Cloudinary storage? This cannot be undone.`)) return;
+    setDeletingDocs(true);
+    try {
+      await api.deleteKycDocuments(doc.user_id);
+      toast.success("Documents deleted from Cloudinary");
+      setViewDoc(null);
+      load();
+    } catch (e: any) { toast.error(e.message || "Failed to delete documents"); }
+    finally { setDeletingDocs(false); }
+  };
+
   const filtered = docs.filter((d) => filter === "all" || d.status === filter);
   const pendingDocs = docs.filter((d) => d.status === "pending");
   const oldestWait = pendingDocs.length > 0
@@ -266,7 +275,6 @@ export default function KYCPage() {
     ? Math.round(pendingDocs.reduce((s, d) => s + waitDays(d.submitted_at), 0) / pendingDocs.length)
     : 0;
 
-  // Build image list for the lightbox from the current detail doc
   const lightboxImages = viewDoc
     ? [
         viewDoc.selfie_url       ? { src: viewDoc.selfie_url,        label: "Selfie" }         : null,
@@ -343,6 +351,7 @@ export default function KYCPage() {
               .map((doc) => {
                 const days = waitDays(doc.submitted_at);
                 const thumbSrc = thumb(doc.selfie_url);
+                const isApprovingThis = approving === doc.user_id;
                 return (
                   <Tr key={doc.id}>
                     {/* Selfie thumbnail */}
@@ -378,11 +387,30 @@ export default function KYCPage() {
                     </Td>
                     <Td className="text-textMuted text-xs">{doc.reviewed_by || (doc.reviewed_at ? formatDate(doc.reviewed_at) : "—")}</Td>
                     <Td>
-                      <Button
-                        variant={doc.status === "pending" ? "secondary" : "ghost"}
-                        onClick={() => handleView(doc)}>
-                        <Eye size={12} /> {doc.status === "pending" ? "Review" : "View"}
-                      </Button>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {doc.status === "pending" && (
+                          <>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleApprove(doc)}
+                              loading={isApprovingThis}
+                              className="text-green border-green/20 bg-green/5 hover:bg-green/10">
+                              <CheckCircle size={12} /> Approve
+                            </Button>
+                            <Button
+                              variant="danger"
+                              onClick={() => setRejectModal(doc)}>
+                              <XCircle size={12} /> Reject
+                            </Button>
+                          </>
+                        )}
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleView(doc)}
+                          title="View documents">
+                          <Eye size={12} /> View
+                        </Button>
+                      </div>
                     </Td>
                   </Tr>
                 );
@@ -397,13 +425,12 @@ export default function KYCPage() {
           className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={() => setViewDoc(null)}>
           <div
-            className="bg-bg2 border border-border rounded-2xl w-full max-w-3xl shadow-2xl max-h-[92vh] overflow-y-auto"
+            className="bg-bg2 border border-border rounded-2xl w-full max-w-3xl shadow-2xl max-h-[92vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}>
 
             {/* Modal header */}
-            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-border">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-border flex-shrink-0">
               <div className="flex items-center gap-3">
-                {/* Small selfie in header */}
                 {viewDoc.selfie_url ? (
                   <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-border flex-shrink-0">
                     <img src={thumb(viewDoc.selfie_url)} alt="Selfie" className="w-full h-full object-cover" />
@@ -419,17 +446,15 @@ export default function KYCPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Badge label={viewDoc.status} tone={TONE(viewDoc.status)} />
-                  <span className="text-textDim text-xs">
-                    {formatDate(viewDoc.submitted_at)}
-                    {viewDoc.status === "pending" && (
-                      <span className={`ml-2 font-bold ${waitDays(viewDoc.submitted_at) > 3 ? "text-red" : "text-yellow"}`}>
-                        · {waitDays(viewDoc.submitted_at)}d waiting
-                      </span>
-                    )}
-                  </span>
-                </div>
+                <Badge label={viewDoc.status} tone={TONE(viewDoc.status)} />
+                <span className="text-textDim text-xs hidden sm:block">
+                  {formatDate(viewDoc.submitted_at)}
+                  {viewDoc.status === "pending" && (
+                    <span className={`ml-2 font-bold ${waitDays(viewDoc.submitted_at) > 3 ? "text-red" : "text-yellow"}`}>
+                      · {waitDays(viewDoc.submitted_at)}d waiting
+                    </span>
+                  )}
+                </span>
                 <button
                   onClick={() => setViewDoc(null)}
                   className="text-textDim hover:text-text transition-colors p-1 rounded-lg hover:bg-bg3">
@@ -438,7 +463,30 @@ export default function KYCPage() {
               </div>
             </div>
 
-            <div className="p-6 space-y-5">
+            {/* Action bar — always visible at top for pending */}
+            {viewDoc.status === "pending" && (
+              <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-bg3/50 flex-shrink-0">
+                <Button
+                  className="flex-1 justify-center"
+                  onClick={() => handleApprove(viewDoc)}
+                  loading={approving === viewDoc.user_id}>
+                  <CheckCircle size={13} /> Approve & Verify Driver
+                </Button>
+                <Button
+                  variant="danger"
+                  className="flex-1 justify-center"
+                  onClick={() => { setRejectModal(viewDoc); setViewDoc(null); }}>
+                  <XCircle size={13} /> Reject
+                </Button>
+                <p className="text-textDim text-[10px] hidden lg:block">
+                  <kbd className="px-1 py-0.5 bg-bg border border-border rounded text-[9px]">A</kbd> approve ·{" "}
+                  <kbd className="px-1 py-0.5 bg-bg border border-border rounded text-[9px]">R</kbd> reject
+                </p>
+              </div>
+            )}
+
+            {/* Scrollable body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
 
               {loadingDetail && (
                 <div className="flex items-center justify-center py-4">
@@ -475,7 +523,6 @@ export default function KYCPage() {
                       className={`w-full ${imageTab === 0 ? "aspect-square max-h-96" : "aspect-[4/3] max-h-80"}`}
                       onClick={() => lbIdx >= 0 && openLightbox(lbIdx)}
                     />
-                    {/* Overlay controls */}
                     {active?.src && (
                       <div className="absolute top-3 right-3 flex gap-2">
                         <button
@@ -517,7 +564,7 @@ export default function KYCPage() {
                     <button
                       key={t.key}
                       onClick={() => setImageTab(i)}
-                      className={`flex flex-col items-center gap-1.5 flex-1 transition-all`}>
+                      className="flex flex-col items-center gap-1.5 flex-1 transition-all">
                       <div className={`w-full aspect-square rounded-xl overflow-hidden border-2 transition-all ${
                         imageTab === i ? "border-cyan ring-1 ring-cyan/30" : "border-border opacity-60 hover:opacity-100"
                       }`}>
@@ -531,7 +578,6 @@ export default function KYCPage() {
                 </div>
               )}
 
-              {/* No images at all */}
               {imageTabs.length === 0 && !loadingDetail && (
                 <div className="flex flex-col items-center justify-center py-12 gap-3">
                   <ImageOff size={32} className="text-textDim" />
@@ -540,7 +586,7 @@ export default function KYCPage() {
                 </div>
               )}
 
-              {/* Rejection reason (if previously rejected) */}
+              {/* Rejection reason */}
               {viewDoc.rejection_reason && (
                 <div className="flex items-start gap-2 bg-red/10 border border-red/20 rounded-xl p-4">
                   <XCircle size={14} className="text-red flex-shrink-0 mt-0.5" />
@@ -551,38 +597,28 @@ export default function KYCPage() {
                 </div>
               )}
 
-              {/* Keyboard hint */}
-              {viewDoc.status === "pending" && (
-                <p className="text-textDim text-[10px] text-center">
-                  Keyboard shortcuts: <kbd className="px-1.5 py-0.5 bg-bg3 border border-border rounded text-[10px]">A</kbd> Approve ·{" "}
-                  <kbd className="px-1.5 py-0.5 bg-bg3 border border-border rounded text-[10px]">R</kbd> Reject ·{" "}
-                  <kbd className="px-1.5 py-0.5 bg-bg3 border border-border rounded text-[10px]">Esc</kbd> Close
-                </p>
-              )}
-
-              {/* Actions */}
-              {viewDoc.status === "pending" && (
-                <div className="flex gap-3">
-                  <Button
-                    className="flex-1 justify-center"
-                    onClick={() => handleApprove(viewDoc)}
-                    loading={approving}>
-                    <CheckCircle size={13} /> Approve & Verify Driver
-                  </Button>
-                  <Button
-                    variant="danger"
-                    className="flex-1 justify-center"
-                    onClick={() => { setRejectModal(viewDoc); setViewDoc(null); }}>
-                    <XCircle size={13} /> Reject
-                  </Button>
-                </div>
-              )}
-
               {viewDoc.reviewed_by && (
                 <p className="text-textDim text-[10px] text-center">
                   Reviewed by <span className="font-bold text-textMuted">{viewDoc.reviewed_by}</span>
                   {viewDoc.reviewed_at && <> on {formatDate(viewDoc.reviewed_at)}</>}
                 </p>
+              )}
+
+              {/* Delete documents from Cloudinary */}
+              {(viewDoc.selfie_url || viewDoc.licence_front_url || viewDoc.licence_back_url) && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-textDim text-[10px] mb-2 font-bold uppercase tracking-widest">Danger Zone</p>
+                  <Button
+                    variant="danger"
+                    onClick={() => handleDeleteDocuments(viewDoc)}
+                    loading={deletingDocs}
+                    className="w-full justify-center">
+                    <Trash2 size={13} /> Delete Documents from Cloudinary
+                  </Button>
+                  <p className="text-textDim text-[10px] mt-2 text-center">
+                    Permanently deletes selfie, licence front, and back from Cloudinary storage. Irreversible.
+                  </p>
+                </div>
               )}
             </div>
           </div>

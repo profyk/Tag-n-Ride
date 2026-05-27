@@ -464,6 +464,10 @@ export const api = {
   kycDetail: (userId: string) => client.get<KYCDocument>(`/api/admin/kyc/${userId}`),
   kycReview: (userId: string, action: "approve" | "reject", rejection_reason?: string) =>
     client.post(`/api/admin/kyc/${userId}/review`, { action, rejection_reason }),
+  deleteKycDocuments: (userId: string) =>
+    client.delete(`/api/admin/kyc/${userId}/documents`),
+  generateDriverQR: (userId: string) =>
+    client.post<{ qr_code: string }>(`/api/admin/drivers/${userId}/generate-qr`),
 
   analytics: () =>
     client.get<{
