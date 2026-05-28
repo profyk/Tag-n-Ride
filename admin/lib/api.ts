@@ -237,13 +237,13 @@ export type Promotion = {
   description?: string;
   discount_type: string;
   discount_value: number;
-  min_ride_amount: number;
+  min_ride_amount?: number;
   max_uses?: number;
-  uses_per_user: number;
+  uses_per_user?: number;
   total_used: number;
-  active: boolean;
-  valid_from: string;
-  valid_to: string;
+  active?: boolean;
+  valid_from?: string;
+  valid_to?: string;
   expires_at?: string;
   target_role?: string;
   created_at: string;
