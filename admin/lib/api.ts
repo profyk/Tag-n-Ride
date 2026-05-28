@@ -413,6 +413,12 @@ export type DashboardStats = {
   today_revenue: number;
   today_transactions: number;
   today_signups: number;
+  yesterday_revenue: number;
+  yesterday_transactions: number;
+  yesterday_signups: number;
+  total_owners?: number;
+  active_drivers?: number;
+  verified_drivers?: number;
   suspicious_transactions: Transaction[];
   recent_transactions: Transaction[];
   pending_driver_list: {
