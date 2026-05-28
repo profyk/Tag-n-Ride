@@ -469,7 +469,7 @@ export const api = {
   generateDriverQR: (userId: string) =>
     client.post<{ qr_code: string }>(`/api/admin/drivers/${userId}/generate-qr`),
 
-  analytics: () =>
+  analytics: (range: "7d" | "30d" | "90d" = "30d") =>
     client.get<{
       daily_volume: { date: string; amount: number; count: number }[];
       weekly_revenue: { week: string; amount: number }[];
@@ -477,7 +477,9 @@ export const api = {
       transactions_by_type: { type: string; count: number; total: number }[];
       top_passengers: { name: string; txn_count: number; total_spent: number }[];
       withdrawal_trend: { date: string; amount: number; count: number }[];
-    }>("/api/admin/analytics"),
+      prev_volume?: number;
+      prev_count?: number;
+    }>(`/api/admin/analytics?range=${range}`),
 
   auditLogs: () => client.get<AuditLog[]>("/api/admin/audit-logs"),
 

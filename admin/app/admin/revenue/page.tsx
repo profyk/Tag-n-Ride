@@ -26,7 +26,7 @@ export default function RevenuePage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${BASE}/api/admin/analytics`, { headers: h() })
+    fetch(`${BASE}/api/admin/analytics?range=${range}`, { headers: h() })
       .then((r) => r.json())
       .then(setAnalytics)
       .catch(() => toast.error("Failed to load revenue data"))
@@ -125,7 +125,7 @@ export default function RevenuePage() {
             </Card>
 
             <div className="flex justify-end">
-              <Button onClick={() => toast.success("Report export queued")}>
+              <Button onClick={() => window.open(`${BASE}/api/admin/export/transactions`, "_blank")}>
                 <Download size={13} /> Export Revenue Report
               </Button>
             </div>

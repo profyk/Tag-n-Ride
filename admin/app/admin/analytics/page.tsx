@@ -41,7 +41,7 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     setLoading(true);
-    api.analytics().then((r) => setData(r.data)).finally(() => setLoading(false));
+    api.analytics(range).then((r) => setData(r.data)).finally(() => setLoading(false));
   }, [range]);
 
   if (loading) return <AdminShell title="Analytics"><Spinner /></AdminShell>;
@@ -49,8 +49,8 @@ export default function AnalyticsPage() {
   const daily = data?.daily_volume ?? [];
   const totalRevenue = daily.reduce((s: number, d: any) => s + (d.amount || 0), 0);
   const totalCount = daily.reduce((s: number, d: any) => s + (d.count || 0), 0);
-  const prevRevenue = totalRevenue * 0.88;
-  const prevCount = totalCount * 0.93;
+  const prevRevenue = data?.prev_volume ?? 0;
+  const prevCount = data?.prev_count ?? 0;
 
   const byType = data?.transactions_by_type ?? [];
   const totals = byType.reduce((s: any, t: any) => ({ ...s, [t.type]: t.total }), {} as any);
@@ -72,8 +72,8 @@ export default function AnalyticsPage() {
                 {r}
               </button>
             ))}
-            <Button variant="secondary" onClick={() => toast.success("Analytics CSV queued for download")}>
-              <Download size={13} /> Export
+            <Button variant="secondary" onClick={() => api.exportTransactions()}>
+              <Download size={13} /> Export CSV
             </Button>
           </div>
         </div>
