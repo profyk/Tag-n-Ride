@@ -137,8 +137,16 @@ ROLE_PERMISSIONS["ceo"] += [
 ]
 ROLE_PERMISSIONS["cfo"] += ["manage_refunds", "manage_limits", "view_risk"]
 
+def get_all_permissions(user: dict) -> list:
+    perms = set(ROLE_PERMISSIONS.get(user.get("role", ""), []))
+    for r in (user.get("extra_roles") or "").split(","):
+        r = r.strip()
+        if r:
+            perms.update(ROLE_PERMISSIONS.get(r, []))
+    return list(perms)
+
 def has_permission(user: dict, permission: str) -> bool:
-    return permission in ROLE_PERMISSIONS.get(user.get("role", ""), [])
+    return permission in get_all_permissions(user)
 
 def token_hash_fn(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:32]
@@ -399,7 +407,7 @@ async def get_current_user(request: Request) -> dict:
     th = token_hash_fn(token)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id,phone_number,full_name,role,is_active,email FROM users WHERE id=$1",
+            "SELECT id,phone_number,full_name,role,is_active,email,extra_roles FROM users WHERE id=$1",
             payload["sub"]
         )
         session = await conn.fetchrow(
@@ -566,6 +574,7 @@ class CreateAdminIn(BaseModel):
 
 class UpdateAdminIn(BaseModel):
     role: Optional[str] = None
+    extra_roles: Optional[list] = None
     full_name: Optional[str] = Field(default=None, min_length=2, max_length=100)
     email: Optional[str] = Field(default=None, min_length=5, max_length=100)
 
@@ -702,7 +711,8 @@ async def admin_login(body: AdminLoginIn, request: Request):
         "user": {
             "id": user["id"], "email": user["email"],
             "full_name": user["full_name"], "role": user["role"],
-            "permissions": ROLE_PERMISSIONS.get(user["role"], [])
+            "extra_roles": [r.strip() for r in (user.get("extra_roles") or "").split(",") if r.strip()],
+            "permissions": get_all_permissions(dict(user))
         }
     }
 
@@ -780,6 +790,32 @@ async def topup_legacy(_body: TopUpIn, _user: dict = Depends(get_current_user)):
         status_code=410,
         detail="Direct top-up is disabled. Use POST /api/wallet/topup/initiate to start a gateway-verified payment."
     )
+
+@api.get("/wallet/driver/{driver_user_id}")
+async def lookup_driver_by_user_id(driver_user_id: str, _: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        drv = await conn.fetchrow(
+            "SELECT d.qr_code,d.vehicle_plate,d.is_verified,d.rating_avg,d.rating_count,d.user_id FROM drivers d WHERE d.user_id=$1",
+            driver_user_id
+        )
+        if not drv:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        user = await conn.fetchrow("SELECT id,full_name,phone_number FROM users WHERE id=$1", drv["user_id"])
+    return {
+        "user_id": user["id"], "full_name": user["full_name"], "phone_number": user["phone_number"],
+        "qr_code": drv["qr_code"], "vehicle_plate": drv["vehicle_plate"],
+        "is_verified": drv["is_verified"], "rating_avg": float(drv["rating_avg"]),
+        "rating_count": drv["rating_count"],
+    }
+
+@api.get("/wallet/withdrawals")
+async def list_user_withdrawals(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM withdrawal_requests WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50",
+            user["id"]
+        )
+    return [{**dict(r), "amount": float(r["amount"] or 0), "created_at": iso(r["created_at"])} for r in rows]
 
 @api.get("/wallet/driver/qr/{code}")
 async def lookup_driver_by_qr(code: str, _: dict = Depends(get_current_user)):
@@ -1128,8 +1164,11 @@ async def admin_users(search: Optional[str] = None, admin: dict = Depends(requir
         )
     return [{**dict(r), "created_at": iso(r["created_at"])} for r in rows]
 
+class BlockUserIn(BaseModel):
+    reason: Optional[str] = None
+
 @api.post("/admin/block/{user_id}")
-async def admin_block(user_id: str, request: Request, admin: dict = Depends(require_admin)):
+async def admin_block(user_id: str, request: Request, body: BlockUserIn = BlockUserIn(), admin: dict = Depends(require_admin)):
     if not has_permission(admin, "manage_users"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
@@ -1137,8 +1176,8 @@ async def admin_block(user_id: str, request: Request, admin: dict = Depends(requ
         if not target: raise HTTPException(status_code=404, detail="User not found")
         if target["role"] in ADMIN_ROLES:
             raise HTTPException(status_code=403, detail="Cannot block admin accounts")
-        await conn.execute("UPDATE users SET is_active=FALSE WHERE id=$1", user_id)
-        await audit(conn, admin["id"], "BLOCK_USER", user_id, "user", {"name": target["full_name"]}, request.client.host)
+        await conn.execute("UPDATE users SET is_active=FALSE, ban_reason=$2 WHERE id=$1", user_id, body.reason)
+        await audit(conn, admin["id"], "BLOCK_USER", user_id, "user", {"name": target["full_name"], "reason": body.reason}, request.client.host)
     return {"ok": True}
 
 @api.post("/admin/unblock/{user_id}")
@@ -1150,7 +1189,7 @@ async def admin_unblock(user_id: str, request: Request, admin: dict = Depends(re
         if not target: raise HTTPException(status_code=404, detail="User not found")
         if target["role"] in ADMIN_ROLES:
             raise HTTPException(status_code=403, detail="Cannot unblock admin accounts this way")
-        await conn.execute("UPDATE users SET is_active=TRUE WHERE id=$1", user_id)
+        await conn.execute("UPDATE users SET is_active=TRUE, ban_reason=NULL WHERE id=$1", user_id)
         await audit(conn, admin["id"], "UNBLOCK_USER", user_id, "user", {"name": target["full_name"]}, request.client.host)
     return {"ok": True}
 
@@ -1342,6 +1381,28 @@ async def admin_kyc_review(user_id: str, body: KYCReviewIn, request: Request, ad
             await conn.execute("UPDATE drivers SET is_verified=TRUE WHERE user_id=$1", user_id)
         await audit(conn, admin["id"], f"KYC_{body.action.upper()}", user_id, "kyc", {"reason": body.rejection_reason}, request.client.host)
     return {"ok": True}
+
+@api.delete("/admin/kyc/{user_id}/documents")
+async def admin_kyc_delete_documents(user_id: str, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "review_kyc"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM kyc_documents WHERE user_id=$1", user_id)
+        await audit(conn, admin["id"], "KYC_DOCUMENTS_DELETED", user_id, "kyc", {}, request.client.host)
+    return {"ok": True}
+
+@api.post("/admin/drivers/{user_id}/generate-qr")
+async def admin_generate_driver_qr(user_id: str, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_drivers"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        drv = await conn.fetchrow("SELECT id FROM drivers WHERE user_id=$1", user_id)
+        if not drv:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        new_qr = generate_qr_code()
+        await conn.execute("UPDATE drivers SET qr_code=$1 WHERE user_id=$2", new_qr, user_id)
+        await audit(conn, admin["id"], "GENERATE_DRIVER_QR", user_id, "driver", {"new_qr": new_qr}, request.client.host)
+    return {"ok": True, "qr_code": new_qr}
 
 # ── Admin: Analytics ─────────────────────────────────────────
 @api.get("/admin/analytics")
@@ -1543,9 +1604,15 @@ async def export_users(request: Request, admin: dict = Depends(require_admin)):
 async def superadmin_list_admins(admin: dict = Depends(require_superadmin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT u.id,u.full_name,u.email,u.role,u.is_active,u.last_login,u.created_at,u.created_by,cb.full_name as created_by_name FROM users u LEFT JOIN users cb ON cb.id=u.created_by WHERE u.role IN ('admin','superadmin','finance','support','ceo','cto','cfo') ORDER BY u.created_at DESC"
+            "SELECT u.id,u.full_name,u.email,u.role,u.extra_roles,u.is_active,u.last_login,u.created_at,u.created_by,cb.full_name as created_by_name FROM users u LEFT JOIN users cb ON cb.id=u.created_by WHERE u.role IN ('admin','superadmin','finance','support','ceo','cto','cfo') ORDER BY u.created_at DESC"
         )
-    return [{**dict(r), "last_login": iso(r["last_login"]) if r["last_login"] else None, "created_at": iso(r["created_at"])} for r in rows]
+    return [{
+        **{k: v for k, v in dict(r).items() if k not in ("last_login","created_at")},
+        "last_login": iso(r["last_login"]) if r["last_login"] else None,
+        "created_at": iso(r["created_at"]),
+        "extra_roles": [x.strip() for x in (r["extra_roles"] or "").split(",") if x.strip()],
+        "permissions": get_all_permissions(dict(r)),
+    } for r in rows]
 
 @api.post("/superadmin/create-admin")
 async def superadmin_create_admin(body: CreateAdminIn, request: Request, admin: dict = Depends(require_superadmin)):
@@ -1575,6 +1642,9 @@ async def superadmin_update_admin(user_id: str, body: UpdateAdminIn, request: Re
             ex = await conn.fetchrow("SELECT id FROM users WHERE email=$1 AND id!=$2", body.email.lower(), user_id)
             if ex: raise HTTPException(status_code=400, detail="Email already taken")
             changes["email"] = body.email.lower()
+        if body.extra_roles is not None:
+            valid_extra = [r for r in body.extra_roles if r in ADMIN_ROLES and r != (body.role or target["role"])]
+            changes["extra_roles"] = ",".join(valid_extra)
         if not changes: return {"ok": True, "message": "No changes"}
         set_clauses = []; params = []
         for k, v in changes.items():
@@ -1820,6 +1890,279 @@ async def owner_toggle_driver_mode(body: dict, user: dict = Depends(require_owne
         await conn.execute("UPDATE wallets SET driver_mode_active=$1 WHERE user_id=$2", active, user["id"])
     return {"ok": True, "driver_mode_active": active}
 
+# ── Owner cashup management ──────────────────────────────────
+
+class SetTargetIn(BaseModel):
+    daily_target: float
+
+class OwnerBankIn(BaseModel):
+    bank_name: str
+    account_number: str
+    account_name: Optional[str] = None
+
+class CashupMethodIn(BaseModel):
+    method: str  # "wallet" or "bank"
+
+@api.post("/owner/drivers/{driver_user_id}/set-target")
+async def owner_set_target(driver_user_id: str, body: SetTargetIn, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
+        if not link:
+            raise HTTPException(status_code=404, detail="Driver not in fleet")
+        await conn.execute("UPDATE owner_drivers SET daily_target=$1 WHERE owner_id=$2 AND driver_user_id=$3",
+                           body.daily_target, owner["id"], driver_user_id)
+    return {"ok": True, "daily_target": body.daily_target}
+
+@api.post("/owner/drivers/{driver_user_id}/confirm")
+async def owner_confirm_driver(driver_user_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
+        if not link:
+            raise HTTPException(status_code=404, detail="Driver not in fleet")
+        await conn.execute("UPDATE owner_drivers SET confirmed=TRUE WHERE owner_id=$1 AND driver_user_id=$2",
+                           owner["id"], driver_user_id)
+    return {"ok": True}
+
+@api.post("/owner/drivers/{driver_user_id}/unconfirm")
+async def owner_unconfirm_driver(driver_user_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
+        if not link:
+            raise HTTPException(status_code=404, detail="Driver not in fleet")
+        await conn.execute("UPDATE owner_drivers SET confirmed=FALSE WHERE owner_id=$1 AND driver_user_id=$2",
+                           owner["id"], driver_user_id)
+    return {"ok": True}
+
+@api.patch("/owner/cashup-method")
+async def owner_set_cashup_method(body: CashupMethodIn, user: dict = Depends(require_owner)):
+    if body.method not in ("wallet", "bank"):
+        raise HTTPException(status_code=400, detail="Method must be 'wallet' or 'bank'")
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE fleet_owners SET cashup_method=$1 WHERE user_id=$2", body.method, user["id"])
+    return {"ok": True, "method": body.method}
+
+@api.post("/owner/bank-account")
+async def owner_save_bank(body: OwnerBankIn, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE fleet_owners SET bank_name=$1, account_number=$2, account_name=$3 WHERE user_id=$4",
+            body.bank_name, body.account_number, body.account_name, user["id"]
+        )
+    return {"ok": True}
+
+@api.get("/owner/bank-account")
+async def owner_get_bank(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT bank_name, account_number, account_name, cashup_method FROM fleet_owners WHERE user_id=$1", user["id"])
+        if not row:
+            raise HTTPException(status_code=404, detail="Owner record not found")
+    return {"bank_name": row["bank_name"], "account_number": row["account_number"],
+            "account_name": row["account_name"], "cashup_method": row["cashup_method"] or "wallet"}
+
+@api.get("/owner/outstanding")
+async def owner_outstanding(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT ob.*, u.full_name as driver_name FROM outstanding_balances ob
+            JOIN users u ON u.id=ob.driver_user_id
+            WHERE ob.owner_user_id=$1 AND ob.status='outstanding'
+            ORDER BY ob.created_at DESC
+        """, user["id"])
+    return [{"id": r["id"], "driver_user_id": r["driver_user_id"], "driver_name": r["driver_name"],
+             "amount": float(r["amount"]), "reason": r["reason"], "created_at": iso(r["created_at"])} for r in rows]
+
+@api.post("/owner/outstanding/{outstanding_id}/cancel")
+async def owner_cancel_outstanding(outstanding_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT id FROM outstanding_balances WHERE id=$1 AND owner_user_id=$2", outstanding_id, user["id"])
+        if not row:
+            raise HTTPException(status_code=404, detail="Outstanding record not found")
+        await conn.execute("UPDATE outstanding_balances SET status='cancelled', cancelled_at=NOW(), cancelled_by=$1 WHERE id=$2",
+                           user["id"], outstanding_id)
+    return {"ok": True}
+
+@api.get("/owner/cashup-history")
+async def owner_cashup_history(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT cr.*, u.full_name as driver_name FROM cashup_records cr
+            JOIN users u ON u.id=cr.driver_user_id
+            WHERE cr.owner_user_id=$1
+            ORDER BY cr.created_at DESC LIMIT 100
+        """, user["id"])
+    return [{"id": r["id"], "driver_user_id": r["driver_user_id"], "driver_name": r["driver_name"],
+             "target_amount": float(r["target_amount"] or 0), "earned_amount": float(r["earned_amount"] or 0),
+             "cashup_amount": float(r["cashup_amount"] or 0), "shortfall": float(r["shortfall"] or 0),
+             "driver_profit": float(r["driver_profit"] or 0), "cashup_method": r["cashup_method"],
+             "payout_fee": float(r["payout_fee"] or 0), "status": r["status"],
+             "created_at": iso(r["created_at"])} for r in rows]
+
+# ── Driver cashup v2 endpoints ───────────────────────────────
+
+@api.get("/driver/cashup-status")
+async def driver_cashup_status(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        link = await conn.fetchrow("""
+            SELECT od.owner_id, od.daily_target, od.confirmed, fo.user_id as owner_user_id,
+                   u.full_name as owner_name, fo.cashup_method
+            FROM owner_drivers od
+            JOIN fleet_owners fo ON fo.id=od.owner_id
+            JOIN users u ON u.id=fo.user_id
+            WHERE od.driver_user_id=$1
+            LIMIT 1
+        """, user["id"])
+        if not link:
+            return {"has_owner": False}
+        today_earned = await conn.fetchval(
+            "SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE",
+            user["id"]
+        )
+        today_earned = float(today_earned or 0)
+        daily_target = float(link["daily_target"] or 0)
+        cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
+        driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
+        shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
+        outstanding = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM outstanding_balances WHERE driver_user_id=$1 AND status='outstanding'",
+            user["id"]
+        )
+    return {
+        "has_owner": True, "owner_user_id": link["owner_user_id"], "owner_name": link["owner_name"],
+        "daily_target": daily_target, "today_earned": today_earned,
+        "cashup_amount": cashup_amount, "driver_profit": driver_profit, "shortfall": shortfall,
+        "is_confirmed": link["confirmed"] or False, "cashup_method": link["cashup_method"] or "wallet",
+        "outstanding_balance": float(outstanding or 0),
+    }
+
+@api.get("/driver/cashup-destination")
+async def driver_cashup_destination(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        link = await conn.fetchrow("""
+            SELECT od.confirmed, fo.cashup_method, fo.bank_name, fo.account_number, fo.account_name
+            FROM owner_drivers od
+            JOIN fleet_owners fo ON fo.id=od.owner_id
+            WHERE od.driver_user_id=$1
+            LIMIT 1
+        """, user["id"])
+        if not link:
+            raise HTTPException(status_code=404, detail="No owner linked")
+        account = None
+        if link["bank_name"]:
+            account = {"bank_name": link["bank_name"], "account_number": link["account_number"],
+                       "account_name": link["account_name"]}
+    return {"confirmed": link["confirmed"] or False, "method": link["cashup_method"] or "wallet", "account": account}
+
+class DriverCashupV2In(BaseModel):
+    owner_user_id: str
+
+@api.post("/driver/cashup/v2")
+async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        link = await conn.fetchrow("""
+            SELECT od.owner_id, od.daily_target, od.confirmed, fo.user_id as owner_user_id,
+                   fo.cashup_method, fo.bank_name, fo.account_number, fo.account_name
+            FROM owner_drivers od
+            JOIN fleet_owners fo ON fo.id=od.owner_id
+            WHERE od.driver_user_id=$1 AND fo.user_id=$2
+        """, user["id"], body.owner_user_id)
+        if not link:
+            raise HTTPException(status_code=404, detail="Owner not linked")
+        today_earned = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE",
+            user["id"]
+        ) or 0)
+        if today_earned <= 0:
+            raise HTTPException(status_code=400, detail="No earnings to cash up today")
+        daily_target = float(link["daily_target"] or 0)
+        cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
+        driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
+        shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
+        method = link["cashup_method"] or "wallet"
+        payout_fee = 3.50 if method == "bank" else 0.0
+        net_cashup = cashup_amount - payout_fee if method == "bank" else cashup_amount
+        async with conn.transaction():
+            driver_wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"])
+            if not driver_wallet or float(driver_wallet["balance"]) < cashup_amount:
+                raise HTTPException(status_code=400, detail="Insufficient wallet balance for cashup")
+            await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", cashup_amount, user["id"])
+            if method == "wallet":
+                await conn.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2", net_cashup, body.owner_user_id)
+            record_id = str(uuid.uuid4())
+            await conn.execute("""
+                INSERT INTO cashup_records (id,owner_user_id,driver_user_id,target_amount,earned_amount,
+                    cashup_amount,shortfall,driver_profit,cashup_method,payout_fee,status)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed')
+            """, record_id, body.owner_user_id, user["id"], daily_target, today_earned,
+                net_cashup, shortfall, driver_profit, method, payout_fee)
+            if shortfall > 0:
+                await conn.execute("""
+                    INSERT INTO outstanding_balances (id,owner_user_id,driver_user_id,amount,reason,status)
+                    VALUES ($1,$2,$3,$4,'Daily target shortfall','outstanding')
+                """, str(uuid.uuid4()), body.owner_user_id, user["id"], shortfall)
+    return {"ok": True, "cashup_amount": net_cashup, "driver_profit": driver_profit,
+            "shortfall": shortfall, "method": method, "payout_fee": payout_fee}
+
+@api.get("/driver/outstanding")
+async def driver_outstanding(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT ob.*, u.full_name as owner_name FROM outstanding_balances ob
+            JOIN users u ON u.id=ob.owner_user_id
+            WHERE ob.driver_user_id=$1 AND ob.status='outstanding'
+            ORDER BY ob.created_at DESC
+        """, user["id"])
+    return [{"id": r["id"], "owner_user_id": r["owner_user_id"], "owner_name": r["owner_name"],
+             "amount": float(r["amount"]), "reason": r["reason"], "created_at": iso(r["created_at"])} for r in rows]
+
+class PayOutstandingIn(BaseModel):
+    outstanding_id: str
+
+@api.post("/driver/outstanding/pay")
+async def driver_pay_outstanding(body: PayOutstandingIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        ob = await conn.fetchrow("SELECT * FROM outstanding_balances WHERE id=$1 AND driver_user_id=$2 AND status='outstanding'",
+                                 body.outstanding_id, user["id"])
+        if not ob:
+            raise HTTPException(status_code=404, detail="Outstanding record not found")
+        async with conn.transaction():
+            wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"])
+            if float(wallet["balance"]) < float(ob["amount"]):
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+            await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", ob["amount"], user["id"])
+            await conn.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2", ob["amount"], ob["owner_user_id"])
+            await conn.execute("UPDATE outstanding_balances SET status='paid', paid_at=NOW() WHERE id=$1", body.outstanding_id)
+    return {"ok": True}
+
+@api.get("/driver/cashup-history")
+async def driver_cashup_history(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT cr.*, u.full_name as owner_name FROM cashup_records cr
+            JOIN users u ON u.id=cr.owner_user_id
+            WHERE cr.driver_user_id=$1
+            ORDER BY cr.created_at DESC LIMIT 100
+        """, user["id"])
+    return [{"id": r["id"], "owner_user_id": r["owner_user_id"], "owner_name": r["owner_name"],
+             "target_amount": float(r["target_amount"] or 0), "earned_amount": float(r["earned_amount"] or 0),
+             "cashup_amount": float(r["cashup_amount"] or 0), "shortfall": float(r["shortfall"] or 0),
+             "driver_profit": float(r["driver_profit"] or 0), "cashup_method": r["cashup_method"],
+             "payout_fee": float(r["payout_fee"] or 0), "status": r["status"],
+             "created_at": iso(r["created_at"])} for r in rows]
 
 # ════════════════════════════════════════════════════════════════
 # NEW FEATURES — All 10 sections
@@ -2261,9 +2604,11 @@ async def create_new_tables():
                         "INSERT INTO platform_accounts (account,balance,description) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
                         acct, bal, desc
                     )
-                # Seed danger PIN
+                # Seed danger PIN — only on first run (ON CONFLICT DO NOTHING keeps existing value)
+                initial_pin = secrets.token_hex(4)  # 8 hex chars, never stored in source
                 await conn.execute(
-                    "INSERT INTO system_config (key,value,description) VALUES ('danger_pin','1019890020','PIN required for destructive actions') ON CONFLICT DO NOTHING"
+                    "INSERT INTO system_config (key,value,description) VALUES ('danger_pin',$1,'PIN required for destructive actions') ON CONFLICT DO NOTHING",
+                    initial_pin
                 )
                 # Seed default config if empty
                 count = await conn.fetchval("SELECT COUNT(*) FROM system_config")
@@ -2288,6 +2633,18 @@ async def create_new_tables():
                             "INSERT INTO system_config (key,value,description) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
                             key, value, desc
                         )
+                # owner_drivers cashup columns
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS daily_target NUMERIC(14,2) DEFAULT 0")
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS confirmed BOOLEAN DEFAULT FALSE")
+                # fleet_owners cashup method + bank details
+                await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS cashup_method TEXT DEFAULT 'wallet'")
+                await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS bank_name TEXT")
+                await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS account_number TEXT")
+                await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS account_name TEXT")
+                # users ban_reason for block tracking
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT")
+                # admin multiple roles (extra_roles stored as comma-separated)
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles TEXT DEFAULT ''")
                 # Migrate kyc_documents — add new columns if they don't exist
                 await conn.execute("ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS selfie_public_id TEXT")
                 await conn.execute("ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS licence_public_id TEXT")
@@ -3695,6 +4052,12 @@ async def transfer_v2(body: TransferIn, user: dict = Depends(get_current_user)):
         if not drv:
             raise HTTPException(status_code=404, detail="Driver not found")
         driver_user = await conn.fetchrow("SELECT phone_number, full_name FROM users WHERE id=$1", body.driver_user_id)
+        passenger_row = await conn.fetchrow("SELECT is_test FROM users WHERE id=$1", user["id"])
+        driver_row = await conn.fetchrow("SELECT is_test FROM users WHERE id=$1", body.driver_user_id)
+        passenger_is_test = passenger_row["is_test"] if passenger_row else False
+        driver_is_test = driver_row["is_test"] if driver_row else False
+        if passenger_is_test != driver_is_test:
+            raise HTTPException(status_code=400, detail="Test accounts can only transact with other test accounts")
         async with conn.transaction():
             sender_w = await conn.fetchrow(
                 "SELECT balance,is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
@@ -5845,7 +6208,7 @@ async def admin_list_wallets(
     async with pool.acquire() as conn:
         q = """
             SELECT u.id, u.full_name, u.phone_number, u.role, u.is_active,
-                   w.balance, w.is_frozen, w.freeze_reason, w.updated_at
+                   w.balance, w.is_frozen, w.frozen_reason, w.updated_at
             FROM users u
             JOIN wallets w ON w.user_id=u.id
             WHERE u.is_test IS NOT TRUE
@@ -5864,7 +6227,7 @@ async def admin_list_wallets(
             "user_id": r["id"], "full_name": r["full_name"],
             "phone_number": r["phone_number"], "role": r["role"],
             "is_active": r["is_active"], "balance": float(r["balance"] or 0),
-            "is_frozen": r["is_frozen"], "freeze_reason": r["freeze_reason"],
+            "is_frozen": r["is_frozen"], "freeze_reason": r["frozen_reason"],
             "updated_at": iso(r["updated_at"]),
         }
         for r in rows
@@ -5881,7 +6244,7 @@ async def admin_freeze_wallet(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         await conn.execute(
-            "UPDATE wallets SET is_frozen=TRUE, freeze_reason=$2 WHERE user_id=$1",
+            "UPDATE wallets SET is_frozen=TRUE, frozen_reason=$2, frozen_at=NOW() WHERE user_id=$1",
             user_id, body.reason
         )
         await audit(conn, admin["id"], "freeze_wallet", user_id, "user",
@@ -5897,7 +6260,7 @@ async def admin_unfreeze_wallet(user_id: str, admin: dict = Depends(require_admi
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         await conn.execute(
-            "UPDATE wallets SET is_frozen=FALSE, freeze_reason=NULL WHERE user_id=$1", user_id
+            "UPDATE wallets SET is_frozen=FALSE, frozen_reason=NULL, frozen_at=NULL WHERE user_id=$1", user_id
         )
         await audit(conn, admin["id"], "unfreeze_wallet", user_id, "user",
                     {"target_name": user["full_name"]})

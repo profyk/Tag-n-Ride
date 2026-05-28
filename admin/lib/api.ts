@@ -73,6 +73,8 @@ export type AdminUser = {
   full_name: string;
   email: string;
   role: string;
+  extra_roles?: string[];
+  permissions?: string[];
   is_active: boolean;
   last_login?: string;
   created_at: string;
@@ -427,7 +429,7 @@ export const api = {
   login: (email: string, password: string) =>
     client.post<{
       token: string;
-      user: { id: string; email: string; full_name: string; role: string; permissions: string[] };
+      user: { id: string; email: string; full_name: string; role: string; extra_roles: string[]; permissions: string[] };
     }>("/api/auth/admin-login", { email, password }),
 
   logout: () => client.post("/api/auth/admin-logout"),
@@ -436,7 +438,7 @@ export const api = {
 
   users: (search?: string) =>
     client.get<User[]>("/api/admin/users", { params: search ? { search } : {} }),
-  blockUser: (id: string) => client.post(`/api/admin/block/${id}`),
+  blockUser: (id: string, reason?: string) => client.post(`/api/admin/block/${id}`, { reason: reason || null }),
   unblockUser: (id: string) => client.post(`/api/admin/unblock/${id}`),
   resetPin: (id: string) =>
     client.post<{ ok: boolean; temporary_pin: string }>(`/api/admin/reset-pin/${id}`),
@@ -493,7 +495,7 @@ export const api = {
   listAdmins: () => client.get<AdminUser[]>("/api/superadmin/admins"),
   createAdmin: (body: { full_name: string; email: string; password: string; role: string }) =>
     client.post<{ ok: boolean; id: string }>("/api/superadmin/create-admin", body),
-  updateAdmin: (id: string, body: { role?: string; full_name?: string; email?: string }) =>
+  updateAdmin: (id: string, body: { role?: string; extra_roles?: string[]; full_name?: string; email?: string }) =>
     client.patch(`/api/superadmin/admins/${id}`, body),
   suspendAdmin: (id: string) => client.post(`/api/superadmin/admins/${id}/suspend`),
   reactivateAdmin: (id: string) => client.post(`/api/superadmin/admins/${id}/reactivate`),

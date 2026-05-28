@@ -5,13 +5,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
 import { useTheme } from "../../src/ThemeContext";
-// inside component:
-const { colors } = useTheme();
 import { useAuth } from "../../src/AuthContext";
 
 export default function Login() {
   const router = useRouter();
   const { signIn } = useAuth();
+  const { colors } = useTheme();
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -34,6 +33,8 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  const styles = makeStyles(colors);
 
   return (
     <SafeAreaView style={styles.root} testID="login-screen">
@@ -94,7 +95,7 @@ export default function Login() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 24, paddingBottom: 40 },
   back: { width: 40, height: 40, alignItems: "flex-start", justifyContent: "center", marginTop: 8 },

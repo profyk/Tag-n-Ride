@@ -59,7 +59,7 @@ export default function UsersPage() {
     if (!blockModal) return;
     const u = blockModal;
     try {
-      if (u.is_active) { await api.blockUser(u.id); toast.success(`${u.full_name} blocked`); }
+      if (u.is_active) { await api.blockUser(u.id, blockReason || undefined); toast.success(`${u.full_name} blocked`); }
       else { await api.unblockUser(u.id); toast.success(`${u.full_name} unblocked`); }
       setBlockModal(null); setBlockReason("");
       load(query);

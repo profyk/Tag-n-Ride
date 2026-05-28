@@ -36,6 +36,7 @@ export default function AdminsPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("admin");
   const [editRole, setEditRole] = useState("");
+  const [editExtraRoles, setEditExtraRoles] = useState<string[]>([]);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -70,6 +71,7 @@ export default function AdminsPage() {
     try {
       await api.updateAdmin(editModal.id, {
         role: editRole || undefined,
+        extra_roles: editExtraRoles,
         full_name: editName || undefined,
         email: editEmail || undefined,
       });
@@ -175,9 +177,16 @@ export default function AdminsPage() {
                   <Td className="font-semibold">{a.full_name}</Td>
                   <Td className="text-textMuted text-sm">{a.email}</Td>
                   <Td>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(a.role)}`}>
-                      {a.role}
-                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(a.role)}`}>
+                        {a.role}
+                      </span>
+                      {(a.extra_roles || []).map(r => (
+                        <span key={r} className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border opacity-70 ${roleBadgeColor(r)}`}>
+                          +{r}
+                        </span>
+                      ))}
+                    </div>
                   </Td>
                   <Td>
                     <Badge label={a.is_active ? "Active" : "Suspended"} tone={a.is_active ? "green" : "red"} />
@@ -205,6 +214,7 @@ export default function AdminsPage() {
                       <div className="flex items-center gap-1">
                         <Button variant="ghost" onClick={() => {
                           setEditModal(a); setEditRole(a.role);
+                          setEditExtraRoles(a.extra_roles || []);
                           setEditName(a.full_name); setEditEmail(a.email);
                         }}>
                           <Edit2 size={12} />
@@ -285,10 +295,36 @@ export default function AdminsPage() {
             <Input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Role</label>
+            <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Primary Role</label>
             <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} className="w-full">
               {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label} — {r.desc}</option>)}
             </Select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Additional Roles</label>
+            <div className="flex flex-wrap gap-2">
+              {ROLES.filter(r => r.value !== editRole).map(r => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setEditExtraRoles(prev =>
+                    prev.includes(r.value) ? prev.filter(x => x !== r.value) : [...prev, r.value]
+                  )}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
+                    editExtraRoles.includes(r.value)
+                      ? "bg-cyan/10 text-cyan border-cyan/40"
+                      : "text-textMuted border-border hover:border-cyan/30"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            {editExtraRoles.length > 0 && (
+              <p className="text-textMuted text-xs mt-1">
+                This admin has combined permissions from: {[editRole, ...editExtraRoles].join(", ")}
+              </p>
+            )}
           </div>
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="secondary" onClick={() => setEditModal(null)}>Cancel</Button>
