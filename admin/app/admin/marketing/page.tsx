@@ -106,8 +106,8 @@ export default function MarketingPage() {
 
   const handleTogglePromo = async (promo: any) => {
     try {
-      await api.updatePromotion(promo.id, { is_active: !promo.is_active });
-      toast.success(promo.is_active ? "Promotion paused" : "Promotion activated");
+      await api.updatePromotion(promo.id, { active: !promo.active });
+      toast.success(promo.active ? "Promotion paused" : "Promotion activated");
       load();
     } catch (e: any) { toast.error(e.message); }
   };
@@ -121,7 +121,7 @@ export default function MarketingPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const activePromos = promos.filter(p => p.is_active).length;
+  const activePromos = promos.filter(p => p.active).length;
   const totalUses = promos.reduce((s, p) => s + (p.use_count || 0), 0);
   const totalSavings = promos.reduce((s, p) => s + (p.total_savings || 0), 0);
 
@@ -239,11 +239,11 @@ export default function MarketingPage() {
                 <Td className="text-textMuted">{p.use_count || 0}{p.max_uses ? ` / ${p.max_uses}` : ""}</Td>
                 <Td><Badge label={p.target_role || "all"} tone="purple" /></Td>
                 <Td className="text-textMuted text-xs">{p.expires_at ? formatDate(p.expires_at) : "Never"}</Td>
-                <Td><Badge label={p.is_active ? "active" : "paused"} tone={p.is_active ? "green" : "yellow"} /></Td>
+                <Td><Badge label={p.active ? "active" : "paused"} tone={p.active ? "green" : "yellow"} /></Td>
                 <Td>
                   <div className="flex gap-2">
                     <button onClick={() => handleTogglePromo(p)} className="text-xs px-2 py-1 rounded border border-border text-textMuted hover:text-cyan hover:border-cyan/30 transition-all">
-                      {p.is_active ? "Pause" : "Activate"}
+                      {p.active ? "Pause" : "Activate"}
                     </button>
                     <button onClick={() => handleDeletePromo(p.id)} className="text-xs px-2 py-1 rounded border border-border text-textMuted hover:text-red hover:border-red/30 transition-all">
                       Delete
