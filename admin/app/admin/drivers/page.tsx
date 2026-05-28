@@ -255,6 +255,26 @@ export default function DriversPage() {
   const avgRating = drivers.filter((d) => d.rating_count > 0)
     .reduce((s, d, _, arr) => s + d.rating_avg / arr.length, 0);
 
+  const exportCsv = () => {
+    const rows = [
+      ["Name", "Phone", "Plate", "Earnings", "Rating", "Reviews", "KYC", "Status", "Joined"],
+      ...filtered.map((d) => [
+        d.full_name, d.phone_number, d.vehicle_plate || "",
+        formatZAR(d.total_earnings),
+        d.rating_avg.toFixed(1), d.rating_count.toString(),
+        d.kyc_status || "none",
+        d.is_verified ? "Verified" : "Pending",
+        d.created_at ? formatDate(d.created_at) : "",
+      ]),
+    ];
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `drivers-${filter}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filtered.length} drivers`);
+  };
+
   return (
     <AdminShell title="Driver Management">
       <div className="space-y-4">
@@ -309,6 +329,10 @@ export default function DriversPage() {
               </button>
             ))}
           </div>
+
+          <Button variant="secondary" onClick={exportCsv} disabled={loading || filtered.length === 0}>
+            <Download size={13} /> Export CSV
+          </Button>
         </div>
 
         {/* Results count */}
