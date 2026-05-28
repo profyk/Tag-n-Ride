@@ -14,6 +14,7 @@ import {
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
   Zap, Globe, Star, ToggleRight, Key, MessageCircle,
   ChevronDown, ChevronRight, Search, X,
+  Rocket, Target, Calculator, Database,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -83,6 +84,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Refunds",           href: "/admin/refunds",        icon: RotateCcw,   permission: "manage_refunds" },
       { label: "Chargebacks",       href: "/admin/chargebacks",    icon: AlertOctagon,permission: "manage_refunds" },
       { label: "Wallet Operations", href: "/admin/wallet-ops",     icon: Banknote,    permission: "view_audit" },
+      { label: "Accounting",        href: "/admin/accounting",     icon: Calculator,  permission: "view_analytics" },
     ],
   },
   {
@@ -92,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
     color: "text-purple",
     items: [
       { label: "Analytics",      href: "/admin/analytics",  icon: BarChart3,  permission: "view_analytics" },
+      { label: "Growth Charts",  href: "/admin/growth",     icon: Rocket,     permission: "view_analytics" },
       { label: "Routes & Trips", href: "/admin/routes",     icon: MapPin,     permission: "view_analytics" },
       { label: "Fleet Reports",  href: "/admin/fleet",      icon: Truck,      permission: "view_analytics" },
     ],
@@ -121,6 +124,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Promotions",     href: "/admin/promotions",    icon: Tag,           permission: "manage_promotions" },
       { label: "Referrals",      href: "/admin/referrals",     icon: Users2,        permission: "view_analytics" },
       { label: "User Feedback",  href: "/admin/feedback",      icon: Star,          permission: "view_analytics" },
+      { label: "Marketing",      href: "/admin/marketing",     icon: Target,        permission: "manage_promotions" },
     ],
   },
   {
@@ -152,6 +156,7 @@ const SUPERADMIN_NAV: NavItem[] = [
   { label: "Sessions",       href: "/admin/sessions",      icon: Monitor },
   { label: "Settings",       href: "/admin/settings",      icon: Settings },
   { label: "System Console", href: "/admin/console",       icon: Terminal },
+  { label: "Database",       href: "/admin/database",      icon: Database },
   { label: "Superadmin",     href: "/admin/superadmin",    icon: ShieldCheck },
   { label: "Test Users",     href: "/admin/test-users",    icon: FlaskConical },
   { label: "Feature Flags",  href: "/admin/feature-flags", icon: ToggleRight },
