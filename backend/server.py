@@ -775,28 +775,11 @@ async def get_wallet(user: dict = Depends(get_current_user)):
     return result
 
 @api.post("/wallet/topup")
-async def topup(body: TopUpIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "passenger":
-        raise HTTPException(status_code=403, detail="Only passengers can top up")
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            wallet = await conn.fetchrow(
-                "SELECT balance,is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
-            )
-            if not wallet or wallet["is_frozen"]:
-                raise HTTPException(status_code=400, detail="Wallet not available")
-            new_balance = float(wallet["balance"]) + body.amount
-            await conn.execute("UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"])
-            txn_id = str(uuid.uuid4()); ref = gen_ref()
-            user_row = await conn.fetchrow("SELECT is_test FROM users WHERE id=$1", user["id"])
-            is_test_txn = user_row["is_test"] if user_row else False
-            await conn.execute(
-                "INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note,is_test) VALUES ($1,$2,'topup','completed',$3,NULL,$4,'Wallet top-up',$5)",
-                txn_id, ref, body.amount, user["id"], is_test_txn
-            )
-            txn_row = await conn.fetchrow("SELECT * FROM transactions WHERE id=$1", txn_id)
-    txn = dict(txn_row); txn["amount"] = float(txn["amount"]); txn["created_at"] = iso(txn["created_at"])
-    return {"balance": new_balance, "transaction": txn}
+async def topup_legacy(_body: TopUpIn, _user: dict = Depends(get_current_user)):
+    raise HTTPException(
+        status_code=410,
+        detail="Direct top-up is disabled. Use POST /api/wallet/topup/initiate to start a gateway-verified payment."
+    )
 
 @api.get("/wallet/driver/qr/{code}")
 async def lookup_driver_by_qr(code: str, _: dict = Depends(get_current_user)):

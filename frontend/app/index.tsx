@@ -13,6 +13,8 @@ export default function Index() {
     if (state.status === "loading") return;
     if (state.status === "guest") {
       router.replace("/(auth)/welcome");
+    } else if (state.status === "authed" && state.user.role === "owner") {
+      router.replace("/owner");
     } else {
       router.replace("/(app)");
     }
