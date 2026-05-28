@@ -6,29 +6,37 @@ import { useAuth } from "./AuthContext";
 type NotifContextType = {
   notifications: Notification[];
   unreadCount: number;
+  isRead: (id: string) => boolean;
+  markRead: (id: string) => void;
   markAllRead: () => void;
+  deleteNotification: (id: string) => void;
   refresh: () => void;
 };
 
 const NotifContext = createContext<NotifContextType>({
   notifications: [],
   unreadCount: 0,
+  isRead: () => false,
+  markRead: () => {},
   markAllRead: () => {},
+  deleteNotification: () => {},
   refresh: () => {},
 });
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { state } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [lastReadAt, setLastReadAt] = useState<string>("0");
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
 
   const STORAGE_KEY = state.status === "authed"
-    ? `tnr_notif_read_${state.user.id}`
-    : "tnr_notif_read";
+    ? `tnr_notif_read_ids_${state.user.id}`
+    : "tnr_notif_read_ids";
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then(v => {
-      if (v) setLastReadAt(v);
+      if (v) {
+        try { setReadIds(new Set(JSON.parse(v))); } catch {}
+      }
     });
   }, [STORAGE_KEY]);
 
@@ -46,21 +54,43 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     return () => clearInterval(interval);
   }, [load]);
 
-  const markAllRead = useCallback(async () => {
-    const now = new Date().toISOString();
-    setLastReadAt(now);
-    await AsyncStorage.setItem(STORAGE_KEY, now);
+  const markRead = useCallback((id: string) => {
+    setReadIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(next))).catch(() => {});
+      return next;
+    });
   }, [STORAGE_KEY]);
 
-  const unreadCount = notifications.filter(
-    n => new Date(n.sent_at) > new Date(lastReadAt)
-  ).length;
+  const markAllRead = useCallback(() => {
+    setReadIds(prev => {
+      const next = new Set(prev);
+      notifications.forEach(n => next.add(n.id));
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(next))).catch(() => {});
+      return next;
+    });
+  }, [notifications, STORAGE_KEY]);
+
+  const deleteNotification = useCallback(async (id: string) => {
+    try {
+      await api.deleteNotification(id);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    } catch {}
+  }, []);
+
+  const isRead = useCallback((id: string) => readIds.has(id), [readIds]);
+
+  const unreadCount = notifications.filter(n => !readIds.has(n.id)).length;
 
   return (
     <NotifContext.Provider value={{
       notifications,
       unreadCount,
+      isRead,
+      markRead,
       markAllRead,
+      deleteNotification,
       refresh: load,
     }}>
       {children}

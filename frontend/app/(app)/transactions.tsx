@@ -1,8 +1,12 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl, TouchableOpacity, Alert } from "react-native";
+import {
+  View, Text, StyleSheet, FlatList, RefreshControl,
+  TouchableOpacity, Alert, Modal, ScrollView, Pressable,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, Txn } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
@@ -35,6 +39,7 @@ export default function Transactions() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Txn | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +55,7 @@ export default function Transactions() {
   const handleHide = async (id: string) => {
     await addHidden([id]);
     setHidden(prev => [...prev, id]);
+    if (selected?.id === id) setSelected(null);
   };
 
   const handleClearAll = () => {
@@ -65,6 +71,7 @@ export default function Transactions() {
             await addHidden(allIds);
             setItems([]);
             setHidden(allIds);
+            setSelected(null);
           },
         },
       ]
@@ -137,7 +144,11 @@ export default function Transactions() {
             : t.counterparty_name || "Transfer";
           return (
             <View style={{ position: "relative" }}>
-              <View style={s.row} testID={`txn-row-${t.id}`}>
+              <TouchableOpacity
+                activeOpacity={0.75}
+                onPress={() => setSelected(t)}
+                style={s.row}
+                testID={`txn-row-${t.id}`}>
                 <View style={[s.icon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
                   <Ionicons name={icon as any} size={20} color={isIn ? colors.green : colors.cyan} />
                 </View>
@@ -155,13 +166,13 @@ export default function Transactions() {
                     />
                   </View>
                 </View>
-                <TouchableOpacity
-                  onPress={() => handleHide(t.id)}
-                  style={s.hideBtn}
-                  testID={`hide-txn-${t.id}`}>
-                  <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
-                </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleHide(t.id)}
+                style={s.hideBtn}
+                testID={`hide-txn-${t.id}`}>
+                <Ionicons name="eye-off-outline" size={16} color={colors.textDim} />
+              </TouchableOpacity>
             </View>
           );
         }}
@@ -174,9 +185,105 @@ export default function Transactions() {
           </View>
         ) : null}
       />
+
+      {/* Transaction detail sheet */}
+      <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
+        <Pressable style={s.backdrop} onPress={() => setSelected(null)}>
+          <Pressable style={s.sheet} onPress={() => {}}>
+            {selected && (() => {
+              const isIn = selected.direction === "in" || selected.type === "topup";
+              const isWithdraw = selected.type === "withdrawal";
+              const sign = isIn ? "+" : "-";
+              const amtColor = isIn ? colors.green : colors.text;
+              const icon = selected.type === "topup" ? "arrow-down"
+                : isWithdraw ? "cash-outline"
+                : isIn ? "arrow-down-circle" : "arrow-up-circle";
+              const title = selected.type === "topup" ? "Wallet top-up"
+                : isWithdraw ? "Withdrawal"
+                : selected.counterparty_name || "Transfer";
+              return (
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <View style={s.sheetHandle} />
+
+                  <View style={s.sheetTop}>
+                    <View style={[s.sheetIcon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
+                      <Ionicons name={icon as any} size={28} color={isIn ? colors.green : colors.cyan} />
+                    </View>
+                    <TouchableOpacity onPress={() => setSelected(null)} style={s.closeBtn}>
+                      <Ionicons name="close" size={20} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={s.sheetName}>{title}</Text>
+                  <Text style={[s.sheetAmt, { color: amtColor }]}>{sign}{formatZAR(selected.amount)}</Text>
+
+                  <View style={s.pillRow}>
+                    <Pill
+                      label={selected.status}
+                      tone={selected.status === "completed" ? "green" : selected.status === "pending" ? "yellow" : "red"}
+                    />
+                    <Pill label={selected.type} tone="cyan" />
+                  </View>
+
+                  <View style={s.detailBox}>
+                    <DetailRow label="Reference" value={selected.reference} copyable colors={colors} />
+                    <DetailRow label="Date" value={formatDate(selected.created_at)} colors={colors} />
+                    {selected.counterparty_name && (
+                      <DetailRow label={isIn ? "From" : "To"} value={selected.counterparty_name} colors={colors} />
+                    )}
+                    {selected.platform_fee ? (
+                      <DetailRow label="Platform fee" value={`-${formatZAR(selected.platform_fee)}`} colors={colors} />
+                    ) : null}
+                    {selected.driver_net ? (
+                      <DetailRow label="Net received" value={formatZAR(selected.driver_net)} colors={colors} />
+                    ) : null}
+                    {selected.gross_amount ? (
+                      <DetailRow label="Gross amount" value={formatZAR(selected.gross_amount)} colors={colors} />
+                    ) : null}
+                    {selected.note ? (
+                      <DetailRow label="Note" value={selected.note} colors={colors} />
+                    ) : null}
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={() => handleHide(selected.id)}
+                    style={s.hideSheetBtn}>
+                    <Ionicons name="eye-off-outline" size={15} color={colors.textMuted} />
+                    <Text style={[s.hideSheetBtnText, { color: colors.textMuted }]}>Hide from history</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
+
+function DetailRow({ label, value, copyable, colors }: { label: string; value: string; copyable?: boolean; colors: any }) {
+  return (
+    <View style={detailRowStyle.row}>
+      <Text style={[detailRowStyle.label, { color: colors.textDim }]}>{label}</Text>
+      <View style={detailRowStyle.valRow}>
+        <Text style={[detailRowStyle.value, { color: colors.text }]} selectable>{value}</Text>
+        {copyable && (
+          <TouchableOpacity onPress={() => Clipboard.setStringAsync(value)} style={detailRowStyle.copyBtn}>
+            <Ionicons name="copy-outline" size={13} color={colors.textDim} />
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const detailRowStyle = StyleSheet.create({
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10 },
+  label: { fontSize: 12, fontWeight: "600" },
+  valRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  value: { fontSize: 13, fontWeight: "600", textAlign: "right", maxWidth: 200 },
+  copyBtn: { padding: 2 },
+});
 
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
@@ -200,7 +307,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
   filterText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
   filterTextActive: { color: colors.cyan },
   row: {
-    flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 40,
+    flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 44,
     backgroundColor: colors.bg2, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.border, gap: 12,
   },
@@ -212,4 +319,38 @@ const makeStyles = (colors: any) => StyleSheet.create({
   hideBtn: { position: "absolute", top: 14, right: 12, padding: 4 },
   empty: { padding: 40, alignItems: "center" },
   emptyTxt: { color: colors.textMuted, marginTop: 8, fontWeight: "600" },
+  // Sheet
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.bg2,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 40, maxHeight: "85%",
+  },
+  sheetHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: colors.border, alignSelf: "center", marginBottom: 20,
+  },
+  sheetTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
+  sheetIcon: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center" },
+  closeBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.bg3 ?? colors.border,
+    alignItems: "center", justifyContent: "center",
+  },
+  sheetName: { color: colors.text, fontSize: 18, fontWeight: "700", marginBottom: 4 },
+  sheetAmt: { fontSize: 32, fontWeight: "900", marginBottom: 12 },
+  pillRow: { flexDirection: "row", gap: 8, marginBottom: 20 },
+  detailBox: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 16, marginBottom: 20,
+    gap: 0,
+  },
+  hideSheetBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 12, justifyContent: "center",
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, backgroundColor: colors.bg,
+  },
+  hideSheetBtnText: { fontSize: 13, fontWeight: "600" },
 });

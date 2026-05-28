@@ -26,10 +26,18 @@ function typeTone(t: string): any {
   return t === "info" ? "cyan" : t === "warning" ? "yellow" : t === "success" ? "green" : "red";
 }
 
+function typeIcon(t: string) {
+  if (t === "success") return <CheckCircle size={18} className="text-green" />;
+  if (t === "error") return <AlertCircle size={18} className="text-red" />;
+  if (t === "warning") return <AlertCircle size={18} className="text-yellow" />;
+  return <Bell size={18} className="text-cyan" />;
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendModal, setSendModal] = useState(false);
+  const [selected, setSelected] = useState<any | null>(null);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [type, setType] = useState("info");
@@ -117,7 +125,7 @@ export default function NotificationsPage() {
             headers={["Title", "Message", "Type", "Audience", "Sent By", "Date"]}
             empty={!notifications.length}>
             {notifications.map((n: any) => (
-              <Tr key={n.id}>
+              <Tr key={n.id} onClick={() => setSelected(n)}>
                 <Td className="font-semibold">{n.title}</Td>
                 <Td className="text-textMuted text-xs max-w-xs truncate">{n.message}</Td>
                 <Td>
@@ -137,6 +145,59 @@ export default function NotificationsPage() {
         )}
       </div>
 
+      {/* Notification detail modal */}
+      <Modal open={!!selected} onClose={() => setSelected(null)} title="Notification Details">
+        {selected && (
+          <div className="space-y-4">
+            <div className={`p-4 rounded-xl border ${
+              selected.type === "success" ? "bg-green/5 border-green/20" :
+              selected.type === "warning" ? "bg-yellow/5 border-yellow/20" :
+              selected.type === "error" ? "bg-red/5 border-red/20" :
+              "bg-cyan/5 border-cyan/20"
+            }`}>
+              <div className="flex items-start gap-3">
+                {typeIcon(selected.type)}
+                <div className="flex-1">
+                  <p className={`font-bold text-base ${
+                    selected.type === "success" ? "text-green" :
+                    selected.type === "warning" ? "text-yellow" :
+                    selected.type === "error" ? "text-red" : "text-cyan"
+                  }`}>{selected.title}</p>
+                  <p className="text-text text-sm mt-2 leading-relaxed">{selected.message}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-[10px] font-bold text-textDim uppercase tracking-widest mb-1">Type</p>
+                <Badge label={selected.type} tone={typeTone(selected.type)} />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-textDim uppercase tracking-widest mb-1">Audience</p>
+                <Badge
+                  label={selected.target === "role" ? selected.target_role || "role" : selected.target}
+                  tone={selected.target === "all" ? "cyan" : "purple"}
+                />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-textDim uppercase tracking-widest mb-1">Sent By</p>
+                <p className="text-textMuted">{selected.sent_by_name || "System"}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-textDim uppercase tracking-widest mb-1">Date</p>
+                <p className="text-textMuted">{formatDate(selected.sent_at)}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button variant="secondary" onClick={() => setSelected(null)}>Close</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Send notification modal */}
       <Modal open={sendModal} onClose={() => { setSendModal(false); setPreview(false); }} title="Send Notification">
         <div className="space-y-4">
 

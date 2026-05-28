@@ -139,8 +139,8 @@ export function Table({
   );
 }
 
-export function Tr({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <tr className={cn("hover:bg-bg3 transition-colors", className)}>{children}</tr>;
+export function Tr({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
+  return <tr className={cn("hover:bg-bg3 transition-colors", onClick && "cursor-pointer", className)} onClick={onClick}>{children}</tr>;
 }
 
 export function Td({ children, className }: { children: React.ReactNode; className?: string }) {

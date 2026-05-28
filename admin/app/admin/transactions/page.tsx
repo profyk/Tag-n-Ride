@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Input, Select, Card } from "@/components/ui";
+import { Table, Tr, Td, Badge, Button, Spinner, Input, Select, Card, Modal } from "@/components/ui";
 import { api, Transaction } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { Search, Download, Copy, X, AlertTriangle, Clock, TrendingUp } from "lucide-react";
@@ -18,6 +18,23 @@ const QUICK_FILTERS = [
   { label: "Top-ups", type: "topup", status: "", icon: TrendingUp, color: "text-cyan" },
 ];
 
+function DetailRow({ label, value, copy }: { label: string; value: string; copy?: boolean }) {
+  return (
+    <div className="flex justify-between items-center py-2.5 border-b border-border last:border-0">
+      <span className="text-[11px] font-bold text-textDim uppercase tracking-widest">{label}</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm text-text font-semibold">{value}</span>
+        {copy && (
+          <button onClick={() => { navigator.clipboard.writeText(value); toast.success("Copied"); }}
+            className="text-textDim hover:text-textMuted transition-colors">
+            <Copy size={11} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function TransactionsPage() {
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +46,7 @@ export default function TransactionsPage() {
   const [minAmt, setMinAmt] = useState("");
   const [maxAmt, setMaxAmt] = useState("");
   const [activeQuick, setActiveQuick] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Transaction | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -152,12 +170,14 @@ export default function TransactionsPage() {
             {filteredByStatus.map((t) => (
               <Tr
                 key={t.id}
+                onClick={() => setSelected(t)}
                 className={t.status === "failed" ? "bg-red/5" : t.amount >= 5000 ? "bg-yellow/5" : ""}
               >
                 <Td>
                   <div className="flex items-center gap-1.5">
                     <span className="font-mono text-[11px] text-textMuted">{t.reference}</span>
-                    <button onClick={() => copyRef(t.reference)} className="text-textDim hover:text-textMuted">
+                    <button onClick={(e) => { e.stopPropagation(); copyRef(t.reference); }}
+                      className="text-textDim hover:text-textMuted">
                       <Copy size={10} />
                     </button>
                   </div>
@@ -185,6 +205,43 @@ export default function TransactionsPage() {
           </Table>
         )}
       </div>
+
+      {/* Transaction detail modal */}
+      <Modal open={!!selected} onClose={() => setSelected(null)} title="Transaction Details">
+        {selected && (
+          <div className="space-y-4">
+            {/* Amount hero */}
+            <div className="text-center py-4 border-b border-border">
+              <p className={`text-3xl font-extrabold ${selected.amount >= 5000 ? "text-yellow" : "text-text"}`}>
+                {formatZAR(selected.amount)}
+              </p>
+              <div className="flex justify-center gap-2 mt-2">
+                <Badge label={selected.type} tone={TYPE_TONE[selected.type] || "cyan"} />
+                <Badge label={selected.status} tone={STATUS_TONE[selected.status] || "yellow"} />
+              </div>
+            </div>
+
+            {/* Details */}
+            <div className="bg-bg rounded-xl border border-border px-4">
+              <DetailRow label="Reference" value={selected.reference} copy />
+              <DetailRow label="Date" value={formatDate(selected.created_at)} />
+              {selected.sender_name && <DetailRow label="Sender" value={selected.sender_name} />}
+              {selected.receiver_name && <DetailRow label="Receiver" value={selected.receiver_name} />}
+              {selected.platform_fee != null && (
+                <DetailRow label="Platform fee" value={formatZAR(selected.platform_fee)} />
+              )}
+              {selected.driver_net != null && (
+                <DetailRow label="Driver net" value={formatZAR(selected.driver_net)} />
+              )}
+              {selected.note && <DetailRow label="Note" value={selected.note} />}
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <Button variant="secondary" onClick={() => setSelected(null)}>Close</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </AdminShell>
   );
 }
