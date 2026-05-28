@@ -562,8 +562,8 @@ function PayrollPageInner() {
                    run.submitted_at ? formatDate(run.submitted_at) :
                    formatDate(run.created_at)}
                 </Td>
-                <Td onClick={e => e.stopPropagation()}>
-                  <div className="flex gap-1.5">
+                <Td>
+                  <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
                     <button onClick={() => openRun(run)}
                       className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
                       <Eye size={11} />
