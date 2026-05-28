@@ -449,6 +449,7 @@ export const api = {
     client.delete(`/api/superadmin/users/${id}`, token ? { headers: { "X-Danger-Token": token } } : undefined),
 
   drivers: () => client.get<Driver[]>("/api/admin/drivers"),
+  driver: (id: string) => client.get<Driver>(`/api/admin/drivers/${id}`),
   verifyDriver: (id: string) => client.post(`/api/admin/verify-driver/${id}`),
 
   transactions: (params?: {

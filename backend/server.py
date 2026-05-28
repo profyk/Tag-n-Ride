@@ -14,6 +14,8 @@ import logging
 import uuid
 import secrets
 import hashlib
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -150,6 +152,29 @@ def has_permission(user: dict, permission: str) -> bool:
 
 def token_hash_fn(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+class LoginRateLimiter:
+    """In-memory rate limiter: 5 failures per 15 min per key, then 15-min lockout."""
+    def __init__(self, max_attempts: int = 5, window: int = 900):
+        self.max_attempts = max_attempts
+        self.window = window
+        self._attempts: dict = defaultdict(list)
+
+    def check(self, key: str) -> None:
+        now = time.time()
+        self._attempts[key] = [t for t in self._attempts[key] if now - t < self.window]
+        if len(self._attempts[key]) >= self.max_attempts:
+            wait = int(self.window - (now - self._attempts[key][0]))
+            raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {max(wait // 60, 1)} minute(s).")
+
+    def record_failure(self, key: str) -> None:
+        self._attempts[key].append(time.time())
+
+    def clear(self, key: str) -> None:
+        self._attempts.pop(key, None)
+
+_login_limiter = LoginRateLimiter()
+_admin_login_limiter = LoginRateLimiter()
 
 def generate_qr_code() -> str:
     return "TNR" + "".join(random.choices(string.digits, k=13))
@@ -430,8 +455,10 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 async def require_superadmin(user: dict = Depends(get_current_user)) -> dict:
-    if user["role"] not in ("superadmin", "ceo"):
+    if not has_permission(user, "manage_admins"):
         raise HTTPException(status_code=403, detail="Superadmin access required")
+    if not user.get("is_active"):
+        raise HTTPException(status_code=403, detail="Account suspended")
     return user
 
 async def require_owner(user: dict = Depends(get_current_user)) -> dict:
@@ -662,16 +689,20 @@ async def register(body: RegisterIn):
     }
 
 @api.post("/auth/login")
-async def login(body: LoginIn):
+async def login(body: LoginIn, request: Request):
+    key = body.phone_number.strip()
+    _login_limiter.check(key)
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
             "SELECT id,phone_number,full_name,role,pin_hash,is_active FROM users WHERE phone_number=$1",
-            body.phone_number.strip()
+            key
         )
     if not user or not verify_pin(body.pin, user["pin_hash"]):
+        _login_limiter.record_failure(key)
         raise HTTPException(status_code=401, detail="Invalid phone number or PIN")
     if not user["is_active"]:
         raise HTTPException(status_code=403, detail="Account disabled")
+    _login_limiter.clear(key)
     token = create_access_token(user["id"], user["role"])
     return {
         "token": token,
@@ -682,12 +713,17 @@ async def login(body: LoginIn):
 @api.post("/auth/admin-login")
 async def admin_login(body: AdminLoginIn, request: Request):
     ip = request.client.host if request.client else "unknown"
+    email_key = body.email.strip().lower()
+    _admin_login_limiter.check(ip)
+    _admin_login_limiter.check(email_key)
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            "SELECT id,email,full_name,role,password_hash,is_active FROM users WHERE email=$1",
-            body.email.strip().lower()
+            "SELECT id,email,full_name,role,extra_roles,password_hash,is_active FROM users WHERE email=$1",
+            email_key
         )
         if not user or user["role"] not in ADMIN_ROLES:
+            _admin_login_limiter.record_failure(ip)
+            _admin_login_limiter.record_failure(email_key)
             await audit(conn, None, "LOGIN_FAILED", metadata={"email": body.email}, ip=ip, success=False)
             raise HTTPException(status_code=401, detail="Invalid credentials")
         if not user["is_active"]:
@@ -696,8 +732,12 @@ async def admin_login(body: AdminLoginIn, request: Request):
         if not user["password_hash"] or not bcrypt.checkpw(
             body.password.encode(), user["password_hash"].encode()
         ):
+            _admin_login_limiter.record_failure(ip)
+            _admin_login_limiter.record_failure(email_key)
             await audit(conn, user["id"], "LOGIN_FAILED", ip=ip, success=False)
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        _admin_login_limiter.clear(ip)
+        _admin_login_limiter.clear(email_key)
         token = create_access_token(user["id"], user["role"])
         th = token_hash_fn(token)
         await conn.execute(
@@ -1132,6 +1172,9 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         today_revenue = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE")
         today_txns = await conn.fetchval("SELECT COUNT(*) FROM transactions WHERE DATE(created_at)=CURRENT_DATE")
         today_signups = await conn.fetchval("SELECT COUNT(*) FROM users WHERE DATE(created_at)=CURRENT_DATE")
+        yesterday_revenue = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE-1")
+        yesterday_txns = await conn.fetchval("SELECT COUNT(*) FROM transactions WHERE DATE(created_at)=CURRENT_DATE-1")
+        yesterday_signups = await conn.fetchval("SELECT COUNT(*) FROM users WHERE DATE(created_at)=CURRENT_DATE-1")
         suspicious = await conn.fetch(
             "SELECT t.*,su.full_name as sender_name,ru.full_name as receiver_name FROM transactions t LEFT JOIN users su ON su.id=t.sender_id LEFT JOIN users ru ON ru.id=t.receiver_id WHERE t.amount>5000 AND t.created_at>NOW()-INTERVAL '7 days' ORDER BY t.amount DESC LIMIT 5"
         )
@@ -1149,6 +1192,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         "pending_withdrawals": pending_withdrawals, "pending_drivers": pending_drivers,
         "pending_kyc": pending_kyc, "flagged_accounts": flagged_count,
         "today_revenue": float(today_revenue), "today_transactions": today_txns, "today_signups": today_signups,
+        "yesterday_revenue": float(yesterday_revenue), "yesterday_transactions": yesterday_txns, "yesterday_signups": yesterday_signups,
         "suspicious_transactions": [{**dict(r), "amount": float(r["amount"]), "created_at": iso(r["created_at"])} for r in suspicious],
         "recent_transactions": [{**dict(r), "amount": float(r["amount"]), "created_at": iso(r["created_at"])} for r in recent],
         "pending_driver_list": [{**dict(r), "created_at": iso(r["created_at"])} for r in pending_driver_list],
@@ -1261,12 +1305,16 @@ async def admin_drivers(admin: dict = Depends(require_admin)):
 @api.get("/admin/drivers/{user_id}")
 async def admin_driver_detail(user_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT d.*,u.full_name,u.phone_number FROM drivers d JOIN users u ON u.id=d.user_id WHERE d.user_id=$1", user_id)
+        row = await conn.fetchrow(
+            "SELECT d.*,u.full_name,u.phone_number,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id WHERE d.user_id=$1",
+            user_id
+        )
     if not row: raise HTTPException(status_code=404, detail="Driver not found")
     return {"user_id": row["user_id"], "full_name": row["full_name"], "phone_number": row["phone_number"],
             "vehicle_plate": row["vehicle_plate"], "total_earnings": float(row["total_earnings"]),
             "is_verified": row["is_verified"], "rating_avg": float(row["rating_avg"]),
-            "rating_count": row["rating_count"], "qr_code": row["qr_code"], "created_at": iso(row["created_at"])}
+            "rating_count": row["rating_count"], "qr_code": row["qr_code"],
+            "kyc_status": row["kyc_status"] or "not_submitted", "created_at": iso(row["created_at"])}
 
 @api.post("/admin/verify-driver/{user_id}")
 async def admin_verify_driver(user_id: str, request: Request, admin: dict = Depends(require_admin)):
@@ -3209,6 +3257,29 @@ async def fleet_reports(admin: dict = Depends(require_admin)):
             "driver_count": r["driver_count"]
         } for r in fleet_earnings],
     }
+
+@api.get("/admin/fleet/{owner_id}/drivers")
+async def fleet_owner_drivers(owner_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT d.user_id, u.full_name, u.phone_number, d.vehicle_plate,
+                      d.total_earnings, d.is_verified, d.rating_avg, d.rating_count,
+                      od.daily_target, od.confirmed
+               FROM owner_drivers od
+               JOIN drivers d ON d.user_id=od.driver_user_id
+               JOIN users u ON u.id=d.user_id
+               JOIN fleet_owners fo ON fo.id=od.owner_id
+               WHERE fo.user_id=$1
+               ORDER BY d.total_earnings DESC""",
+            owner_id
+        )
+    return [{
+        "user_id": r["user_id"], "full_name": r["full_name"], "phone_number": r["phone_number"],
+        "vehicle_plate": r["vehicle_plate"], "total_earnings": float(r["total_earnings"]),
+        "is_verified": r["is_verified"], "rating_avg": float(r["rating_avg"]),
+        "rating_count": r["rating_count"], "daily_target": float(r["daily_target"] or 0),
+        "confirmed": r["confirmed"]
+    } for r in rows]
 
 # ── 10. ONBOARDING PIPELINE ──────────────────────────────────
 @api.get("/admin/onboarding/pipeline")

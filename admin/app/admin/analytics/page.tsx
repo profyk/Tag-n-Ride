@@ -53,7 +53,7 @@ export default function AnalyticsPage() {
   const prevCount = data?.prev_count ?? 0;
 
   const byType = data?.transactions_by_type ?? [];
-  const totals = byType.reduce((s: any, t: any) => ({ ...s, [t.type]: t.total }), {} as any);
+  const totals = byType.reduce((s: any, t: any) => ({ ...s, [t.type]: t.volume }), {} as any);
 
   return (
     <AdminShell title="Analytics">

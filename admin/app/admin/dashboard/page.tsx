@@ -118,7 +118,7 @@ export default function DashboardPage() {
               <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Revenue Today</p>
               <p className="text-2xl font-black text-green">{formatZAR(data.today_revenue)}</p>
               <div className="flex items-center gap-2 mt-1">
-                <TrendBadge value={data.today_revenue} prev={data.today_revenue * 0.82} />
+                <TrendBadge value={data.today_revenue} prev={data.yesterday_revenue ?? 0} />
                 <span className="text-[10px] text-textMuted">vs yesterday</span>
               </div>
             </div>
@@ -126,7 +126,7 @@ export default function DashboardPage() {
               <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Transactions</p>
               <p className="text-2xl font-black text-cyan">{data.today_transactions}</p>
               <div className="flex items-center gap-2 mt-1">
-                <TrendBadge value={data.today_transactions} prev={data.today_transactions * 0.91} />
+                <TrendBadge value={data.today_transactions} prev={data.yesterday_transactions ?? 0} />
                 <span className="text-[10px] text-textMuted">vs yesterday</span>
               </div>
             </div>
@@ -134,7 +134,7 @@ export default function DashboardPage() {
               <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">New Signups</p>
               <p className="text-2xl font-black text-purple">{data.today_signups}</p>
               <div className="flex items-center gap-2 mt-1">
-                <TrendBadge value={data.today_signups} prev={data.today_signups * 0.78} />
+                <TrendBadge value={data.today_signups} prev={data.yesterday_signups ?? 0} />
                 <span className="text-[10px] text-textMuted">vs yesterday</span>
               </div>
             </div>

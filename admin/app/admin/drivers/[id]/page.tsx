@@ -70,7 +70,7 @@ export default function DriverDetailPage() {
   useEffect(() => {
     if (!id) return;
     Promise.all([
-      api.drivers().then((r) => r.data.find((d) => d.user_id === id)),
+      api.driver(id).then((r) => r.data).catch(() => null),
       api.transactions({ search: id }),
     ]).then(async ([d, t]) => {
       setDriver(d || null);

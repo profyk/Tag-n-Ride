@@ -34,16 +34,14 @@ export default function RevenuePage() {
   }, [range]);
 
   const daily = analytics?.daily_volume || [];
-  const totalRevenue = daily.reduce((s: number, d: any) => s + (d.revenue || 0), 0);
-  const totalFees = daily.reduce((s: number, d: any) => s + (d.fees || d.revenue * 0.08 || 0), 0);
   const totalVolume = daily.reduce((s: number, d: any) => s + (d.amount || 0), 0);
+  const totalFees = daily.reduce((s: number, d: any) => s + (d.fees || 0), 0);
   const avgFeeRate = totalVolume > 0 ? ((totalFees / totalVolume) * 100).toFixed(2) : "—";
 
   const chartData = daily.slice(-30).map((d: any) => ({
     date: d.date ? new Date(d.date).toLocaleDateString("en-ZA", { month: "short", day: "numeric" }) : d.day,
-    Revenue: d.revenue || 0,
-    Fees: d.fees || Math.round((d.revenue || 0) * 0.08),
     Volume: d.amount || 0,
+    Fees: d.fees || 0,
   }));
 
   return (
@@ -52,10 +50,10 @@ export default function RevenuePage() {
         {loading ? <Spinner /> : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Total Revenue" value={formatZAR(totalRevenue)} />
-              <StatCard label="Fees Collected" value={formatZAR(totalFees)} />
               <StatCard label="Gross Volume" value={formatZAR(totalVolume)} />
+              <StatCard label="Fees Collected" value={formatZAR(totalFees)} />
               <StatCard label="Avg Fee Rate" value={`${avgFeeRate}%`} />
+              <StatCard label="Transactions" value={daily.reduce((s: number, d: any) => s + (d.count || 0), 0).toLocaleString()} />
             </div>
 
             <Card>
@@ -99,7 +97,7 @@ export default function RevenuePage() {
                       formatter={(v: any) => formatZAR(v)}
                     />
                     <Legend wrapperStyle={{ fontSize: 11, color: "#7777AA" }} />
-                    <Area type="monotone" dataKey="Revenue" stroke="#00D4FF" fill="url(#revGrad)" strokeWidth={2} dot={false} />
+                    <Area type="monotone" dataKey="Volume" stroke="#00D4FF" fill="url(#revGrad)" strokeWidth={2} dot={false} />
                     <Area type="monotone" dataKey="Fees" stroke="#00E676" fill="url(#feeGrad)" strokeWidth={2} dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
