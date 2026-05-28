@@ -95,7 +95,7 @@ export default function MarketingPage() {
     if (!bTitle.trim() || !bMessage.trim()) { toast.error("Title and message required"); return; }
     setBSending(true);
     try {
-      await api.sendBroadcast(bTitle.trim(), bMessage.trim(), undefined, bTarget, bRole || undefined);
+      await api.sendBroadcast({ title: bTitle.trim(), message: bMessage.trim(), target: bTarget, target_role: bRole || undefined });
       toast.success("Broadcast sent");
       setBroadcastModal(false);
       setBTitle(""); setBMessage(""); setBTarget("all"); setBRole("");
