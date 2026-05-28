@@ -163,7 +163,7 @@ export default function UsersPage() {
           <p className="text-xs text-textMuted">
             {loading ? "Loading…" : `${filtered.length} user${filtered.length !== 1 ? "s" : ""}${query ? ` matching "${query}"` : ""}`}
           </p>
-          <Button variant="secondary" onClick={() => { api.exportUsers(); toast.success("Export queued"); }}>
+          <Button variant="secondary" onClick={() => api.exportUsers()}>
             <Download size={13} /> Export CSV
           </Button>
         </div>

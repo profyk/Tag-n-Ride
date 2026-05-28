@@ -139,7 +139,7 @@ export default function TransactionsPage() {
         )}
 
         <div className="flex justify-end">
-          <Button variant="secondary" onClick={() => { api.exportTransactions(); toast.success("Export queued"); }}>
+          <Button variant="secondary" onClick={() => api.exportTransactions()}>
             <Download size={13} /> Export CSV
           </Button>
         </div>
