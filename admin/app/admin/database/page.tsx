@@ -262,7 +262,7 @@ export default function DatabasePage() {
     if (!selectedTable || !tableData || selectedRows.size === 0) return;
     setMutating(true);
     try {
-      for (const ri of selectedRows) {
+      for (const ri of Array.from(selectedRows)) {
         const obj = rowToObj(tableData.columns, tableData.rows[ri]);
         const pk = findPK(obj);
         if (pk) await runMutation(`DELETE FROM ${selectedTable} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`);
