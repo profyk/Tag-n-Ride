@@ -1201,7 +1201,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
 # ── Admin: Users ─────────────────────────────────────────────
 @api.get("/admin/users")
 async def admin_users(search: Optional[str] = None, admin: dict = Depends(require_admin)):
-    is_super = admin["role"] in ("superadmin", "ceo")
+    is_super = has_permission(admin, "manage_admins")
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT id,phone_number,full_name,role,is_active,flagged,created_at FROM users
@@ -1369,7 +1369,7 @@ async def admin_approve_withdrawal(withdrawal_id: str, request: Request, admin: 
     async with pool.acquire() as conn:
         req = await conn.fetchrow("SELECT * FROM withdrawal_requests WHERE id=$1 AND status='pending'", withdrawal_id)
         if not req: raise HTTPException(status_code=404, detail="Withdrawal not found")
-        if float(req["amount"]) > 10000 and admin["role"] not in ("superadmin", "ceo", "cfo"):
+        if float(req["amount"]) > 10000 and not has_permission(admin, "large_withdrawals"):
             raise HTTPException(status_code=403, detail="Withdrawals over R10,000 require superadmin approval")
         await conn.execute("UPDATE withdrawal_requests SET status='approved' WHERE id=$1", withdrawal_id)
         await conn.execute(
@@ -5233,8 +5233,8 @@ class DangerPinVerifyIn(BaseModel):
     pin: str = Field(min_length=4, max_length=20)
 
 async def verify_danger_pin(conn, pin: str, admin: dict) -> bool:
-    """Verify the danger PIN. CFO, CEO, Superadmin only."""
-    if admin.get("role") not in ("cfo", "ceo", "superadmin"):
+    """Verify the danger PIN. Requires danger_actions permission."""
+    if not has_permission(admin, "danger_actions"):
         return False
     config = await conn.fetchrow(
         "SELECT value FROM system_config WHERE key='danger_pin'"
@@ -5249,10 +5249,10 @@ async def danger_pin_verify(body: DangerPinVerifyIn, admin: dict = Depends(requi
     """
     Verify danger PIN before a destructive action.
     Returns a short-lived token valid for 5 minutes.
-    CFO, CEO, Superadmin only.
+    Requires danger_actions permission.
     """
-    if admin.get("role") not in ("cfo", "ceo", "superadmin"):
-        raise HTTPException(status_code=403, detail="CFO, CEO or Superadmin only")
+    if not has_permission(admin, "danger_actions"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         valid = await verify_danger_pin(conn, body.pin, admin)
     if not valid:
@@ -5270,9 +5270,9 @@ async def danger_pin_verify(body: DangerPinVerifyIn, admin: dict = Depends(requi
 
 @api.post("/admin/danger-pin/change")
 async def danger_pin_change(body: dict, request: Request, admin: dict = Depends(require_admin)):
-    """Change the danger PIN. CEO and Superadmin only. Requires current PIN."""
-    if admin.get("role") not in ("ceo", "superadmin"):
-        raise HTTPException(status_code=403, detail="CEO or Superadmin only")
+    """Change the danger PIN. Requires danger_actions permission."""
+    if not has_permission(admin, "danger_actions"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     current_pin = body.get("current_pin", "")
     new_pin = body.get("new_pin", "")
     if not current_pin or not new_pin:
@@ -5324,8 +5324,6 @@ async def run_danger_command(
     Requires valid X-Danger-Token header (obtained from /danger-pin/verify).
     Superadmin only.
     """
-    if admin.get("role") not in ("ceo", "superadmin"):
-        raise HTTPException(status_code=403, detail="CEO or Superadmin only")
     if not has_permission(admin, "danger_actions"):
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -6032,9 +6030,9 @@ async def statement_audit_export(
     fmt: str = "csv",
     admin: dict = Depends(require_admin)
 ):
-    """Full audit log export — CEO and Superadmin only."""
-    if admin.get("role") not in ("ceo", "superadmin"):
-        raise HTTPException(status_code=403, detail="CEO or Superadmin only")
+    """Full audit log export — requires archive_audit_logs permission."""
+    if not has_permission(admin, "archive_audit_logs"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         query = """
             SELECT al.id, al.action, al.target_id, al.target_type,
@@ -6142,6 +6140,81 @@ async def statement_fleet_earnings(
     ] for r in rows]
     return csv_response(data, headers, f"fleet-earnings-{ref}.csv")
 
+
+@api.get("/admin/statements/driver/{user_id}")
+async def statement_driver_single(
+    user_id: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT u.full_name, u.phone_number,
+                   COUNT(t.id) as trip_count,
+                   SUM(t.amount) as gross_earnings,
+                   COALESCE(SUM(t.platform_fee),0) as fees_deducted,
+                   COALESCE(SUM(t.driver_net),0) as net_earnings,
+                   MIN(t.created_at) as first_trip, MAX(t.created_at) as last_trip
+            FROM transactions t
+            JOIN users u ON u.id=t.receiver_id
+            WHERE t.type='payment' AND t.status='completed' AND t.receiver_id=$1
+        """
+        params: list = [user_id]
+        if date_from:
+            params.append(date_from); query += f" AND t.created_at>=${len(params)}"
+        if date_to:
+            params.append(date_to); query += f" AND t.created_at<=${len(params)}"
+        query += " GROUP BY u.id, u.full_name, u.phone_number"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], f"driver_earnings_{user_id}", fmt, date_from, date_to)
+    headers = ["Driver", "Phone", "Trips", "Gross Earnings", "Fees Deducted", "Net Earnings", "First Trip", "Last Trip"]
+    data = [[
+        r["full_name"], r["phone_number"], r["trip_count"],
+        float(r["gross_earnings"] or 0), float(r["fees_deducted"] or 0),
+        float(r["net_earnings"] or 0),
+        iso(r["first_trip"]) if r["first_trip"] else "", iso(r["last_trip"]) if r["last_trip"] else "",
+    ] for r in rows]
+    return csv_response(data, headers, f"driver-{user_id}-{ref}.csv")
+
+@api.get("/admin/statements/fleet-owner/{user_id}")
+async def statement_fleet_owner_single(
+    user_id: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT u.full_name, u.phone_number,
+                   COUNT(t.id) AS trips,
+                   COALESCE(SUM(t.amount),0) AS gross,
+                   COALESCE(SUM(t.platform_fee),0) AS fees,
+                   COALESCE(SUM(t.driver_net),0) AS net
+            FROM transactions t
+            JOIN users u ON u.id=t.receiver_id
+            WHERE t.type='payment' AND t.status='completed' AND t.receiver_id=$1
+        """
+        params: list = [user_id]
+        if date_from:
+            params.append(date_from); query += f" AND t.created_at>=${len(params)}"
+        if date_to:
+            params.append(date_to); query += f" AND t.created_at<=${len(params)}"
+        query += " GROUP BY u.id, u.full_name, u.phone_number"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], f"fleet_owner_{user_id}", fmt, date_from, date_to)
+    headers = ["Fleet Owner", "Phone", "Trips", "Gross Earnings", "Platform Fees", "Net Earnings"]
+    data = [[
+        r["full_name"], r["phone_number"], r["trips"],
+        float(r["gross"] or 0), float(r["fees"] or 0), float(r["net"] or 0)
+    ] for r in rows]
+    return csv_response(data, headers, f"fleet-owner-{user_id}-{ref}.csv")
 
 @api.get("/admin/statements/routes")
 async def statement_routes(
@@ -7875,8 +7948,8 @@ async def payroll_submit(run_id: str, admin: dict = Depends(require_admin)):
 
 @api.post("/admin/payroll/runs/{run_id}/approve")
 async def payroll_approve(run_id: str, admin: dict = Depends(require_admin)):
-    if admin["role"] not in ("superadmin", "ceo", "cfo"):
-        raise HTTPException(status_code=403, detail="CEO, CFO or Superadmin only")
+    if not has_permission(admin, "large_withdrawals"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         run = await conn.fetchrow("SELECT status FROM payroll_runs WHERE id=$1", run_id)
         if not run:
@@ -7913,8 +7986,8 @@ async def payroll_execute(
     admin: dict = Depends(require_admin),
     _danger: dict = Depends(require_danger_token),
 ):
-    if admin["role"] not in ("superadmin", "ceo", "cfo"):
-        raise HTTPException(status_code=403, detail="CEO, CFO or Superadmin only")
+    if not has_permission(admin, "large_withdrawals"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         run = await conn.fetchrow("SELECT status FROM payroll_runs WHERE id=$1", run_id)
         if not run:
@@ -7968,7 +8041,7 @@ async def payroll_export(run_id: str, admin: dict = Depends(require_admin)):
 
 @api.get("/admin/db/tables")
 async def admin_db_tables(admin: dict = Depends(require_admin)):
-    if admin["role"] not in ("superadmin", "ceo", "cto"):
+    if not has_permission(admin, "edit_system"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -7991,7 +8064,7 @@ async def admin_db_table(
     limit: int = 50,
     admin: dict = Depends(require_admin),
 ):
-    if admin["role"] not in ("superadmin", "ceo", "cto"):
+    if not has_permission(admin, "edit_system"):
         raise HTTPException(status_code=403, detail="Permission denied")
     # Validate table name — only allow alphanumeric + underscore
     if not table_name.replace("_", "").isalnum():
@@ -8025,7 +8098,7 @@ class DbQueryIn(BaseModel):
 
 @api.post("/admin/db/query")
 async def admin_db_query(body: DbQueryIn, admin: dict = Depends(require_admin)):
-    if admin["role"] not in ("superadmin", "ceo", "cto"):
+    if not has_permission(admin, "edit_system"):
         raise HTTPException(status_code=403, detail="Permission denied")
     sql = body.sql.strip()
     if not sql:
