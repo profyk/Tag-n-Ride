@@ -367,8 +367,8 @@ function HRPageInner() {
                   <Td className="text-purple text-xs">{formatZAR(uif)}</Td>
                   <Td><Badge label={s.status} tone={STATUS_TONE[s.status] || "cyan"} /></Td>
                   <Td className="text-textDim text-xs">{formatDate(s.start_date)}</Td>
-                  <Td onClick={e => e.stopPropagation()}>
-                    <div className="flex gap-1.5">
+                  <Td>
+                    <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => handleReveal(s)}
                         title={isRevealed ? "Hide sensitive data" : "Reveal sensitive data"}
