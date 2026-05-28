@@ -116,9 +116,9 @@ export default function PromotionsPage() {
                   <Td>
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 rounded-full bg-bg3">
-                        <div className="h-1.5 rounded-full bg-cyan" style={{ width: `${Math.min((p.total_used / p.max_uses) * 100, 100)}%` }} />
+                        <div className="h-1.5 rounded-full bg-cyan" style={{ width: p.max_uses ? `${Math.min((p.total_used / p.max_uses) * 100, 100)}%` : "0%" }} />
                       </div>
-                      <span className="text-xs text-textMuted">{p.total_used}/{p.max_uses}</span>
+                      <span className="text-xs text-textMuted">{p.total_used}{p.max_uses ? `/${p.max_uses}` : ""}</span>
                     </div>
                   </Td>
                   <Td className="text-textMuted text-xs">{formatDate(p.valid_to)}</Td>
