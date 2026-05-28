@@ -5,7 +5,7 @@ export function formatZAR(amount: number): string {
   })}`;
 }
 
-export function formatDate(iso: string): string {
+export function formatDate(iso: string | undefined | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-ZA", {
     day: "numeric", month: "short", year: "numeric",

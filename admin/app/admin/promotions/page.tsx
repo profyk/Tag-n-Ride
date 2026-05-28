@@ -79,7 +79,7 @@ export default function PromotionsPage() {
           <StatCard label="Active Promotions" value={String(active)} />
           <StatCard label="Total Redemptions" value={totalUses.toLocaleString()} />
           <StatCard label="Total Promos" value={String(promos.length)} />
-          <StatCard label="Expired" value={String(promos.filter((p) => new Date(p.valid_to) < new Date()).length)} />
+          <StatCard label="Expired" value={String(promos.filter((p) => p.valid_to && new Date(p.valid_to) < new Date()).length)} />
         </div>
 
         <Card>
