@@ -6799,6 +6799,106 @@ async def admin_resolve_discrepancy(
 
 
 # ════════════════════════════════════════════════════════════════
+# Database Management
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/db/tables")
+async def admin_db_tables(admin: dict = Depends(require_admin)):
+    if admin["role"] not in ("superadmin", "ceo", "cto"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                t.table_name,
+                COALESCE(s.n_live_tup, 0) AS rows
+            FROM information_schema.tables t
+            LEFT JOIN pg_stat_user_tables s ON s.relname = t.table_name
+            WHERE t.table_schema = 'public'
+              AND t.table_type = 'BASE TABLE'
+            ORDER BY t.table_name
+        """)
+        return [{"name": r["table_name"], "rows": r["rows"]} for r in rows]
+
+
+@api.get("/admin/db/table/{table_name}")
+async def admin_db_table(
+    table_name: str,
+    page: int = 1,
+    limit: int = 50,
+    admin: dict = Depends(require_admin),
+):
+    if admin["role"] not in ("superadmin", "ceo", "cto"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    # Validate table name — only allow alphanumeric + underscore
+    if not table_name.replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid table name")
+    limit = min(limit, 200)
+    offset = (page - 1) * limit
+    async with pool.acquire() as conn:
+        # Verify table exists in public schema
+        exists = await conn.fetchval(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1",
+            table_name,
+        )
+        if not exists:
+            raise HTTPException(status_code=404, detail="Table not found")
+        count = await conn.fetchval(f'SELECT COUNT(*) FROM "{table_name}"')
+        records = await conn.fetch(f'SELECT * FROM "{table_name}" LIMIT $1 OFFSET $2', limit, offset)
+        if not records:
+            # Get column names even for empty tables
+            cols = await conn.fetch(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position",
+                table_name,
+            )
+            return {"columns": [c["column_name"] for c in cols], "rows": [], "count": count}
+        columns = list(records[0].keys())
+        rows = [[str(v) if v is not None else None for v in r.values()] for r in records]
+        return {"columns": columns, "rows": rows, "count": count}
+
+
+class DbQueryIn(BaseModel):
+    sql: str
+
+@api.post("/admin/db/query")
+async def admin_db_query(body: DbQueryIn, admin: dict = Depends(require_admin)):
+    if admin["role"] not in ("superadmin", "ceo", "cto"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    sql = body.sql.strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail="Empty query")
+    # Block destructive DDL
+    upper = sql.upper()
+    blocked = ("DROP TABLE", "DROP DATABASE", "TRUNCATE", "ALTER TABLE", "DROP SCHEMA", "CREATE TABLE")
+    for b in blocked:
+        if b in upper:
+            raise HTTPException(status_code=400, detail=f"Statement not allowed: {b}")
+    async with pool.acquire() as conn:
+        try:
+            import time
+            start = time.time()
+            if upper.lstrip().startswith("SELECT") or upper.lstrip().startswith("WITH"):
+                records = await conn.fetch(sql)
+                duration_ms = int((time.time() - start) * 1000)
+                if not records:
+                    return {"columns": [], "rows": [], "count": 0, "duration_ms": duration_ms}
+                columns = list(records[0].keys())
+                rows = [[str(v) if v is not None else None for v in r.values()] for r in records]
+                return {"columns": columns, "rows": rows, "count": len(rows), "duration_ms": duration_ms}
+            else:
+                result = await conn.execute(sql)
+                duration_ms = int((time.time() - start) * 1000)
+                count = 0
+                try:
+                    count = int(result.split()[-1])
+                except Exception:
+                    pass
+                await audit(conn, admin["id"], "db_mutation", None, "database", {"sql": sql[:500]})
+                return {"columns": [], "rows": [], "count": count, "duration_ms": duration_ms}
+        except Exception as e:
+            return {"columns": [], "rows": [], "count": 0, "error": str(e)}
+
+
+# ════════════════════════════════════════════════════════════════
 # Must be last line
 # ════════════════════════════════════════════════════════════════
 app.include_router(api)
