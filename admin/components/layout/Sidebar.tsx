@@ -150,6 +150,11 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+const HR_NAV: NavItem[] = [
+  { label: "HR · Staff",  href: "/admin/hr",      icon: Users2 },
+  { label: "Payroll",     href: "/admin/payroll",  icon: Banknote },
+];
+
 const SUPERADMIN_NAV: NavItem[] = [
   { label: "Admin Accounts", href: "/admin/admins",        icon: Shield },
   { label: "Roles & Perms",  href: "/admin/roles",         icon: Lock },
@@ -265,6 +270,7 @@ export function Sidebar() {
   const path = usePathname();
   const role = getRole() || "";
   const superAdmin = isSuperAdmin();
+  const hrAllowed = ["superadmin", "ceo", "cfo"].includes(role);
   const [search, setSearch] = useState("");
   const [superOpen, setSuperOpen] = useState(false);
 
@@ -363,6 +369,21 @@ export function Sidebar() {
             />
           ))}
         </div>
+
+        {/* Human Resources — CEO / CFO / Superadmin only */}
+        {hrAllowed && (
+          <div className="mt-2">
+            <p className="px-3 py-1.5 text-[10px] font-extrabold tracking-widest uppercase text-yellow flex items-center gap-1.5">
+              <Users2 size={10} className="text-yellow" /> Human Resources
+            </p>
+            <div className="ml-2 pl-2 border-l border-yellow/20 space-y-0.5 mb-1">
+              {HR_NAV.filter(i => !search || i.label.toLowerCase().includes(search.toLowerCase()))
+                .map(item => (
+                  <NavLink key={item.href} href={item.href} icon={item.icon} label={item.label} compact />
+                ))}
+            </div>
+          </div>
+        )}
 
         {/* Superadmin */}
         {superAdmin && filteredSuper.length > 0 && (
