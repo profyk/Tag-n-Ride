@@ -1,16 +1,16 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { getRole, isSuperAdmin } from "@/lib/api";
+import { api, getRole, hasPermission } from "@/lib/api";
 import { DangerPinModal, useDangerPin, getDangerToken } from "@/components/DangerPinModal";
 import toast from "react-hot-toast";
 import {
-  Users, Plus, Shield, ShieldX, Eye, EyeOff, Lock, Unlock,
+  Users, Plus, Shield, ShieldX, Lock, Unlock,
   Edit2, UserX, FileText, Phone, Mail, Building, CreditCard,
   Hash, Calendar, CheckCircle, AlertTriangle, Download,
-  Search, Star, Briefcase, UserCheck, Clock,
+  Search, Briefcase, UserCheck, Clock, Wallet, Check, X as XIcon,
 } from "lucide-react";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
@@ -30,7 +30,7 @@ function calcAnnualPAYE(annualGross: number): number {
   else if (annualGross <= 857_900)   tax = 179_147 + (annualGross - 673_000) * 0.39;
   else if (annualGross <= 1_817_000) tax = 251_258 + (annualGross - 857_900) * 0.41;
   else                               tax = 644_489 + (annualGross - 1_817_000) * 0.45;
-  return Math.max(0, tax - 17_235); // minus primary rebate
+  return Math.max(0, tax - 17_235);
 }
 const monthlyPAYE = (monthly: number) => calcAnnualPAYE(monthly * 12) / 12;
 const monthlyUIF  = (monthly: number) => Math.min(monthly * 0.01, 177.12);
@@ -54,7 +54,6 @@ type Staff = {
   email?: string;
   phone?: string;
   created_at: string;
-  // sensitive — only revealed after PIN
   id_number?: string;
   tax_ref?: string;
   bank_name?: string;
@@ -63,6 +62,36 @@ type Staff = {
   branch_code?: string;
   emergency_name?: string;
   emergency_phone?: string;
+};
+
+type SalaryPayment = {
+  id: string;
+  employee_name: string;
+  staff_id?: string;
+  bank_name: string;
+  account_number: string;
+  account_holder: string;
+  branch_code?: string;
+  gross_amount: number;
+  paye_deducted: number;
+  uif_deducted: number;
+  net_amount: number;
+  pay_period: string;
+  description?: string;
+  status: string;
+  created_by_name?: string;
+  approved_by_name?: string;
+  rejection_reason?: string;
+  payment_reference?: string;
+  paid_at?: string;
+  created_at: string;
+};
+
+type SystemWallet = {
+  balance: number;
+  total_fees_collected: number;
+  total_salary_paid: number;
+  available: number;
 };
 
 // ── Access guard ──────────────────────────────────────────────────────────────
@@ -76,7 +105,7 @@ function AccessDenied() {
         <div className="text-center">
           <p className="text-red font-extrabold text-xl">Access Restricted</p>
           <p className="text-textMuted text-sm mt-2 max-w-sm">
-            This page is classified. Access is limited to <strong>Superadmin</strong>, <strong>CEO</strong>, and <strong>CFO</strong> roles only.
+            This page is classified. Access is limited to <strong>Superadmin</strong>, <strong>CEO</strong>, <strong>CFO</strong>, and <strong>HR</strong> roles only.
           </p>
           <p className="text-textDim text-xs mt-3">All access attempts are logged and reviewed.</p>
         </div>
@@ -118,7 +147,7 @@ function EmptyHR({ onAdd }: { onAdd: () => void }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function HRPage() {
   const role = getRole() || "";
-  if (!["superadmin", "ceo", "cfo"].includes(role)) return <AccessDenied />;
+  if (!["superadmin", "ceo", "cfo", "hr"].includes(role)) return <AccessDenied />;
 
   return <HRPageInner />;
 }
@@ -126,13 +155,15 @@ export default function HRPage() {
 function HRPageInner() {
   const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
 
+  const [activeTab, setActiveTab] = useState<"staff" | "salary">("staff");
+
+  // ── Staff state ──
   const [staff, setStaff]   = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
-  // Modals
   const [addModal, setAddModal]   = useState(false);
   const [viewStaff, setViewStaff] = useState<Staff | null>(null);
   const [editStaff, setEditStaff] = useState<Staff | null>(null);
@@ -140,10 +171,8 @@ function HRPageInner() {
   const [termReason, setTermReason] = useState("");
   const [termDate, setTermDate]   = useState("");
 
-  // Revealed sensitive data — cleared on unmount / new reveal
   const [revealed, setRevealed]   = useState<Record<string, Partial<Staff>>>({});
 
-  // Add / Edit form state
   const emptyForm: Partial<Staff> = {
     full_name: "", role_title: "", department: DEPARTMENTS[0],
     employment_type: EMP_TYPES[0], status: "active",
@@ -157,7 +186,24 @@ function HRPageInner() {
   const [saving, setSaving]       = useState(false);
   const [terminating, setTerminating] = useState(false);
 
-  // Clear revealed data after 5 min
+  // ── Salary state ──
+  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
+  const [systemWallet, setSystemWallet] = useState<SystemWallet | null>(null);
+  const [salaryLoading, setSalaryLoading] = useState(false);
+  const [createSalaryModal, setCreateSalaryModal] = useState(false);
+  const [rejectModal, setRejectModal] = useState<SalaryPayment | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const emptySalaryForm = {
+    employee_name: "", bank_name: SA_BANKS[0],
+    account_number: "", account_holder: "",
+    branch_code: SA_BRANCH[SA_BANKS[0]] || "",
+    gross_amount: 0, pay_period: "", description: "",
+  };
+  const [salaryForm, setSalaryForm] = useState(emptySalaryForm);
+
+  const canApproveOrPay = hasPermission("large_withdrawals");
+
+  // Clear revealed sensitive data after 5 min
   useEffect(() => {
     const t = setTimeout(() => setRevealed({}), 5 * 60 * 1000);
     return () => clearTimeout(t);
@@ -174,6 +220,20 @@ function HRPageInner() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadSalary = useCallback(async () => {
+    setSalaryLoading(true);
+    try {
+      const [sp, sw] = await Promise.all([api.salaryPayments(), api.systemWallet()]);
+      setSalaryPayments(sp.data ?? []);
+      setSystemWallet(sw.data ?? null);
+    } catch { }
+    finally { setSalaryLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "salary") loadSalary();
+  }, [activeTab, loadSalary]);
 
   // ── Reveal sensitive data ──
   const handleReveal = async (s: Staff) => {
@@ -240,7 +300,7 @@ function HRPageInner() {
     finally { setTerminating(false); }
   };
 
-  // ── Export ──
+  // ── Export staff ──
   const handleExport = async () => {
     const token = await requestPin();
     if (!token) return;
@@ -257,7 +317,55 @@ function HRPageInner() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  // ── Derived metrics ──
+  // ── Salary handlers ──
+  const handleCreateSalary = async () => {
+    if (!salaryForm.employee_name || !salaryForm.account_number || !salaryForm.account_holder || !salaryForm.gross_amount || !salaryForm.pay_period) {
+      toast.error("Employee, account details, amount, and period are required"); return;
+    }
+    try {
+      const paye = monthlyPAYE(salaryForm.gross_amount);
+      const uif  = monthlyUIF(salaryForm.gross_amount);
+      await api.createSalaryPayment({
+        ...salaryForm,
+        paye_deducted: paye,
+        uif_deducted: uif,
+        net_amount: salaryForm.gross_amount - paye - uif,
+      });
+      toast.success("Salary payment submitted — awaiting CFO/CEO approval");
+      setCreateSalaryModal(false);
+      setSalaryForm(emptySalaryForm);
+      loadSalary();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleApproveSalary = async (sp: SalaryPayment) => {
+    try {
+      await api.approveSalaryPayment(sp.id);
+      toast.success(`Payment for ${sp.employee_name} approved`);
+      loadSalary();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleRejectSalary = async () => {
+    if (!rejectModal || !rejectReason.trim()) { toast.error("Reason is required"); return; }
+    try {
+      await api.rejectSalaryPayment(rejectModal.id, rejectReason);
+      toast.success("Payment rejected");
+      setRejectModal(null); setRejectReason("");
+      loadSalary();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handlePaySalary = async (sp: SalaryPayment) => {
+    if (!confirm(`Pay ${sp.employee_name} ${formatZAR(sp.net_amount)} for ${sp.pay_period} via gateway?`)) return;
+    try {
+      await api.paySalary(sp.id);
+      toast.success("Salary payment processed via Stitch gateway");
+      loadSalary();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  // ── Derived ──
   const active = staff.filter(s => s.status === "active").length;
   const totalPayroll = staff.filter(s => s.status === "active").reduce((sum, s) => sum + s.gross_salary, 0);
   const totalPAYE = staff.filter(s => s.status === "active").reduce((sum, s) => sum + monthlyPAYE(s.gross_salary), 0);
@@ -271,7 +379,7 @@ function HRPageInner() {
 
   const depts = Array.from(new Set(staff.map(s => s.department)));
 
-  const openAdd = () => { setForm(emptyForm); setAddModal(true); };
+  const openAdd  = () => { setForm(emptyForm); setAddModal(true); };
   const openEdit = (s: Staff) => { setForm({ ...s }); setEditStaff(s); };
 
   return (
@@ -289,108 +397,231 @@ function HRPageInner() {
           </p>
         </div>
 
-        {/* KPI row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: "Active Employees", value: active, color: "text-cyan", border: "border-cyan/20", icon: UserCheck },
-            { label: "Monthly Payroll", value: formatZAR(totalPayroll), color: "text-green", border: "border-green/20", icon: CreditCard },
-            { label: "PAYE Liability", value: formatZAR(totalPAYE), color: "text-yellow", border: "border-yellow/20", icon: Hash },
-            { label: "UIF (Employee)", value: formatZAR(totalUIF), color: "text-purple", border: "border-purple/20", icon: Shield },
-          ].map(({ label, value, color, border, icon: Ic }) => (
-            <div key={label} className={`bg-bg2 border rounded-xl p-4 ${border}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <Ic size={14} className={color} />
-                <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">{label}</p>
-              </div>
-              <p className={`text-xl font-black ${color}`}>{value}</p>
+        {/* Tab navigation */}
+        <div className="flex gap-1 p-1 bg-bg2 rounded-xl border border-border w-fit">
+          <button
+            onClick={() => setActiveTab("staff")}
+            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "staff" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}
+          >
+            <Users size={12} /> Staff
+          </button>
+          <button
+            onClick={() => setActiveTab("salary")}
+            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "salary" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}
+          >
+            <Wallet size={12} /> Salary Payouts
+          </button>
+        </div>
+
+        {/* ═══════════════ STAFF TAB ═══════════════ */}
+        {activeTab === "staff" && (
+          <>
+            {/* KPI row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: "Active Employees", value: active, color: "text-cyan", border: "border-cyan/20", icon: UserCheck },
+                { label: "Monthly Payroll", value: formatZAR(totalPayroll), color: "text-green", border: "border-green/20", icon: CreditCard },
+                { label: "PAYE Liability", value: formatZAR(totalPAYE), color: "text-yellow", border: "border-yellow/20", icon: Hash },
+                { label: "UIF (Employee)", value: formatZAR(totalUIF), color: "text-purple", border: "border-purple/20", icon: Shield },
+              ].map(({ label, value, color, border, icon: Ic }) => (
+                <div key={label} className={`bg-bg2 border rounded-xl p-4 ${border}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Ic size={14} className={color} />
+                    <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">{label}</p>
+                  </div>
+                  <p className={`text-xl font-black ${color}`}>{value}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-textDim" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, title..."
-              className="w-full bg-bg2 border border-border rounded-lg pl-8 pr-3 py-2 text-xs text-text placeholder:text-textDim focus:outline-none focus:border-cyan" />
-          </div>
-          <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
-            className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan">
-            <option value="">All Departments</option>
-            {depts.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan">
-            <option value="">All Status</option>
-            <option value="active">Active</option>
-            <option value="probation">Probation</option>
-            <option value="on_leave">On Leave</option>
-            <option value="terminated">Terminated</option>
-          </select>
-          <div className="flex gap-2 ml-auto">
-            <Button variant="secondary" onClick={handleExport}><Download size={13} /> Export</Button>
-            <Button onClick={openAdd}><Plus size={13} /> Add Employee</Button>
-          </div>
-        </div>
+            {/* Toolbar */}
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-textDim" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, title..."
+                  className="w-full bg-bg2 border border-border rounded-lg pl-8 pr-3 py-2 text-xs text-text placeholder:text-textDim focus:outline-none focus:border-cyan" />
+              </div>
+              <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
+                className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan">
+                <option value="">All Departments</option>
+                {depts.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan">
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="probation">Probation</option>
+                <option value="on_leave">On Leave</option>
+                <option value="terminated">Terminated</option>
+              </select>
+              <div className="flex gap-2 ml-auto">
+                <Button variant="secondary" onClick={handleExport}><Download size={13} /> Export</Button>
+                <Button onClick={openAdd}><Plus size={13} /> Add Employee</Button>
+              </div>
+            </div>
 
-        {/* Staff table */}
-        {loading ? <Spinner /> : !filtered.length ? (
-          staff.length === 0 ? <EmptyHR onAdd={openAdd} /> : (
-            <div className="text-center py-12 text-textMuted">No employees match the filter</div>
-          )
-        ) : (
-          <Table headers={["Employee", "Department", "Role", "Type", "Gross Salary", "PAYE", "UIF", "Status", "Start", ""]}
-            empty={false}>
-            {filtered.map(s => {
-              const paye = monthlyPAYE(s.gross_salary);
-              const uif  = monthlyUIF(s.gross_salary);
-              const net  = s.gross_salary - paye - uif;
-              const isRevealed = !!revealed[s.id];
-              return (
-                <Tr key={s.id} onClick={() => setViewStaff(s)}>
-                  <Td>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-cyanDim border border-cyan/20 flex items-center justify-center text-[11px] font-extrabold text-cyan">
-                        {s.full_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
+            {/* Staff table */}
+            {loading ? <Spinner /> : !filtered.length ? (
+              staff.length === 0 ? <EmptyHR onAdd={openAdd} /> : (
+                <div className="text-center py-12 text-textMuted">No employees match the filter</div>
+              )
+            ) : (
+              <Table headers={["Employee", "Department", "Role", "Type", "Gross Salary", "PAYE", "UIF", "Status", "Start", ""]}
+                empty={false}>
+                {filtered.map(s => {
+                  const paye = monthlyPAYE(s.gross_salary);
+                  const uif  = monthlyUIF(s.gross_salary);
+                  const isRevealed = !!revealed[s.id];
+                  return (
+                    <Tr key={s.id} onClick={() => setViewStaff(s)}>
+                      <Td>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-cyanDim border border-cyan/20 flex items-center justify-center text-[11px] font-extrabold text-cyan">
+                            {s.full_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-text text-xs">{s.full_name}</p>
+                            <p className="text-textDim text-[10px]">{s.email || "—"}</p>
+                          </div>
+                        </div>
+                      </Td>
+                      <Td className="text-textMuted text-xs">{s.department}</Td>
+                      <Td className="text-textMuted text-xs">{s.role_title}</Td>
+                      <Td><Badge label={s.employment_type} tone="cyan" /></Td>
+                      <Td className="font-bold text-green">{formatZAR(s.gross_salary)}</Td>
+                      <Td className="text-yellow text-xs">{formatZAR(paye)}</Td>
+                      <Td className="text-purple text-xs">{formatZAR(uif)}</Td>
+                      <Td><Badge label={s.status} tone={STATUS_TONE[s.status] || "cyan"} /></Td>
+                      <Td className="text-textDim text-xs">{formatDate(s.start_date)}</Td>
+                      <Td>
+                        <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleReveal(s)}
+                            title={isRevealed ? "Hide sensitive data" : "Reveal sensitive data"}
+                            className={`p-1.5 rounded-lg border transition-all ${isRevealed ? "bg-yellow/10 border-yellow/30 text-yellow" : "border-border text-textDim hover:text-yellow hover:border-yellow/30"}`}>
+                            {isRevealed ? <Unlock size={11} /> : <Lock size={11} />}
+                          </button>
+                          <button onClick={() => openEdit(s)}
+                            className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
+                            <Edit2 size={11} />
+                          </button>
+                          {s.status !== "terminated" && (
+                            <button onClick={() => setTermStaff(s)}
+                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all">
+                              <UserX size={11} />
+                            </button>
+                          )}
+                        </div>
+                      </Td>
+                    </Tr>
+                  );
+                })}
+              </Table>
+            )}
+          </>
+        )}
+
+        {/* ═══════════════ SALARY TAB ═══════════════ */}
+        {activeTab === "salary" && (
+          <div className="space-y-4">
+
+            {/* System wallet cards */}
+            {systemWallet && (
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-bg2 border border-cyan/20 rounded-xl p-4">
+                  <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">System Wallet Balance</p>
+                  <p className="text-2xl font-black text-cyan">{formatZAR(systemWallet.balance)}</p>
+                  <p className="text-[10px] text-textDim mt-1">Trust account — gateway funds</p>
+                </div>
+                <div className="bg-bg2 border border-green/20 rounded-xl p-4">
+                  <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Total Fees Collected</p>
+                  <p className="text-2xl font-black text-green">{formatZAR(systemWallet.total_fees_collected)}</p>
+                </div>
+                <div className="bg-bg2 border border-red/20 rounded-xl p-4">
+                  <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Total Salaries Paid</p>
+                  <p className="text-2xl font-black text-red">{formatZAR(systemWallet.total_salary_paid)}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Toolbar */}
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-textMuted">
+                {salaryPayments.length} payment record{salaryPayments.length !== 1 ? "s" : ""}
+              </p>
+              <Button onClick={() => setCreateSalaryModal(true)}>
+                <Plus size={13} /> New Salary Payment
+              </Button>
+            </div>
+
+            {/* Payments table */}
+            {salaryLoading ? <Spinner /> : (
+              <Table
+                headers={["Employee", "Bank / Account", "Gross", "PAYE", "UIF", "Net Pay", "Period", "Status", "Actions"]}
+                empty={!salaryPayments.length}
+              >
+                {salaryPayments.map(sp => (
+                  <Tr key={sp.id}>
+                    <Td>
+                      <p className="font-semibold text-text text-xs">{sp.employee_name}</p>
+                      {sp.description && <p className="text-[10px] text-textDim">{sp.description}</p>}
+                    </Td>
+                    <Td>
+                      <p className="text-xs text-textMuted">{sp.bank_name}</p>
+                      <p className="text-[10px] font-mono text-textDim">****{sp.account_number.slice(-4)}</p>
+                    </Td>
+                    <Td className="font-bold text-text text-xs">{formatZAR(sp.gross_amount)}</Td>
+                    <Td className="text-yellow text-xs">{formatZAR(sp.paye_deducted)}</Td>
+                    <Td className="text-purple text-xs">{formatZAR(sp.uif_deducted)}</Td>
+                    <Td className="font-bold text-green text-xs">{formatZAR(sp.net_amount)}</Td>
+                    <Td className="text-textMuted text-xs">{sp.pay_period}</Td>
+                    <Td>
+                      <Badge
+                        label={sp.status}
+                        tone={sp.status === "paid" ? "green" : sp.status === "approved" ? "cyan" : sp.status === "rejected" ? "red" : "yellow"}
+                      />
+                    </Td>
+                    <Td>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {sp.status === "pending" && canApproveOrPay && (
+                          <>
+                            <button
+                              onClick={() => handleApproveSalary(sp)}
+                              title="Approve"
+                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all"
+                            >
+                              <Check size={11} />
+                            </button>
+                            <button
+                              onClick={() => setRejectModal(sp)}
+                              title="Reject"
+                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all"
+                            >
+                              <XIcon size={11} />
+                            </button>
+                          </>
+                        )}
+                        {sp.status === "approved" && canApproveOrPay && (
+                          <button
+                            onClick={() => handlePaySalary(sp)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-green/30 bg-green/10 text-green text-[10px] font-bold hover:bg-green/20 transition-all"
+                          >
+                            <Wallet size={11} /> Pay
+                          </button>
+                        )}
+                        {sp.status === "paid" && sp.paid_at && (
+                          <span className="text-[10px] text-textDim">{formatDate(sp.paid_at)}</span>
+                        )}
+                        {sp.status === "rejected" && (
+                          <span className="text-[10px] text-red/70" title={sp.rejection_reason || ""}>Rejected</span>
+                        )}
                       </div>
-                      <div>
-                        <p className="font-semibold text-text text-xs">{s.full_name}</p>
-                        <p className="text-textDim text-[10px]">{s.email || "—"}</p>
-                      </div>
-                    </div>
-                  </Td>
-                  <Td className="text-textMuted text-xs">{s.department}</Td>
-                  <Td className="text-textMuted text-xs">{s.role_title}</Td>
-                  <Td><Badge label={s.employment_type} tone="cyan" /></Td>
-                  <Td className="font-bold text-green">{formatZAR(s.gross_salary)}</Td>
-                  <Td className="text-yellow text-xs">{formatZAR(paye)}</Td>
-                  <Td className="text-purple text-xs">{formatZAR(uif)}</Td>
-                  <Td><Badge label={s.status} tone={STATUS_TONE[s.status] || "cyan"} /></Td>
-                  <Td className="text-textDim text-xs">{formatDate(s.start_date)}</Td>
-                  <Td>
-                    <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleReveal(s)}
-                        title={isRevealed ? "Hide sensitive data" : "Reveal sensitive data"}
-                        className={`p-1.5 rounded-lg border transition-all ${isRevealed ? "bg-yellow/10 border-yellow/30 text-yellow" : "border-border text-textDim hover:text-yellow hover:border-yellow/30"}`}>
-                        {isRevealed ? <Unlock size={11} /> : <Lock size={11} />}
-                      </button>
-                      <button onClick={() => openEdit(s)}
-                        className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
-                        <Edit2 size={11} />
-                      </button>
-                      {s.status !== "terminated" && (
-                        <button onClick={() => setTermStaff(s)}
-                          className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all">
-                          <UserX size={11} />
-                        </button>
-                      )}
-                    </div>
-                  </Td>
-                </Tr>
-              );
-            })}
-          </Table>
+                    </Td>
+                  </Tr>
+                ))}
+              </Table>
+            )}
+          </div>
         )}
       </div>
 
@@ -404,7 +635,6 @@ function HRPageInner() {
           const isRevealed = !!revealed[viewStaff.id];
           return (
             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-              {/* Header */}
               <div className="flex items-center gap-4 pb-4 border-b border-border">
                 <div className="w-14 h-14 rounded-2xl bg-cyanDim border border-cyan/20 flex items-center justify-center text-xl font-extrabold text-cyan">
                   {viewStaff.full_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
@@ -419,7 +649,6 @@ function HRPageInner() {
                 </div>
               </div>
 
-              {/* Pay breakdown */}
               <div className="bg-bg rounded-xl border border-border p-4">
                 <p className="text-[10px] font-extrabold text-textDim uppercase tracking-widest mb-3">Compensation</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -437,7 +666,6 @@ function HRPageInner() {
                 </div>
               </div>
 
-              {/* Basic info */}
               <div className="bg-bg rounded-xl border border-border p-4">
                 <p className="text-[10px] font-extrabold text-textDim uppercase tracking-widest mb-3">Details</p>
                 <MaskedField value={viewStaff.email}  label="Work Email"  icon={Mail} />
@@ -446,7 +674,6 @@ function HRPageInner() {
                 {viewStaff.end_date && <MaskedField value={formatDate(viewStaff.end_date)} label="End Date" icon={Calendar} />}
               </div>
 
-              {/* Sensitive data */}
               <div className={`rounded-xl border p-4 ${isRevealed ? "bg-yellow/5 border-yellow/30" : "bg-bg border-border"}`}>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-[10px] font-extrabold text-textDim uppercase tracking-widest flex items-center gap-1.5">
@@ -498,14 +725,13 @@ function HRPageInner() {
         })()}
       </Modal>
 
-      {/* ── Add / Edit Modal ── */}
+      {/* ── Add / Edit Staff Modal ── */}
       <Modal
         open={addModal || !!editStaff}
         onClose={() => { setAddModal(false); setEditStaff(null); setForm(emptyForm); }}
         title={editStaff ? "Edit Employee" : "Add Employee"}>
         <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
 
-          {/* Basic info */}
           <div>
             <p className="text-[10px] font-extrabold text-textDim uppercase tracking-widest mb-3">Basic Information</p>
             <div className="space-y-3">
@@ -560,7 +786,6 @@ function HRPageInner() {
             </div>
           </div>
 
-          {/* Compensation */}
           <div>
             <p className="text-[10px] font-extrabold text-textDim uppercase tracking-widest mb-3">Compensation</p>
             <div>
@@ -583,7 +808,6 @@ function HRPageInner() {
             </div>
           </div>
 
-          {/* Sensitive info — locked behind warning */}
           <div className="border border-yellow/20 rounded-xl p-4 bg-yellow/5">
             <p className="text-[10px] font-extrabold text-yellow uppercase tracking-widest mb-1 flex items-center gap-1.5">
               <Lock size={10} /> Sensitive Data — Stored Encrypted
@@ -687,7 +911,113 @@ function HRPageInner() {
         )}
       </Modal>
 
-      {/* Global style helper */}
+      {/* ── Create Salary Payment Modal ── */}
+      <Modal
+        open={createSalaryModal}
+        onClose={() => { setCreateSalaryModal(false); setSalaryForm(emptySalaryForm); }}
+        title="Create Salary Payment"
+      >
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label-sm">Employee Name</label>
+              <Input value={salaryForm.employee_name} onChange={e => setSalaryForm(f => ({ ...f, employee_name: e.target.value }))} placeholder="Jane Smith" />
+            </div>
+            <div>
+              <label className="label-sm">Pay Period</label>
+              <Input value={salaryForm.pay_period} onChange={e => setSalaryForm(f => ({ ...f, pay_period: e.target.value }))} placeholder="May 2026" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label-sm">Bank Name</label>
+              <Select value={salaryForm.bank_name} onChange={e => {
+                const b = e.target.value;
+                setSalaryForm(f => ({ ...f, bank_name: b, branch_code: SA_BRANCH[b] || "" }));
+              }} className="w-full">
+                {SA_BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="label-sm">Branch Code</label>
+              <Input value={salaryForm.branch_code} onChange={e => setSalaryForm(f => ({ ...f, branch_code: e.target.value }))} placeholder="470010" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label-sm">Account Holder Name</label>
+              <Input value={salaryForm.account_holder} onChange={e => setSalaryForm(f => ({ ...f, account_holder: e.target.value }))} placeholder="Jane Smith" />
+            </div>
+            <div>
+              <label className="label-sm">Account Number</label>
+              <Input value={salaryForm.account_number} onChange={e => setSalaryForm(f => ({ ...f, account_number: e.target.value }))} placeholder="1234567890" />
+            </div>
+          </div>
+          <div>
+            <label className="label-sm">Monthly Gross Amount (ZAR)</label>
+            <Input
+              type="number"
+              value={salaryForm.gross_amount || ""}
+              onChange={e => setSalaryForm(f => ({ ...f, gross_amount: parseFloat(e.target.value) || 0 }))}
+              placeholder="25000"
+            />
+            {(salaryForm.gross_amount || 0) > 0 && (
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                {[
+                  { l: "PAYE est.", v: formatZAR(monthlyPAYE(salaryForm.gross_amount || 0)), c: "text-yellow" },
+                  { l: "UIF (1%)", v: formatZAR(monthlyUIF(salaryForm.gross_amount || 0)), c: "text-purple" },
+                  { l: "Net Pay", v: formatZAR((salaryForm.gross_amount || 0) - monthlyPAYE(salaryForm.gross_amount || 0) - monthlyUIF(salaryForm.gross_amount || 0)), c: "text-green" },
+                ].map(i => (
+                  <div key={i.l} className="bg-bg2 rounded-lg border border-border p-2 text-center">
+                    <p className="text-[10px] text-textDim">{i.l}</p>
+                    <p className={`text-sm font-bold mt-0.5 ${i.c}`}>{i.v}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="label-sm">Description (Optional)</label>
+            <Input value={salaryForm.description} onChange={e => setSalaryForm(f => ({ ...f, description: e.target.value }))} placeholder="Monthly salary — May 2026" />
+          </div>
+          <p className="text-textDim text-xs flex items-center gap-1.5">
+            <AlertTriangle size={10} /> Payment will be submitted for CFO/CEO/Superadmin approval before processing.
+          </p>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="secondary" onClick={() => { setCreateSalaryModal(false); setSalaryForm(emptySalaryForm); }}>Cancel</Button>
+            <Button onClick={handleCreateSalary}>
+              <Plus size={13} /> Submit for Approval
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Reject Salary Modal ── */}
+      <Modal open={!!rejectModal} onClose={() => { setRejectModal(null); setRejectReason(""); }} title="Reject Salary Payment">
+        {rejectModal && (
+          <div className="space-y-4">
+            <p className="text-textMuted text-sm">
+              Rejecting payment for <strong className="text-text">{rejectModal.employee_name}</strong> ({rejectModal.pay_period}) — {formatZAR(rejectModal.net_amount)} net.
+            </p>
+            <div>
+              <label className="label-sm">Rejection Reason</label>
+              <textarea
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Reason for rejection..."
+                className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-textDim focus:outline-none focus:border-red resize-none h-20"
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="secondary" onClick={() => { setRejectModal(null); setRejectReason(""); }}>Cancel</Button>
+              <Button variant="danger" onClick={handleRejectSalary}>
+                <XIcon size={13} /> Reject Payment
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <style>{`.label-sm { display: block; font-size: 10px; font-weight: 700; color: var(--textMuted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }`}</style>
     </AdminShell>
   );

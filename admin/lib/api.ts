@@ -38,7 +38,7 @@ export function isAuthenticated(): boolean {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     if (payload.exp * 1000 < Date.now()) { clearToken(); return false; }
-    return ["admin", "superadmin", "finance", "support", "ceo", "cto", "cfo"].includes(payload.role);
+    return ["admin", "superadmin", "finance", "support", "ceo", "cto", "cfo", "hr"].includes(payload.role);
   } catch { return false; }
 }
 
@@ -430,6 +430,27 @@ export type DashboardStats = {
   }[];
 };
 
+// ── Auth-gated file download (CSV/PDF) ──
+export async function downloadAuthFile(path: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).detail || `Download failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(href);
+}
+
 // ── API ──
 export const api = {
   login: (email: string, password: string) =>
@@ -529,10 +550,8 @@ export const api = {
   adjustBalance: (body: { user_id: string; amount: number; note?: string }, token?: string | null) =>
     client.post<{ ok: boolean; new_balance: number }>("/api/superadmin/adjust-balance", body, token ? { headers: { "X-Danger-Token": token } } : undefined),
 
-  exportTransactions: () =>
-    window.open(`${BASE_URL}/api/admin/export/transactions`, "_blank"),
-  exportUsers: () =>
-    window.open(`${BASE_URL}/api/admin/export/users`, "_blank"),
+  exportTransactions: () => downloadAuthFile("/api/admin/export/transactions", "transactions.csv"),
+  exportUsers: () => downloadAuthFile("/api/admin/export/users", "users.csv"),
 
   // Wallet operations
   wallets: (params?: { search?: string; frozen?: boolean }) =>
@@ -640,4 +659,18 @@ export const api = {
     ),
   resolveDiscrepancy: (id: string, resolution_note: string) =>
     client.post(`/api/admin/reconciliation/discrepancies/${id}/resolve`, { resolution_note }),
+
+  // Salary payments
+  salaryPayments: (status?: string) =>
+    client.get<any[]>("/api/admin/salary-payments", { params: status ? { status } : {} }),
+  createSalaryPayment: (body: {
+    employee_name: string; staff_id?: string; bank_name: string; account_number: string;
+    account_holder: string; branch_code?: string; gross_amount: number; paye_deducted: number;
+    uif_deducted: number; net_amount: number; pay_period: string; description?: string;
+  }) => client.post<{ ok: boolean; id: string; net_amount: number }>("/api/admin/salary-payments", body),
+  approveSalaryPayment: (id: string) => client.post(`/api/admin/salary-payments/${id}/approve`),
+  rejectSalaryPayment: (id: string, reason: string) =>
+    client.post(`/api/admin/salary-payments/${id}/reject`, { reason }),
+  paySalary: (id: string) => client.post<{ ok: boolean; reference: string; net_amount: number }>(`/api/admin/salary-payments/${id}/pay`),
+  systemWallet: () => client.get<{ balance: number; total_fees_collected: number; total_salary_paid: number; available: number }>("/api/admin/system-wallet"),
 };

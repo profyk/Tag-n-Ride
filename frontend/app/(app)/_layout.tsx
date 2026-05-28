@@ -102,6 +102,7 @@ function AppTabs() {
         name="notifications"
         options={{
           title: "Alerts",
+          href: null,
           tabBarIcon: ({ color, size }) => (
             <NotifTabIcon color={color} size={size} />
           ),

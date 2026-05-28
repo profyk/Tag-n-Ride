@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal, Select } from "@/components/ui";
 import { api, User, hasPermission, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
-import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, FlaskConical, Copy, Download, X } from "lucide-react";
+import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, Copy, Download, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
@@ -45,7 +45,6 @@ export default function UsersPage() {
   const [blockReason, setBlockReason] = useState("");
   const [pinModal, setPinModal] = useState<{ name: string; pin: string } | null>(null);
   const superAdmin = isSuperAdmin();
-  const canManageTest = hasPermission("manage_test_users");
   const dangerPin = useDangerPin();
 
   const load = (q?: string) => {
@@ -98,19 +97,6 @@ export default function UsersPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Delete failed");
       toast.success(`${u.full_name} deleted`);
-      load(query);
-    } catch (e: any) { toast.error(e.message); }
-  };
-
-  const handleToggleTest = async (u: any) => {
-    const isTest = !u.is_test;
-    try {
-      const res = await fetch(`${BASE}/api/admin/test-users/${u.id}/mark`, {
-        method: "PATCH", headers: authHeaders(), body: JSON.stringify({ is_test: isTest }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed");
-      toast.success(isTest ? `${u.full_name} marked as test` : `${u.full_name} unmarked`);
       load(query);
     } catch (e: any) { toast.error(e.message); }
   };
@@ -178,11 +164,6 @@ export default function UsersPage() {
                 <Td>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-semibold">{u.full_name}</span>
-                    {u.is_test && (
-                      <span className="flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 bg-purple/10 border border-purple/20 rounded text-purple uppercase">
-                        <FlaskConical size={9} /> TEST
-                      </span>
-                    )}
                     {u.flagged && (
                       <span className="text-[10px] text-red font-bold">⚑ FLAGGED</span>
                     )}
@@ -220,11 +201,6 @@ export default function UsersPage() {
                     ) : (
                       <Button variant="ghost" onClick={() => setFlagModal(u)}>
                         <Flag size={12} /> Flag
-                      </Button>
-                    )}
-                    {canManageTest && (
-                      <Button variant="ghost" onClick={() => handleToggleTest(u)}>
-                        <FlaskConical size={12} /> {u.is_test ? "Unmark" : "Test"}
                       </Button>
                     )}
                     {superAdmin && (

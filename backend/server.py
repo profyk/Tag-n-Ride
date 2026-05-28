@@ -128,21 +128,21 @@ ROLE_PERMISSIONS = {
     "support": ["reset_pin", "manage_users"],
     "hr": [
         "view_audit", "view_analytics", "export_data",
-        "manage_users", "manage_drivers", "flag_accounts",
-        "download_statements",
+        "manage_users", "flag_accounts",
+        "download_statements", "manage_staff",
     ],
 }
 
 # ── extend superadmin/ceo/cfo with new permissions ────────────────
 ROLE_PERMISSIONS["superadmin"] += [
     "manage_refunds", "manage_pricing", "manage_promotions",
-    "broadcast_messages", "manage_limits", "view_risk",
+    "broadcast_messages", "manage_limits", "view_risk", "manage_staff",
 ]
 ROLE_PERMISSIONS["ceo"] += [
     "manage_refunds", "manage_pricing", "manage_promotions",
-    "broadcast_messages", "manage_limits", "view_risk",
+    "broadcast_messages", "manage_limits", "view_risk", "manage_staff",
 ]
-ROLE_PERMISSIONS["cfo"] += ["manage_refunds", "manage_limits", "view_risk"]
+ROLE_PERMISSIONS["cfo"] += ["manage_refunds", "manage_limits", "view_risk", "manage_staff"]
 
 def get_all_permissions(user: dict) -> list:
     perms = set(ROLE_PERMISSIONS.get(user.get("role", ""), []))
@@ -2849,6 +2849,45 @@ async def create_new_tables():
                         branch_code TEXT
                     )
                 """)
+                # ── System wallet (trust account) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS system_wallet (
+                        id TEXT PRIMARY KEY DEFAULT 'main',
+                        balance NUMERIC(18,2) DEFAULT 0,
+                        total_fees_in NUMERIC(18,2) DEFAULT 0,
+                        total_paid_out NUMERIC(18,2) DEFAULT 0,
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute(
+                    "INSERT INTO system_wallet (id) VALUES ('main') ON CONFLICT DO NOTHING"
+                )
+                # ── Salary payments ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS salary_payments (
+                        id TEXT PRIMARY KEY,
+                        employee_name TEXT NOT NULL,
+                        staff_id TEXT REFERENCES staff(id) ON DELETE SET NULL,
+                        bank_name TEXT NOT NULL,
+                        account_number TEXT NOT NULL,
+                        account_holder TEXT NOT NULL,
+                        branch_code TEXT,
+                        gross_amount NUMERIC(14,2) NOT NULL,
+                        paye_deducted NUMERIC(14,2) DEFAULT 0,
+                        uif_deducted NUMERIC(14,2) DEFAULT 0,
+                        net_amount NUMERIC(14,2) NOT NULL,
+                        pay_period TEXT NOT NULL,
+                        description TEXT,
+                        status TEXT DEFAULT 'pending',
+                        created_by TEXT REFERENCES users(id),
+                        approved_by TEXT REFERENCES users(id),
+                        rejection_reason TEXT,
+                        payment_reference TEXT,
+                        stitch_payout_id TEXT,
+                        paid_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
         except Exception as e:
             print("New tables error:", e)
 
@@ -3650,9 +3689,11 @@ STITCH_CLIENT_ID     = os.getenv("STITCH_CLIENT_ID", "")
 STITCH_CLIENT_SECRET = os.getenv("STITCH_CLIENT_SECRET", "")
 STITCH_REDIRECT_URI  = os.getenv("STITCH_REDIRECT_URI", "")
 BACKEND_URL          = os.getenv("BACKEND_URL", "https://tag-n-ride-production.up.railway.app")
-FRONTEND_URL         = os.getenv("FRONTEND_URL", "https://aaz82b03cqzl.spock.relit.dev")
+FRONTEND_URL         = os.getenv("FRONTEND_URL", "https://tagnride.app")
+# Deep link base for Stitch redirect/cancel on mobile (matches app.json scheme: "tagnride")
+APP_DEEP_LINK_BASE   = os.getenv("APP_DEEP_LINK_BASE", "tagnride://")
 STITCH_BASE_URL      = "https://api.stitch.money"
-STITCH_SANDBOX       = os.getenv("STITCH_SANDBOX", "true").lower() == "true"
+STITCH_SANDBOX       = os.getenv("STITCH_SANDBOX", "false").lower() == "true"
 
 # ── Stitch OAuth token ────────────────────────────────────────
 _stitch_token_cache: dict = {}
@@ -3778,8 +3819,8 @@ async def topup_initiate(body: TopupInitiateIn, request: Request, user: dict = D
                     "name": "Tag n Ride",
                     "url": FRONTEND_URL,
                 },
-                "redirectUrl": f"{FRONTEND_URL}/topup-success?payment_id={payment_id}",
-                "cancelUrl": f"{FRONTEND_URL}/topup-cancel",
+                "redirectUrl": f"{APP_DEEP_LINK_BASE}topup-success?payment_id={payment_id}",
+                "cancelUrl": f"{APP_DEEP_LINK_BASE}topup-cancel",
                 "webhookUrl": f"{BACKEND_URL}/api/stitch/webhook",
                 "metadata": {
                     "payment_id": payment_id,
@@ -3793,8 +3834,8 @@ async def topup_initiate(body: TopupInitiateIn, request: Request, user: dict = D
         }
 
         if STITCH_SANDBOX:
-            # In sandbox mode return simulated data
-            payment_url = f"{FRONTEND_URL}/topup-pending?payment_id={payment_id}&amount={charge_amount}&sandbox=true"
+            # Sandbox mode — simulate payment for testing
+            payment_url = f"{APP_DEEP_LINK_BASE}topup-pending?payment_id={payment_id}&amount={charge_amount}&sandbox=true"
             stitch_payment_id = f"sandbox_{payment_id}"
         else:
             result = await stitch_graphql(stitch_mutation, variables)
@@ -3812,8 +3853,8 @@ async def topup_initiate(body: TopupInitiateIn, request: Request, user: dict = D
 
     except Exception as e:
         print(f"[STITCH ERROR] {e}")
-        # Fallback — return payment_id for manual processing
-        payment_url = f"{FRONTEND_URL}/topup-manual?payment_id={payment_id}"
+        # Fallback — app polls for status so just return the payment_id
+        payment_url = f"{APP_DEEP_LINK_BASE}topup-error?payment_id={payment_id}"
         stitch_payment_id = None
 
     return {
@@ -6428,7 +6469,7 @@ async def admin_list_wallets(
     frozen: Optional[bool] = None,
     admin: dict = Depends(require_admin)
 ):
-    if not has_permission(admin, "freeze_wallet"):
+    if not has_permission(admin, "manage_users") and not has_permission(admin, "freeze_wallet"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
         q = """
@@ -7639,7 +7680,7 @@ async def admin_resolve_discrepancy(
 # HR — Staff Management
 # ════════════════════════════════════════════════════════════════
 
-HR_ROLES = ("superadmin", "ceo", "cfo")
+HR_ROLES = ("superadmin", "ceo", "cfo", "hr")
 
 def _calc_paye(monthly: float) -> float:
     annual = monthly * 12
@@ -7835,6 +7876,175 @@ async def hr_export(
         headers={"Content-Disposition": "attachment; filename=hr_staff.csv"},
     )
 
+
+# ════════════════════════════════════════════════════════════════
+# Salary Payments (trust account → employee bank account)
+# ════════════════════════════════════════════════════════════════
+
+class SalaryPaymentIn(BaseModel):
+    employee_name: str = Field(min_length=2, max_length=100)
+    staff_id: Optional[str] = None
+    bank_name: str = Field(min_length=2, max_length=60)
+    account_number: str = Field(min_length=6, max_length=20)
+    account_holder: str = Field(min_length=2, max_length=100)
+    branch_code: Optional[str] = None
+    gross_amount: float = Field(gt=0)
+    paye_deducted: float = Field(default=0, ge=0)
+    uif_deducted: float = Field(default=0, ge=0)
+    pay_period: str = Field(min_length=4, max_length=20)
+    description: Optional[str] = None
+
+class SalaryRejectIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=300)
+
+@api.get("/admin/salary-payments")
+async def list_salary_payments(
+    status: Optional[str] = None,
+    admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_staff"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        q = """SELECT sp.*, u.full_name as created_by_name, a.full_name as approved_by_name
+               FROM salary_payments sp
+               LEFT JOIN users u ON u.id=sp.created_by
+               LEFT JOIN users a ON a.id=sp.approved_by"""
+        params: list = []
+        if status:
+            params.append(status)
+            q += f" WHERE sp.status=${len(params)}"
+        q += " ORDER BY sp.created_at DESC"
+        rows = await conn.fetch(q, *params)
+    return [{
+        "id": r["id"], "employee_name": r["employee_name"], "staff_id": r["staff_id"],
+        "bank_name": r["bank_name"], "account_number": r["account_number"],
+        "account_holder": r["account_holder"], "branch_code": r["branch_code"],
+        "gross_amount": float(r["gross_amount"]), "paye_deducted": float(r["paye_deducted"] or 0),
+        "uif_deducted": float(r["uif_deducted"] or 0), "net_amount": float(r["net_amount"]),
+        "pay_period": r["pay_period"], "description": r["description"],
+        "status": r["status"], "created_by": r["created_by"],
+        "created_by_name": r["created_by_name"], "approved_by_name": r["approved_by_name"],
+        "rejection_reason": r["rejection_reason"], "payment_reference": r["payment_reference"],
+        "paid_at": iso(r["paid_at"]) if r["paid_at"] else None,
+        "created_at": iso(r["created_at"]),
+    } for r in rows]
+
+@api.post("/admin/salary-payments")
+async def create_salary_payment(body: SalaryPaymentIn, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_staff"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    net = round(body.gross_amount - body.paye_deducted - body.uif_deducted, 2)
+    if net <= 0:
+        raise HTTPException(status_code=400, detail="Net amount must be positive after deductions")
+    sid = str(uuid.uuid4())
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO salary_payments
+               (id,employee_name,staff_id,bank_name,account_number,account_holder,branch_code,
+                gross_amount,paye_deducted,uif_deducted,net_amount,pay_period,description,created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)""",
+            sid, body.employee_name, body.staff_id, body.bank_name, body.account_number,
+            body.account_holder, body.branch_code, body.gross_amount, body.paye_deducted,
+            body.uif_deducted, net, body.pay_period, body.description, admin["id"]
+        )
+    return {"ok": True, "id": sid, "net_amount": net}
+
+@api.post("/admin/salary-payments/{payment_id}/approve")
+async def approve_salary_payment(payment_id: str, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "large_withdrawals"):
+        raise HTTPException(status_code=403, detail="CFO, CEO, or Superadmin only")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT status FROM salary_payments WHERE id=$1", payment_id)
+        if not row: raise HTTPException(status_code=404, detail="Payment not found")
+        if row["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Cannot approve — status is {row['status']}")
+        await conn.execute(
+            "UPDATE salary_payments SET status='approved', approved_by=$1 WHERE id=$2",
+            admin["id"], payment_id
+        )
+    return {"ok": True}
+
+@api.post("/admin/salary-payments/{payment_id}/reject")
+async def reject_salary_payment(payment_id: str, body: SalaryRejectIn, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "large_withdrawals"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT status FROM salary_payments WHERE id=$1", payment_id)
+        if not row: raise HTTPException(status_code=404, detail="Payment not found")
+        if row["status"] not in ("pending", "approved"):
+            raise HTTPException(status_code=400, detail="Cannot reject this payment")
+        await conn.execute(
+            "UPDATE salary_payments SET status='rejected', rejection_reason=$1 WHERE id=$2",
+            body.reason, payment_id
+        )
+    return {"ok": True}
+
+@api.post("/admin/salary-payments/{payment_id}/pay")
+async def pay_salary(payment_id: str, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "large_withdrawals"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM salary_payments WHERE id=$1", payment_id)
+        if not row: raise HTTPException(status_code=404, detail="Payment not found")
+        if row["status"] != "approved":
+            raise HTTPException(status_code=400, detail="Payment must be approved before paying")
+        # Mark as processing
+        await conn.execute("UPDATE salary_payments SET status='processing' WHERE id=$1", payment_id)
+
+    try:
+        ref = f"SAL-{payment_id[:8].upper()}"
+        result = await stitch_payout(
+            amount=float(row["net_amount"]),
+            bank_name=row["bank_name"],
+            account_number=row["account_number"],
+            account_holder=row["account_holder"],
+            reference=ref,
+            withdrawal_id=payment_id,
+            user_id=admin["id"],
+            phone_number="",
+        )
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE salary_payments SET status='paid', payment_reference=$1,
+                   stitch_payout_id=$2, paid_at=NOW() WHERE id=$3""",
+                ref, result.get("payout_id"), payment_id
+            )
+            # Debit system wallet
+            await conn.execute(
+                "UPDATE system_wallet SET balance=balance-$1, total_paid_out=total_paid_out+$1, updated_at=NOW() WHERE id='main'",
+                float(row["net_amount"])
+            )
+            await audit(conn, admin["id"], "SALARY_PAID", payment_id, "salary_payment",
+                        {"employee": row["employee_name"], "amount": float(row["net_amount"]), "ref": ref},
+                        request.client.host if request.client else "unknown")
+        return {"ok": True, "reference": ref, "net_amount": float(row["net_amount"])}
+    except Exception as e:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE salary_payments SET status='approved', rejection_reason=$1 WHERE id=$2",
+                f"Payment failed: {str(e)}", payment_id
+            )
+        raise HTTPException(status_code=502, detail=f"Payout failed: {str(e)}")
+
+@api.get("/admin/system-wallet")
+async def get_system_wallet(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_ledger") and not has_permission(admin, "manage_staff"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        sw = await conn.fetchrow("SELECT * FROM system_wallet WHERE id='main'")
+        # Calculate live fee balance from transactions
+        total_fees = await conn.fetchval(
+            "SELECT COALESCE(SUM(platform_fee),0) FROM transactions WHERE is_test IS NOT TRUE AND status='completed'"
+        )
+        total_salary_paid = await conn.fetchval(
+            "SELECT COALESCE(SUM(net_amount),0) FROM salary_payments WHERE status='paid'"
+        )
+    return {
+        "balance": float(sw["balance"] if sw else 0),
+        "total_fees_collected": float(total_fees or 0),
+        "total_salary_paid": float(total_salary_paid or 0),
+        "available": float((total_fees or 0) - (total_salary_paid or 0)),
+    }
 
 # ════════════════════════════════════════════════════════════════
 # Payroll

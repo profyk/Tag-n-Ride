@@ -24,6 +24,9 @@ const ALL_PERMISSIONS = [
   { key: "view_risk",          label: "View Risk Dashboard",  category: "Compliance" },
   { key: "manage_limits",      label: "Manage Limits",        category: "System" },
   { key: "broadcast_messages", label: "Broadcast Messages",   category: "System" },
+  { key: "export_data",        label: "Export Data",          category: "Analytics" },
+  { key: "flag_accounts",      label: "Flag Accounts",        category: "Users" },
+  { key: "manage_staff",       label: "Manage Staff / HR",    category: "System" },
 ];
 
 type RoleConfig = { label: string; color: string; permissions: string[] };
@@ -36,6 +39,7 @@ const DEFAULT_ROLES: Record<string, RoleConfig> = {
   admin: { label: "Admin", color: "green", permissions: ["manage_users", "manage_drivers", "review_kyc", "approve_withdrawals", "reset_pin", "view_analytics", "manage_disputes"] },
   finance: { label: "Finance", color: "yellow", permissions: ["approve_withdrawals", "view_ledger", "download_statements", "view_analytics", "manage_refunds"] },
   support: { label: "Support", color: "orange", permissions: ["manage_users", "reset_pin", "manage_disputes", "view_analytics"] },
+  hr: { label: "HR", color: "purple", permissions: ["view_audit", "view_analytics", "export_data", "manage_users", "flag_accounts", "download_statements", "manage_staff"] },
 };
 
 const TONE_MAP: Record<string, any> = {
