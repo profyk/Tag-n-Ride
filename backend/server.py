@@ -2308,6 +2308,77 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS selfie_public_id TEXT")
                 await conn.execute("ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS licence_public_id TEXT")
                 await conn.execute("ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS storage TEXT DEFAULT 'base64'")
+                # ── HR / Payroll tables ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS staff (
+                        id TEXT PRIMARY KEY,
+                        full_name TEXT NOT NULL,
+                        role_title TEXT NOT NULL,
+                        department TEXT NOT NULL DEFAULT 'Engineering',
+                        employment_type TEXT NOT NULL DEFAULT 'Permanent',
+                        status TEXT NOT NULL DEFAULT 'active',
+                        start_date DATE NOT NULL,
+                        end_date DATE,
+                        gross_salary NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        email TEXT,
+                        phone TEXT,
+                        id_number TEXT,
+                        tax_ref TEXT,
+                        bank_name TEXT,
+                        account_number TEXT,
+                        account_type TEXT DEFAULT 'Current',
+                        branch_code TEXT,
+                        emergency_name TEXT,
+                        emergency_phone TEXT,
+                        termination_reason TEXT,
+                        created_by TEXT REFERENCES users(id),
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS payroll_runs (
+                        id TEXT PRIMARY KEY,
+                        period_month TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'draft',
+                        total_gross NUMERIC(14,2) DEFAULT 0,
+                        total_paye NUMERIC(14,2) DEFAULT 0,
+                        total_uif_employee NUMERIC(14,2) DEFAULT 0,
+                        total_uif_employer NUMERIC(14,2) DEFAULT 0,
+                        total_sdl NUMERIC(14,2) DEFAULT 0,
+                        total_net NUMERIC(14,2) DEFAULT 0,
+                        employee_count INTEGER DEFAULT 0,
+                        notes TEXT,
+                        rejection_note TEXT,
+                        created_by TEXT REFERENCES users(id),
+                        submitted_by TEXT REFERENCES users(id),
+                        submitted_at TIMESTAMPTZ,
+                        approved_by TEXT REFERENCES users(id),
+                        approved_at TIMESTAMPTZ,
+                        executed_by TEXT REFERENCES users(id),
+                        executed_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS payroll_line_items (
+                        id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+                        staff_id TEXT NOT NULL REFERENCES staff(id),
+                        full_name TEXT NOT NULL,
+                        role_title TEXT NOT NULL,
+                        department TEXT NOT NULL,
+                        gross_salary NUMERIC(14,2) NOT NULL,
+                        paye NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        uif_employee NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        uif_employer NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        sdl NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        net_pay NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        bank_name TEXT,
+                        account_number TEXT,
+                        branch_code TEXT
+                    )
+                """)
         except Exception as e:
             print("New tables error:", e)
 
@@ -6796,6 +6867,437 @@ async def admin_resolve_discrepancy(
         await audit(conn, admin["id"], "resolve_discrepancy", disc_id, "reconciliation",
                     {"note": body.resolution_note})
     return {"ok": True}
+
+
+# ════════════════════════════════════════════════════════════════
+# HR — Staff Management
+# ════════════════════════════════════════════════════════════════
+
+HR_ROLES = ("superadmin", "ceo", "cfo")
+
+def _calc_paye(monthly: float) -> float:
+    annual = monthly * 12
+    if annual <= 237_100:   tax = annual * 0.18
+    elif annual <= 370_500: tax = 42_678  + (annual - 237_100) * 0.26
+    elif annual <= 512_800: tax = 77_362  + (annual - 370_500) * 0.31
+    elif annual <= 673_000: tax = 121_475 + (annual - 512_800) * 0.36
+    elif annual <= 857_900: tax = 179_147 + (annual - 673_000) * 0.39
+    elif annual <= 1_817_000: tax = 251_258 + (annual - 857_900) * 0.41
+    else: tax = 644_489 + (annual - 1_817_000) * 0.45
+    return max(0.0, (tax - 17_235) / 12)
+
+def _calc_uif(monthly: float) -> float:
+    return min(monthly * 0.01, 177.12)
+
+def _calc_sdl(monthly: float) -> float:
+    return monthly * 0.01
+
+class StaffIn(BaseModel):
+    full_name: str
+    role_title: str
+    department: str = "Engineering"
+    employment_type: str = "Permanent"
+    status: str = "active"
+    start_date: str
+    end_date: Optional[str] = None
+    gross_salary: float
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    id_number: Optional[str] = None
+    tax_ref: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_type: Optional[str] = "Current"
+    branch_code: Optional[str] = None
+    emergency_name: Optional[str] = None
+    emergency_phone: Optional[str] = None
+
+class TerminateIn(BaseModel):
+    reason: str
+    end_date: str
+
+class PayrollRunIn(BaseModel):
+    period_month: str  # e.g. "2025-05"
+    notes: Optional[str] = None
+
+class PayrollRejectIn(BaseModel):
+    note: str
+
+@api.get("/admin/hr/staff")
+async def hr_list_staff(admin: dict = Depends(require_admin)):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, full_name, role_title, department, employment_type, status,
+                      start_date, end_date, gross_salary, email, phone, created_at
+               FROM staff ORDER BY full_name"""
+        )
+        return [dict(r) for r in rows]
+
+@api.post("/admin/hr/staff")
+async def hr_create_staff(
+    body: StaffIn,
+    admin: dict = Depends(require_admin),
+    _danger: dict = Depends(require_danger_token),
+):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    sid = str(uuid.uuid4())
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO staff (id, full_name, role_title, department, employment_type, status,
+               start_date, end_date, gross_salary, email, phone, id_number, tax_ref,
+               bank_name, account_number, account_type, branch_code,
+               emergency_name, emergency_phone, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)""",
+            sid, body.full_name, body.role_title, body.department, body.employment_type,
+            body.status, body.start_date, body.end_date, body.gross_salary,
+            body.email, body.phone, body.id_number, body.tax_ref,
+            body.bank_name, body.account_number, body.account_type, body.branch_code,
+            body.emergency_name, body.emergency_phone, admin["id"],
+        )
+        await audit(conn, admin["id"], "CREATE_STAFF", sid, "staff", {"name": body.full_name})
+    return {"ok": True, "id": sid}
+
+@api.patch("/admin/hr/staff/{staff_id}")
+async def hr_update_staff(
+    staff_id: str,
+    body: StaffIn,
+    admin: dict = Depends(require_admin),
+    _danger: dict = Depends(require_danger_token),
+):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT id FROM staff WHERE id=$1", staff_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+        await conn.execute(
+            """UPDATE staff SET full_name=$2, role_title=$3, department=$4, employment_type=$5,
+               status=$6, start_date=$7, end_date=$8, gross_salary=$9, email=$10, phone=$11,
+               id_number=$12, tax_ref=$13, bank_name=$14, account_number=$15,
+               account_type=$16, branch_code=$17, emergency_name=$18, emergency_phone=$19,
+               updated_at=NOW() WHERE id=$1""",
+            staff_id, body.full_name, body.role_title, body.department, body.employment_type,
+            body.status, body.start_date, body.end_date, body.gross_salary,
+            body.email, body.phone, body.id_number, body.tax_ref,
+            body.bank_name, body.account_number, body.account_type, body.branch_code,
+            body.emergency_name, body.emergency_phone,
+        )
+        await audit(conn, admin["id"], "UPDATE_STAFF", staff_id, "staff", {"name": body.full_name})
+    return {"ok": True}
+
+@api.post("/admin/hr/staff/{staff_id}/reveal-sensitive")
+async def hr_reveal_sensitive(
+    staff_id: str,
+    admin: dict = Depends(require_admin),
+    _danger: dict = Depends(require_danger_token),
+):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id_number, tax_ref, bank_name, account_number, account_type,
+                      branch_code, emergency_name, emergency_phone
+               FROM staff WHERE id=$1""",
+            staff_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+        await audit(conn, admin["id"], "REVEAL_STAFF_SENSITIVE", staff_id, "staff", {})
+        return dict(row)
+
+@api.post("/admin/hr/staff/{staff_id}/terminate")
+async def hr_terminate_staff(
+    staff_id: str,
+    body: TerminateIn,
+    admin: dict = Depends(require_admin),
+    _danger: dict = Depends(require_danger_token),
+):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT full_name FROM staff WHERE id=$1", staff_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+        await conn.execute(
+            "UPDATE staff SET status='terminated', end_date=$2, termination_reason=$3, updated_at=NOW() WHERE id=$1",
+            staff_id, body.end_date, body.reason,
+        )
+        await audit(conn, admin["id"], "TERMINATE_STAFF", staff_id, "staff",
+                    {"name": existing["full_name"], "reason": body.reason})
+    return {"ok": True}
+
+@api.get("/admin/hr/export")
+async def hr_export(
+    admin: dict = Depends(require_admin),
+    _danger: dict = Depends(require_danger_token),
+):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT full_name, role_title, department, employment_type, status,
+                      start_date, end_date, gross_salary, email, phone,
+                      id_number, tax_ref, bank_name, account_number, account_type,
+                      branch_code, emergency_name, emergency_phone, created_at
+               FROM staff ORDER BY full_name"""
+        )
+        await audit(conn, admin["id"], "EXPORT_HR_DATA", None, "staff", {})
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Full Name", "Role", "Department", "Type", "Status",
+        "Start Date", "End Date", "Gross Salary", "Email", "Phone",
+        "ID Number", "Tax Ref", "Bank", "Account No", "Account Type",
+        "Branch Code", "Emergency Contact", "Emergency Phone", "Created At",
+    ])
+    for r in rows:
+        writer.writerow([
+            r["full_name"], r["role_title"], r["department"], r["employment_type"], r["status"],
+            r["start_date"], r["end_date"] or "", r["gross_salary"], r["email"] or "",
+            r["phone"] or "", r["id_number"] or "", r["tax_ref"] or "",
+            r["bank_name"] or "", r["account_number"] or "", r["account_type"] or "",
+            r["branch_code"] or "", r["emergency_name"] or "", r["emergency_phone"] or "",
+            r["created_at"],
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=hr_staff.csv"},
+    )
+
+
+# ════════════════════════════════════════════════════════════════
+# Payroll
+# ════════════════════════════════════════════════════════════════
+
+PAYROLL_ROLES = ("superadmin", "ceo", "cfo")
+
+@api.get("/admin/payroll/runs")
+async def payroll_list_runs(admin: dict = Depends(require_admin)):
+    if admin["role"] not in PAYROLL_ROLES:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT r.*,
+                      cb.full_name AS created_by_name,
+                      sb.full_name AS submitted_by_name,
+                      ab.full_name AS approved_by_name,
+                      eb.full_name AS executed_by_name
+               FROM payroll_runs r
+               LEFT JOIN users cb ON cb.id = r.created_by
+               LEFT JOIN users sb ON sb.id = r.submitted_by
+               LEFT JOIN users ab ON ab.id = r.approved_by
+               LEFT JOIN users eb ON eb.id = r.executed_by
+               ORDER BY r.created_at DESC"""
+        )
+        return [dict(r) for r in rows]
+
+@api.post("/admin/payroll/runs")
+async def payroll_create_run(
+    body: PayrollRunIn,
+    admin: dict = Depends(require_admin),
+):
+    if admin["role"] not in PAYROLL_ROLES:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM payroll_runs WHERE period_month=$1 AND status != 'cancelled'",
+            body.period_month,
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="A payroll run already exists for this period")
+        active_staff = await conn.fetch(
+            """SELECT id, full_name, role_title, department, gross_salary,
+                      bank_name, account_number, branch_code
+               FROM staff WHERE status='active'"""
+        )
+        if not active_staff:
+            raise HTTPException(status_code=400, detail="No active staff found")
+
+        total_gross = total_paye = total_uif_emp = total_uif_er = total_sdl = total_net = 0.0
+        lines = []
+        for s in active_staff:
+            g = float(s["gross_salary"])
+            paye = _calc_paye(g)
+            uif_e = _calc_uif(g)
+            uif_r = _calc_uif(g)
+            sdl = _calc_sdl(g)
+            net = g - paye - uif_e
+            total_gross += g; total_paye += paye
+            total_uif_emp += uif_e; total_uif_er += uif_r
+            total_sdl += sdl; total_net += net
+            lines.append({
+                "id": str(uuid.uuid4()),
+                "staff_id": s["id"], "full_name": s["full_name"],
+                "role_title": s["role_title"], "department": s["department"],
+                "gross_salary": g, "paye": paye, "uif_employee": uif_e,
+                "uif_employer": uif_r, "sdl": sdl, "net_pay": net,
+                "bank_name": s["bank_name"], "account_number": s["account_number"],
+                "branch_code": s["branch_code"],
+            })
+
+        run_id = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO payroll_runs
+               (id, period_month, status, total_gross, total_paye, total_uif_employee,
+                total_uif_employer, total_sdl, total_net, employee_count, notes, created_by)
+               VALUES ($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+            run_id, body.period_month, round(total_gross, 2), round(total_paye, 2),
+            round(total_uif_emp, 2), round(total_uif_er, 2), round(total_sdl, 2),
+            round(total_net, 2), len(lines), body.notes, admin["id"],
+        )
+        for ln in lines:
+            await conn.execute(
+                """INSERT INTO payroll_line_items
+                   (id, run_id, staff_id, full_name, role_title, department,
+                    gross_salary, paye, uif_employee, uif_employer, sdl, net_pay,
+                    bank_name, account_number, branch_code)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                ln["id"], run_id, ln["staff_id"], ln["full_name"], ln["role_title"],
+                ln["department"], ln["gross_salary"], ln["paye"], ln["uif_employee"],
+                ln["uif_employer"], ln["sdl"], ln["net_pay"],
+                ln["bank_name"], ln["account_number"], ln["branch_code"],
+            )
+        await audit(conn, admin["id"], "CREATE_PAYROLL_RUN", run_id, "payroll",
+                    {"period": body.period_month, "employees": len(lines)})
+    return {"ok": True, "id": run_id}
+
+@api.get("/admin/payroll/runs/{run_id}")
+async def payroll_get_run(run_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in PAYROLL_ROLES:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow(
+            """SELECT r.*,
+                      cb.full_name AS created_by_name,
+                      sb.full_name AS submitted_by_name,
+                      ab.full_name AS approved_by_name,
+                      eb.full_name AS executed_by_name
+               FROM payroll_runs r
+               LEFT JOIN users cb ON cb.id = r.created_by
+               LEFT JOIN users sb ON sb.id = r.submitted_by
+               LEFT JOIN users ab ON ab.id = r.approved_by
+               LEFT JOIN users eb ON eb.id = r.executed_by
+               WHERE r.id=$1""",
+            run_id,
+        )
+        if not run:
+            raise HTTPException(status_code=404, detail="Payroll run not found")
+        lines = await conn.fetch(
+            "SELECT * FROM payroll_line_items WHERE run_id=$1 ORDER BY full_name", run_id
+        )
+        result = dict(run)
+        result["lines"] = [dict(ln) for ln in lines]
+        return result
+
+@api.post("/admin/payroll/runs/{run_id}/submit")
+async def payroll_submit(run_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in PAYROLL_ROLES:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow("SELECT status FROM payroll_runs WHERE id=$1", run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Not found")
+        if run["status"] != "draft":
+            raise HTTPException(status_code=400, detail="Only draft runs can be submitted")
+        await conn.execute(
+            "UPDATE payroll_runs SET status='submitted', submitted_by=$2, submitted_at=NOW() WHERE id=$1",
+            run_id, admin["id"],
+        )
+        await audit(conn, admin["id"], "SUBMIT_PAYROLL", run_id, "payroll", {})
+    return {"ok": True}
+
+@api.post("/admin/payroll/runs/{run_id}/approve")
+async def payroll_approve(run_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in ("superadmin", "ceo", "cfo"):
+        raise HTTPException(status_code=403, detail="CEO, CFO or Superadmin only")
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow("SELECT status FROM payroll_runs WHERE id=$1", run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Not found")
+        if run["status"] != "submitted":
+            raise HTTPException(status_code=400, detail="Only submitted runs can be approved")
+        await conn.execute(
+            "UPDATE payroll_runs SET status='approved', approved_by=$2, approved_at=NOW() WHERE id=$1",
+            run_id, admin["id"],
+        )
+        await audit(conn, admin["id"], "APPROVE_PAYROLL", run_id, "payroll", {})
+    return {"ok": True}
+
+@api.post("/admin/payroll/runs/{run_id}/reject")
+async def payroll_reject(run_id: str, body: PayrollRejectIn, admin: dict = Depends(require_admin)):
+    if admin["role"] not in PAYROLL_ROLES:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow("SELECT status FROM payroll_runs WHERE id=$1", run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Not found")
+        if run["status"] not in ("submitted", "approved"):
+            raise HTTPException(status_code=400, detail="Cannot reject at this stage")
+        await conn.execute(
+            "UPDATE payroll_runs SET status='draft', rejection_note=$2, approved_by=NULL, approved_at=NULL, submitted_by=NULL, submitted_at=NULL WHERE id=$1",
+            run_id, body.note,
+        )
+        await audit(conn, admin["id"], "REJECT_PAYROLL", run_id, "payroll", {"note": body.note})
+    return {"ok": True}
+
+@api.post("/admin/payroll/runs/{run_id}/execute")
+async def payroll_execute(
+    run_id: str,
+    admin: dict = Depends(require_admin),
+    _danger: dict = Depends(require_danger_token),
+):
+    if admin["role"] not in ("superadmin", "ceo", "cfo"):
+        raise HTTPException(status_code=403, detail="CEO, CFO or Superadmin only")
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow("SELECT status FROM payroll_runs WHERE id=$1", run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Not found")
+        if run["status"] != "approved":
+            raise HTTPException(status_code=400, detail="Only approved runs can be executed")
+        await conn.execute(
+            "UPDATE payroll_runs SET status='executed', executed_by=$2, executed_at=NOW() WHERE id=$1",
+            run_id, admin["id"],
+        )
+        await audit(conn, admin["id"], "EXECUTE_PAYROLL", run_id, "payroll", {})
+    return {"ok": True}
+
+@api.get("/admin/payroll/runs/{run_id}/export")
+async def payroll_export(run_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in PAYROLL_ROLES:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        run = await conn.fetchrow("SELECT period_month FROM payroll_runs WHERE id=$1", run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Not found")
+        lines = await conn.fetch(
+            "SELECT * FROM payroll_line_items WHERE run_id=$1 ORDER BY full_name", run_id
+        )
+        await audit(conn, admin["id"], "EXPORT_PAYROLL", run_id, "payroll", {})
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Full Name", "Role", "Department", "Gross Salary",
+        "PAYE", "UIF (Employee)", "UIF (Employer)", "SDL", "Net Pay",
+        "Bank", "Account Number", "Branch Code",
+    ])
+    for ln in lines:
+        writer.writerow([
+            ln["full_name"], ln["role_title"], ln["department"], ln["gross_salary"],
+            ln["paye"], ln["uif_employee"], ln["uif_employer"], ln["sdl"], ln["net_pay"],
+            ln["bank_name"] or "", ln["account_number"] or "", ln["branch_code"] or "",
+        ])
+    output.seek(0)
+    fname = f"payroll_{run['period_month']}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
 
 
 # ════════════════════════════════════════════════════════════════
