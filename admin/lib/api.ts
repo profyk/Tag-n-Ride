@@ -244,6 +244,8 @@ export type Promotion = {
   active: boolean;
   valid_from: string;
   valid_to: string;
+  expires_at?: string;
+  target_role?: string;
   created_at: string;
 };
 
