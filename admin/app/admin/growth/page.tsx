@@ -128,12 +128,13 @@ export default function GrowthPage() {
     return { ...d, growth: avg > 0 ? ((d.amount - avg) / avg * 100).toFixed(1) : 0 };
   });
 
-  // Simulated day-of-week heatmap from weekly data
-  const dowData = DOW_LABELS.map((day, i) => ({
-    day,
-    rides: Math.round((totalTxns / 7) * (0.7 + Math.sin(i * 0.8) * 0.3 + Math.random() * 0.2)),
-    revenue: Math.round((totalVol / 7) * (0.7 + Math.sin(i * 0.8) * 0.3 + Math.random() * 0.2)),
-  }));
+  // Real day-of-week data from backend (last 90 days)
+  // Backend returns Sun=0..Sat=6; reorder to Mon-Sun for display
+  const rawDow: any[] = data?.day_of_week ?? [];
+  const dowData = DOW_LABELS.map((day) => {
+    const match = rawDow.find((r: any) => r.day === day);
+    return { day, rides: match?.rides ?? 0, revenue: match?.revenue ?? 0 };
+  });
 
   // Cumulative volume for the curve chart
   let cumulative = 0;
@@ -153,11 +154,11 @@ export default function GrowthPage() {
   ];
 
   const PIE_DATA = [
-    { name: "Passengers", value: dash?.total_passengers || 60 },
-    { name: "Drivers", value: dash?.active_drivers || 25 },
-    { name: "Owners", value: dash?.total_users ? Math.round(dash.total_users * 0.05) : 5 },
-    { name: "Pending KYC", value: dash?.kyc_pending || 10 },
-  ];
+    { name: "Passengers", value: dash?.total_passengers || 0 },
+    { name: "Drivers", value: dash?.active_drivers || 0 },
+    { name: "Owners", value: dash?.total_owners || 0 },
+    { name: "Pending KYC", value: dash?.kyc_pending || 0 },
+  ].filter(d => d.value > 0);
 
   const PIE_COLORS_ARR = [COLORS.cyan, COLORS.purple, COLORS.green, COLORS.yellow];
 

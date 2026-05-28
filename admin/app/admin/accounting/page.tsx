@@ -57,37 +57,38 @@ export default function AccountingPage() {
   const byType = data?.transactions_by_type ?? [];
 
   const grossRevenue = daily.reduce((s: number, d: any) => s + (d.amount || 0), 0);
+  // Use actual platform_fee from transactions (fees field now comes from backend)
   const platformFees = daily.reduce((s: number, d: any) => s + (d.fees || 0), 0);
 
-  // Use byType for fee breakdown
-  const paymentVol = byType.find((t: any) => t.type === "payment")?.total || 0;
-  const topupVol = byType.find((t: any) => t.type === "topup")?.total || 0;
-  const withdrawalCount = byType.find((t: any) => t.type === "withdrawal")?.count || 0;
+  const paymentByType = byType.find((t: any) => t.type === "payment");
+  const topupByType = byType.find((t: any) => t.type === "topup");
+  const paymentVol = paymentByType?.volume || 0;
+  const rideFeesEstimate = paymentByType?.fees || 0;
+  const topupVol = topupByType?.volume || 0;
+  const topupFeesEstimate = topupByType?.fees || 0;
 
-  const rideFeesEstimate = paymentVol * 0.08;
-  const topupFeesEstimate = topupVol * 0.015;
+  const withdrawalCount = byType.find((t: any) => t.type === "withdrawal")?.count || 0;
   const withdrawalFeesEstimate = withdrawalCount * 2.50;
-  const totalFeeRevenue = rideFeesEstimate + topupFeesEstimate + withdrawalFeesEstimate;
+  // totalFeeRevenue = actual platform fees collected + withdrawal fees
+  const totalFeeRevenue = platformFees + withdrawalFeesEstimate;
 
   const vatCollected = totalFeeRevenue * VAT_RATE;
   const netRevenue = totalFeeRevenue - vatCollected;
-  const operatingCost = totalFeeRevenue * 0.12; // estimated 12% infrastructure cost
+  const operatingCost = totalFeeRevenue * 0.12;
   const netProfit = netRevenue - operatingCost;
 
-  // Monthly P&L data from weekly
-  const plData = weekly.map((w: any, i: number) => ({
+  // P&L data from weekly — use actual fees field
+  const plData = weekly.map((w: any) => ({
     period: w.week,
-    revenue: w.amount * 0.08,
-    costs: w.amount * 0.08 * 0.12,
-    profit: w.amount * 0.08 * (1 - 0.12 - VAT_RATE),
+    revenue: w.fees || 0,
+    costs: (w.fees || 0) * 0.12,
+    profit: (w.fees || 0) * (1 - 0.12 - VAT_RATE),
   }));
 
-  // Fee breakdown for pie
   const feeBreakdown = [
-    { name: "Ride fees (8%)", value: Math.round(rideFeesEstimate), color: "#00D4FF" },
-    { name: "Top-up fees (1.5%)", value: Math.round(topupFeesEstimate), color: "#00E676" },
-    { name: "Withdrawal fees", value: Math.round(withdrawalFeesEstimate), color: "#A064FF" },
-  ];
+    { name: "Platform fees (actual)", value: Math.round(platformFees), color: "#00D4FF" },
+    { name: "Withdrawal fees (R2.50×n)", value: Math.round(withdrawalFeesEstimate), color: "#A064FF" },
+  ].filter(d => d.value > 0);
 
   const handleExport = async () => {
     try {

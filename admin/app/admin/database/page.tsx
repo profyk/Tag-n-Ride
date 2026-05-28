@@ -2,11 +2,12 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Spinner } from "@/components/ui";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 import {
   Database, Table2, Play, Download, RefreshCw, Search,
   ChevronLeft, ChevronRight, Terminal, X, Copy, History,
   AlertCircle, CheckCircle, Clock, Layers, Edit2, Trash2, Plus,
-  Save, Info,
+  Save, Info, ShieldAlert,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -122,6 +123,7 @@ export default function DatabasePage() {
   const [schemaLoading, setSchemaLoading] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dangerPin = useDangerPin();
 
   const loadTables = async () => {
     setTablesLoading(true);
@@ -180,8 +182,15 @@ export default function DatabasePage() {
     finally { setSchemaLoading(false); }
   }, []);
 
+  const isMutationSQL = (sql: string) =>
+    /^\s*(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE)\s/i.test(sql.trim());
+
   const runQuery = async () => {
     if (!query.trim()) return;
+    if (isMutationSQL(query)) {
+      const token = await dangerPin.request();
+      if (!token) return;
+    }
     setQueryRunning(true);
     setQueryResult(null);
     const start = Date.now();
@@ -216,6 +225,8 @@ export default function DatabasePage() {
 
   const handleSaveEdit = async () => {
     if (!editModal || !selectedTable) return;
+    const token = await dangerPin.request();
+    if (!token) return;
     setMutating(true);
     try {
       if (editModal.isNew) {
@@ -246,6 +257,8 @@ export default function DatabasePage() {
     if (!selectedTable) return;
     const pk = findPK(obj);
     if (!pk) { toast.error("No primary key found — cannot delete"); return; }
+    const token = await dangerPin.request();
+    if (!token) return;
     setMutating(true);
     try {
       await runMutation(`DELETE FROM ${selectedTable} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`);
@@ -260,6 +273,8 @@ export default function DatabasePage() {
 
   const handleBulkDelete = async () => {
     if (!selectedTable || !tableData || selectedRows.size === 0) return;
+    const token = await dangerPin.request();
+    if (!token) return;
     setMutating(true);
     try {
       for (const ri of Array.from(selectedRows)) {
@@ -446,8 +461,13 @@ export default function DatabasePage() {
                     className="p-1 rounded-lg text-textDim hover:text-textMuted transition-colors">
                     <X size={12} />
                   </button>
+                  {isMutationSQL(query) && (
+                    <span className="flex items-center gap-1 text-yellow text-[10px] font-bold px-2">
+                      <ShieldAlert size={11} /> PIN required
+                    </span>
+                  )}
                   <button onClick={runQuery} disabled={queryRunning}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple text-white hover:bg-purple/80 disabled:opacity-50 transition-all">
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 transition-all ${isMutationSQL(query) ? "bg-yellow text-black hover:bg-yellow/80" : "bg-purple text-white hover:bg-purple/80"}`}>
                     {queryRunning ? <span className="animate-spin">⟳</span> : <Play size={11} />}
                     {queryRunning ? "Running..." : "Run"}
                   </button>
@@ -728,6 +748,12 @@ export default function DatabasePage() {
           </div>
         </div>
       )}
+
+      <DangerPinModal
+        open={dangerPin.open}
+        onSuccess={dangerPin.handleSuccess}
+        onCancel={dangerPin.handleCancel}
+      />
     </AdminShell>
   );
 }

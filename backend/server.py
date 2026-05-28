@@ -1118,6 +1118,9 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo')")
         total_drivers = await conn.fetchval("SELECT COUNT(*) FROM drivers")
         total_passengers = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='passenger'")
+        total_owners = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='owner'")
+        active_drivers = await conn.fetchval("SELECT COUNT(*) FROM drivers WHERE is_verified=TRUE")
+        verified_drivers = await conn.fetchval("SELECT COUNT(*) FROM drivers WHERE is_verified=TRUE")
         total_transactions = await conn.fetchval("SELECT COUNT(*) FROM transactions")
         total_revenue = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed'")
         total_wallet_balance = await conn.fetchval("SELECT COALESCE(SUM(balance),0) FROM wallets")
@@ -1140,6 +1143,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         )
     return {
         "total_users": total_users, "total_drivers": total_drivers, "total_passengers": total_passengers,
+        "total_owners": total_owners, "active_drivers": active_drivers, "verified_drivers": verified_drivers,
         "total_transactions": total_transactions, "total_revenue": float(total_revenue),
         "total_wallet_balance": float(total_wallet_balance), "total_withdrawn": float(total_withdrawn),
         "pending_withdrawals": pending_withdrawals, "pending_drivers": pending_drivers,
@@ -1406,23 +1410,68 @@ async def admin_generate_driver_qr(user_id: str, request: Request, admin: dict =
 
 # ── Admin: Analytics ─────────────────────────────────────────
 @api.get("/admin/analytics")
-async def admin_analytics(admin: dict = Depends(require_admin)):
+async def admin_analytics(range: Optional[str] = "30d", admin: dict = Depends(require_admin)):
     if not has_permission(admin, "view_analytics"):
         raise HTTPException(status_code=403, detail="Permission denied")
+    days_map = {"7d": 7, "30d": 30, "90d": 90}
+    days = days_map.get(range, 30)
     async with pool.acquire() as conn:
-        daily = await conn.fetch("SELECT DATE(created_at) as date,SUM(amount) as amount,COUNT(*) as count FROM transactions WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY date ASC")
-        weekly = await conn.fetch("SELECT DATE_TRUNC('week',created_at) as week,SUM(amount) as amount FROM transactions WHERE type='payment' AND status='completed' AND created_at>=NOW()-INTERVAL '12 weeks' GROUP BY DATE_TRUNC('week',created_at) ORDER BY week ASC")
-        leaderboard = await conn.fetch("SELECT u.full_name as name,d.total_earnings as earnings FROM drivers d JOIN users u ON u.id=d.user_id ORDER BY d.total_earnings DESC LIMIT 10")
-        by_type = await conn.fetch("SELECT type,COUNT(*) as count,SUM(amount) as total FROM transactions GROUP BY type")
-        top_passengers = await conn.fetch("SELECT u.full_name as name,COUNT(t.id) as txn_count,SUM(t.amount) as total_spent FROM transactions t JOIN users u ON u.id=t.sender_id WHERE t.type='payment' GROUP BY u.full_name ORDER BY total_spent DESC LIMIT 5")
-        withdrawal_trend = await conn.fetch("SELECT DATE(created_at) as date,SUM(amount) as amount,COUNT(*) as count FROM withdrawal_requests WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY date ASC")
+        daily = await conn.fetch(
+            """SELECT DATE(created_at) as date,
+                      SUM(amount) as amount,
+                      COUNT(*) as count,
+                      COALESCE(SUM(platform_fee),0) as fees
+               FROM transactions
+               WHERE created_at>=NOW()-INTERVAL '%s days' AND is_test IS NOT TRUE
+               GROUP BY DATE(created_at) ORDER BY date ASC""" % days
+        )
+        prev_period = await conn.fetchrow(
+            """SELECT COALESCE(SUM(amount),0) as vol, COUNT(*) as cnt
+               FROM transactions
+               WHERE created_at>=NOW()-INTERVAL '%s days'
+                 AND created_at<NOW()-INTERVAL '%s days'
+                 AND is_test IS NOT TRUE""" % (days * 2, days)
+        )
+        weekly = await conn.fetch(
+            """SELECT DATE_TRUNC('week',created_at) as week, SUM(amount) as amount, COALESCE(SUM(platform_fee),0) as fees
+               FROM transactions WHERE type='payment' AND status='completed' AND created_at>=NOW()-INTERVAL '12 weeks' AND is_test IS NOT TRUE
+               GROUP BY DATE_TRUNC('week',created_at) ORDER BY week ASC"""
+        )
+        leaderboard = await conn.fetch(
+            "SELECT u.full_name as name,d.total_earnings as earnings FROM drivers d JOIN users u ON u.id=d.user_id ORDER BY d.total_earnings DESC LIMIT 10"
+        )
+        by_type = await conn.fetch(
+            "SELECT type,COUNT(*) as count,COALESCE(SUM(amount),0) as volume,COALESCE(SUM(platform_fee),0) as fees FROM transactions WHERE is_test IS NOT TRUE GROUP BY type"
+        )
+        top_passengers = await conn.fetch(
+            """SELECT u.full_name as name,COUNT(t.id) as txn_count,SUM(t.amount) as total_spent
+               FROM transactions t JOIN users u ON u.id=t.sender_id
+               WHERE t.type='payment' AND t.is_test IS NOT TRUE GROUP BY u.full_name ORDER BY total_spent DESC LIMIT 5"""
+        )
+        withdrawal_trend = await conn.fetch(
+            """SELECT DATE(created_at) as date,SUM(amount) as amount,COUNT(*) as count
+               FROM withdrawal_requests WHERE created_at>=NOW()-INTERVAL '%s days'
+               GROUP BY DATE(created_at) ORDER BY date ASC""" % days
+        )
+        dow_data = await conn.fetch(
+            """SELECT EXTRACT(DOW FROM created_at)::int as dow,
+                      COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+               FROM transactions WHERE type='payment' AND is_test IS NOT TRUE
+                 AND created_at>=NOW()-INTERVAL '90 days'
+               GROUP BY dow ORDER BY dow ASC"""
+        )
+    dow_map = {r["dow"]: {"count": r["count"], "amount": float(r["amount"])} for r in dow_data}
+    dow_labels = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
     return {
-        "daily_volume": [{"date": str(r["date"]), "amount": float(r["amount"]), "count": r["count"]} for r in daily],
-        "weekly_revenue": [{"week": str(r["week"])[:10], "amount": float(r["amount"])} for r in weekly],
+        "daily_volume": [{"date": str(r["date"]), "amount": float(r["amount"]), "count": r["count"], "fees": float(r["fees"])} for r in daily],
+        "weekly_revenue": [{"week": str(r["week"])[:10], "amount": float(r["amount"]), "fees": float(r["fees"])} for r in weekly],
         "driver_leaderboard": [{"name": r["name"], "earnings": float(r["earnings"])} for r in leaderboard],
-        "transactions_by_type": [{"type": r["type"], "count": r["count"], "total": float(r["total"])} for r in by_type],
+        "transactions_by_type": [{"type": r["type"], "count": r["count"], "volume": float(r["volume"]), "fees": float(r["fees"])} for r in by_type],
         "top_passengers": [{"name": r["name"], "txn_count": r["txn_count"], "total_spent": float(r["total_spent"])} for r in top_passengers],
         "withdrawal_trend": [{"date": str(r["date"]), "amount": float(r["amount"]), "count": r["count"]} for r in withdrawal_trend],
+        "prev_volume": float(prev_period["vol"] or 0),
+        "prev_count": int(prev_period["cnt"] or 0),
+        "day_of_week": [{"day": dow_labels[i], "rides": dow_map.get(i, {}).get("count", 0), "revenue": dow_map.get(i, {}).get("amount", 0)} for i in range(7)],
     }
 
 # ── Admin: Audit log ─────────────────────────────────────────
@@ -1971,8 +2020,9 @@ async def owner_outstanding(user: dict = Depends(require_owner)):
             WHERE ob.owner_user_id=$1 AND ob.status='outstanding'
             ORDER BY ob.created_at DESC
         """, user["id"])
-    return [{"id": r["id"], "driver_user_id": r["driver_user_id"], "driver_name": r["driver_name"],
-             "amount": float(r["amount"]), "reason": r["reason"], "created_at": iso(r["created_at"])} for r in rows]
+    items = [{"id": r["id"], "driver_user_id": r["driver_user_id"], "driver_name": r["driver_name"],
+              "amount": float(r["amount"]), "reason": r["reason"], "created_at": iso(r["created_at"])} for r in rows]
+    return {"items": items, "total_outstanding": sum(i["amount"] for i in items)}
 
 @api.post("/owner/outstanding/{outstanding_id}/cancel")
 async def owner_cancel_outstanding(outstanding_id: str, user: dict = Depends(require_owner)):
