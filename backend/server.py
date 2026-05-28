@@ -329,6 +329,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -5595,6 +5596,200 @@ async def statement_audit_export(
         json.dumps(dict(r["metadata"] or {})), iso(r["created_at"])
     ] for r in rows]
     return csv_response(data, headers, f"audit-export-{ref}.csv")
+
+
+@api.get("/admin/statements/passenger-topups")
+async def statement_passenger_topups(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    """Passenger top-up history — Finance+."""
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT u.full_name, u.phone_number, t.reference, t.amount,
+                   t.status, t.note, t.created_at
+            FROM transactions t
+            JOIN users u ON u.id = t.sender_id
+            WHERE t.type = 'topup' AND u.is_test IS NOT TRUE
+        """
+        params: list = []
+        if date_from:
+            params.append(date_from)
+            query += f" AND t.created_at >= ${len(params)}"
+        if date_to:
+            params.append(date_to)
+            query += f" AND t.created_at <= ${len(params)}"
+        query += " ORDER BY t.created_at DESC"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], "passenger_topups", fmt, date_from, date_to)
+
+    headers = ["Passenger", "Phone", "Reference", "Amount", "Status", "Note", "Date"]
+    data = [[
+        r["full_name"], r["phone_number"], r["reference"],
+        float(r["amount"]), r["status"], r["note"] or "", iso(r["created_at"])
+    ] for r in rows]
+    return csv_response(data, headers, f"passenger-topups-{ref}.csv")
+
+
+@api.get("/admin/statements/fleet-earnings")
+async def statement_fleet_earnings(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    """Fleet owner earnings — Finance+."""
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT u.full_name, u.phone_number,
+                   COUNT(t.id) AS trips,
+                   SUM(t.amount) AS gross,
+                   SUM(t.platform_fee) AS fees,
+                   SUM(t.driver_net) AS net
+            FROM transactions t
+            JOIN users u ON u.id = t.receiver_id
+            WHERE t.type = 'payment' AND t.status = 'completed'
+              AND u.role = 'owner' AND u.is_test IS NOT TRUE
+        """
+        params: list = []
+        if date_from:
+            params.append(date_from)
+            query += f" AND t.created_at >= ${len(params)}"
+        if date_to:
+            params.append(date_to)
+            query += f" AND t.created_at <= ${len(params)}"
+        query += " GROUP BY u.id, u.full_name, u.phone_number ORDER BY net DESC"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], "fleet_earnings", fmt, date_from, date_to)
+
+    headers = ["Fleet Owner", "Phone", "Trips", "Gross Earnings", "Platform Fees", "Net Earnings"]
+    data = [[
+        r["full_name"], r["phone_number"], r["trips"],
+        float(r["gross"] or 0), float(r["fees"] or 0), float(r["net"] or 0)
+    ] for r in rows]
+    return csv_response(data, headers, f"fleet-earnings-{ref}.csv")
+
+
+@api.get("/admin/statements/routes")
+async def statement_routes(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    """Route usage report — Finance+."""
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT t.reference, t.amount, t.status,
+                   su.full_name AS passenger, du.full_name AS driver,
+                   t.note, t.created_at
+            FROM transactions t
+            LEFT JOIN users su ON su.id = t.sender_id
+            LEFT JOIN users du ON du.id = t.receiver_id
+            WHERE t.type = 'payment' AND t.is_test IS NOT TRUE
+        """
+        params: list = []
+        if date_from:
+            params.append(date_from)
+            query += f" AND t.created_at >= ${len(params)}"
+        if date_to:
+            params.append(date_to)
+            query += f" AND t.created_at <= ${len(params)}"
+        query += " ORDER BY t.created_at DESC"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], "routes", fmt, date_from, date_to)
+
+    headers = ["Reference", "Amount", "Status", "Passenger", "Driver", "Note", "Date"]
+    data = [[
+        r["reference"], float(r["amount"]), r["status"],
+        r["passenger"] or "", r["driver"] or "", r["note"] or "", iso(r["created_at"])
+    ] for r in rows]
+    return csv_response(data, headers, f"routes-{ref}.csv")
+
+
+@api.get("/admin/statements/refunds")
+async def statement_refunds(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    """Refund requests report — Finance+."""
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT u.full_name, u.phone_number, r.amount, r.reason,
+                   r.status, r.resolution_note, r.created_at
+            FROM refund_requests r
+            JOIN users u ON u.id = r.user_id
+            WHERE u.is_test IS NOT TRUE
+        """
+        params: list = []
+        if date_from:
+            params.append(date_from)
+            query += f" AND r.created_at >= ${len(params)}"
+        if date_to:
+            params.append(date_to)
+            query += f" AND r.created_at <= ${len(params)}"
+        query += " ORDER BY r.created_at DESC"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], "refunds", fmt, date_from, date_to)
+
+    headers = ["User", "Phone", "Amount", "Reason", "Status", "Resolution Note", "Date"]
+    data = [[
+        r["full_name"], r["phone_number"], float(r["amount"]),
+        r["reason"], r["status"], r["resolution_note"] or "", iso(r["created_at"])
+    ] for r in rows]
+    return csv_response(data, headers, f"refunds-{ref}.csv")
+
+
+@api.get("/admin/statements/kyc-decisions")
+async def statement_kyc_decisions(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    fmt: str = "csv",
+    admin: dict = Depends(require_admin),
+):
+    """KYC decision history — Finance+."""
+    if not has_permission(admin, "download_statements"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        query = """
+            SELECT u.full_name, u.phone_number, k.status,
+                   k.rejection_reason, k.submitted_at, k.reviewed_at,
+                   rev.full_name AS reviewed_by
+            FROM kyc_documents k
+            JOIN users u ON u.id = k.user_id
+            LEFT JOIN users rev ON rev.id = k.reviewed_by
+            WHERE u.is_test IS NOT TRUE
+        """
+        params: list = []
+        if date_from:
+            params.append(date_from)
+            query += f" AND k.submitted_at >= ${len(params)}"
+        if date_to:
+            params.append(date_to)
+            query += f" AND k.submitted_at <= ${len(params)}"
+        query += " ORDER BY k.submitted_at DESC"
+        rows = await conn.fetch(query, *params)
+        ref = await log_statement_download(conn, admin["id"], "kyc_decisions", fmt, date_from, date_to)
+
+    headers = ["User", "Phone", "Status", "Rejection Reason", "Submitted At", "Reviewed At", "Reviewed By"]
+    data = [[
+        r["full_name"], r["phone_number"], r["status"],
+        r["rejection_reason"] or "", iso(r["submitted_at"]) if r["submitted_at"] else "",
+        iso(r["reviewed_at"]) if r["reviewed_at"] else "", r["reviewed_by"] or ""
+    ] for r in rows]
+    return csv_response(data, headers, f"kyc-decisions-{ref}.csv")
 
 
 # ════════════════════════════════════════════════════════════════
