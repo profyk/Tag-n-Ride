@@ -418,6 +418,9 @@ export type Wallet = {
   vehicle_plate?: string;
   total_earnings?: number;
   today_total?: number;
+  today_gross?: number;
+  today_platform_fee?: number;
+  today_trip_count?: number;
   is_verified?: boolean;
   rating_avg?: number;
   rating_count?: number;
@@ -436,6 +439,9 @@ export type Txn = {
   created_at: string;
   counterparty_name?: string | null;
   direction?: "in" | "out";
+  platform_fee?: number;
+  driver_net?: number;
+  gross_amount?: number;
 };
 
 export type DriverInfo = {

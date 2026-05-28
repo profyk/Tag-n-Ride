@@ -29,7 +29,39 @@ async function addHidden(ids: string[]) {
     const merged = Array.from(new Set([...existing, ...ids]));
     await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(merged));
   } catch {}
-}export default function Home() {
+}
+
+function todayStr() {
+  return new Date().toDateString();
+}
+
+/** Compute today's fare breakdown from transaction list */
+function computeTodayBreakdown(txns: Txn[], walletGross?: number, walletFee?: number) {
+  const payments = txns.filter(
+    (t) =>
+      t.type === "payment" &&
+      t.direction === "in" &&
+      t.status === "completed" &&
+      new Date(t.created_at).toDateString() === todayStr()
+  );
+
+  if (walletGross !== undefined) {
+    return {
+      gross: walletGross,
+      fee: walletFee ?? 0,
+      net: walletGross - (walletFee ?? 0),
+      trips: payments.length,
+    };
+  }
+
+  // Derive from individual transactions
+  const gross = payments.reduce((s, t) => s + (t.gross_amount ?? t.amount + (t.platform_fee ?? 0)), 0);
+  const fee = payments.reduce((s, t) => s + (t.platform_fee ?? 0), 0);
+  const net = gross - fee;
+  return { gross, fee, net, trips: payments.length };
+}
+
+export default function Home() {
   const router = useRouter();
   const { state } = useAuth();
   const { colors } = useTheme();
@@ -121,7 +153,10 @@ async function addHidden(ids: string[]) {
         Alert.alert("Insufficient balance", `Not enough to CashUp R${amount.toFixed(2)}.`);
       } else { Alert.alert("Failed", msg || "Could not process. Please try again."); }
     } finally { setCashUpLoading(false); }
-  };const s = makeStyles(colors);
+  };
+
+  const s = makeStyles(colors);
+  const breakdown = isDriver && wallet ? computeTodayBreakdown(allTxns, wallet.today_gross, wallet.today_platform_fee) : null;
 
   return (
     <SafeAreaView style={s.root} edges={["top"]} testID="home-screen">
@@ -129,6 +164,7 @@ async function addHidden(ids: string[]) {
         contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}>
 
+        {/* Header */}
         <View style={s.headerRow}>
           <View>
             <Text style={s.hello}>Hello,</Text>
@@ -147,31 +183,94 @@ async function addHidden(ids: string[]) {
           </View>
         </View>
 
-        <View style={s.balanceCard} testID="balance-card">
-          <View style={s.balanceCardGlow} />
-          <Text style={s.balanceLabel}>WALLET BALANCE · ZAR</Text>
-          {loading || !wallet ? (
-            <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
-          ) : (
-            <Text style={s.balanceAmt} testID="balance-amount">{formatZAR(wallet.balance)}</Text>
-          )}
-          {isDriver && wallet ? (
-            <View style={s.statsRow}>
-              <View style={s.stat}>
-                <Text style={s.statLabel}>Today</Text>
-                <Text style={s.statVal}>{formatZAR(wallet.today_total ?? 0)}</Text>
-              </View>
-              <View style={[s.stat, { borderLeftColor: colors.border, borderLeftWidth: 1, paddingLeft: 16 }]}>
-                <Text style={s.statLabel}>Rating</Text>
-                <Text style={s.statVal}>
-                  {wallet.rating_count ? `★ ${wallet.rating_avg?.toFixed(1)}` : "—"}
-                  {wallet.rating_count ? <Text style={{ color: colors.textMuted, fontSize: 13 }}>{"  "}({wallet.rating_count})</Text> : null}
-                </Text>
-              </View>
-            </View>
-          ) : null}
-        </View>
+        {/* ── Driver balance card ── */}
+        {isDriver ? (
+          <View style={s.balanceCard} testID="balance-card">
+            <View style={s.balanceCardGlow} />
 
+            {/* Fare collected header */}
+            <View style={s.fareHeader}>
+              <View style={s.fareIconWrap}>
+                <Ionicons name="cash-outline" size={16} color={colors.cyan} />
+              </View>
+              <Text style={s.fareHeaderLabel}>FARE COLLECTED TODAY</Text>
+              {breakdown && breakdown.trips > 0 && (
+                <View style={s.tripBadge}>
+                  <Text style={s.tripBadgeText}>{breakdown.trips} trip{breakdown.trips !== 1 ? "s" : ""}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Gross fare — what passengers paid */}
+            {loading || !wallet ? (
+              <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
+            ) : (
+              <>
+                <Text style={s.grossFare} testID="gross-fare">
+                  {formatZAR(breakdown?.gross ?? wallet.today_total ?? 0)}
+                </Text>
+                <Text style={s.grossFareLabel}>Gross fare paid by passengers</Text>
+
+                {/* Platform fee line */}
+                {(breakdown?.fee ?? 0) > 0 && (
+                  <View style={s.feeRow}>
+                    <Ionicons name="remove-circle-outline" size={13} color={colors.red} />
+                    <Text style={s.feeLabel}>Platform fee</Text>
+                    <Text style={s.feeAmt}>−{formatZAR(breakdown!.fee)}</Text>
+                  </View>
+                )}
+
+                {/* Divider */}
+                <View style={s.divider} />
+
+                {/* Bottom 3-column breakdown */}
+                <View style={s.bottomRow}>
+                  <View style={s.bottomStat}>
+                    <Text style={s.bottomStatLabel}>TOTAL BALANCE</Text>
+                    <Text style={[s.bottomStatVal, { color: colors.text }]} testID="balance-amount">
+                      {formatZAR(wallet.balance)}
+                    </Text>
+                  </View>
+                  <View style={[s.bottomStat, s.bottomStatCenter]}>
+                    <Text style={s.bottomStatLabel}>PLATFORM FEE</Text>
+                    <Text style={[s.bottomStatVal, { color: colors.red }]}>
+                      −{formatZAR(breakdown?.fee ?? 0)}
+                    </Text>
+                  </View>
+                  <View style={[s.bottomStat, { alignItems: "flex-end" }]}>
+                    <Text style={s.bottomStatLabel}>AVAILABLE</Text>
+                    <Text style={[s.bottomStatVal, { color: colors.green }]}>
+                      {formatZAR(wallet.balance)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Rating row */}
+                {(wallet.rating_count ?? 0) > 0 && (
+                  <View style={s.ratingRow}>
+                    <Ionicons name="star" size={12} color="#FFD60A" />
+                    <Text style={s.ratingText}>
+                      {wallet.rating_avg?.toFixed(1)} rating · {wallet.rating_count} review{wallet.rating_count !== 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        ) : (
+          /* ── Passenger balance card (unchanged) ── */
+          <View style={s.balanceCard} testID="balance-card">
+            <View style={s.balanceCardGlow} />
+            <Text style={s.balanceLabel}>WALLET BALANCE · ZAR</Text>
+            {loading || !wallet ? (
+              <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
+            ) : (
+              <Text style={s.balanceAmt} testID="balance-amount">{formatZAR(wallet.balance)}</Text>
+            )}
+          </View>
+        )}
+
+        {/* Quick actions */}
         <Text style={s.section}>QUICK ACTIONS</Text>
         {isDriver ? (
           <>
@@ -194,6 +293,7 @@ async function addHidden(ids: string[]) {
           </View>
         )}
 
+        {/* Recent transactions */}
         <View style={s.recentHeader}>
           <Text style={s.section}>RECENT</Text>
           <TouchableOpacity onPress={() => router.push("/(app)/transactions")}>
@@ -214,6 +314,7 @@ async function addHidden(ids: string[]) {
         )}
       </ScrollView>
 
+      {/* Pay Fuel modal */}
       <Modal visible={fuelModal} transparent animationType="slide" onRequestClose={() => setFuelModal(false)}>
         <View style={s.modalOverlay}>
           <View style={s.modalSheet}>
@@ -232,6 +333,7 @@ async function addHidden(ids: string[]) {
         </View>
       </Modal>
 
+      {/* CashUp modal */}
       <Modal visible={cashUpModal} transparent animationType="slide" onRequestClose={() => setCashUpModal(false)}>
         <View style={s.modalOverlay}>
           <View style={s.modalSheet}>
@@ -262,6 +364,7 @@ async function addHidden(ids: string[]) {
     </SafeAreaView>
   );
 }
+
 type Tone = "cyan" | "green" | "muted" | "orange" | "purple";
 
 const QA: React.FC<{
@@ -290,10 +393,15 @@ const QA: React.FC<{
 const TxnRow: React.FC<{ t: Txn; onHide: (id: string) => void; colors: any }> = ({ t, onHide, colors }) => {
   const isIn = t.direction === "in" || t.type === "topup";
   const isWithdraw = t.type === "withdrawal";
-  const sign = isIn ? "+" : "-";
+  const sign = isIn ? "+" : "−";
   const color = isIn ? colors.green : colors.text;
   const icon = t.type === "topup" ? "arrow-down" : isWithdraw ? "cash-outline" : isIn ? "arrow-down-circle" : "arrow-up-circle";
   const title = t.type === "topup" ? "Wallet top-up" : isWithdraw ? "Withdrawal" : t.counterparty_name || "Transfer";
+
+  // Show gross for incoming payments when available
+  const displayAmt = isIn && t.type === "payment" && t.gross_amount ? t.gross_amount : t.amount;
+  const hasFee = isIn && t.type === "payment" && (t.platform_fee ?? 0) > 0;
+
   return (
     <View style={{ position: "relative" }}>
       <View style={{ flexDirection: "row", alignItems: "center", padding: 14, paddingRight: 38, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, gap: 12 }} testID={`txn-${t.id}`}>
@@ -303,9 +411,19 @@ const TxnRow: React.FC<{ t: Txn; onHide: (id: string) => void; colors: any }> = 
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.text, fontWeight: "700", fontSize: 14 }}>{title}</Text>
           <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{formatDate(t.created_at)} · {t.reference}</Text>
+          {hasFee && (
+            <Text style={{ color: colors.textDim, fontSize: 10, marginTop: 1 }}>
+              Fee: −{formatZAR(t.platform_fee!)} · Net: {formatZAR(t.driver_net ?? t.amount)}
+            </Text>
+          )}
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={{ fontWeight: "800", fontSize: 15, color }}>{sign}{formatZAR(t.amount)}</Text>
+          <Text style={{ fontWeight: "800", fontSize: 15, color }}>{sign}{formatZAR(displayAmt)}</Text>
+          {hasFee && (
+            <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>
+              You receive {formatZAR(t.driver_net ?? t.amount)}
+            </Text>
+          )}
           <View style={{ marginTop: 4 }}>
             <Pill label={t.status} tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
           </View>
@@ -328,14 +446,46 @@ const makeStyles = (colors: any) => StyleSheet.create({
   badge: { position: "absolute", top: -2, right: -2, backgroundColor: colors.red, borderRadius: 999, minWidth: 18, height: 18, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 2, borderColor: colors.bg },
   badgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan },
-  balanceCard: { backgroundColor: colors.bg2, borderColor: colors.cyan, borderWidth: 1, borderRadius: radius.lg, padding: 24, overflow: "hidden" },
-  balanceCardGlow: { position: "absolute", top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: colors.cyan, opacity: 0.08 },
-  balanceLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4 },
+
+  // Driver balance card
+  balanceCard: { backgroundColor: colors.bg2, borderColor: colors.cyan, borderWidth: 1, borderRadius: radius.lg, padding: 20, overflow: "hidden", marginBottom: 4 },
+  balanceCardGlow: { position: "absolute", top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: colors.cyan, opacity: 0.06 },
+
+  // Fare header
+  fareHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
+  fareIconWrap: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
+  fareHeaderLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, flex: 1 },
+  tripBadge: { backgroundColor: colors.cyanDim, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  tripBadgeText: { color: colors.cyan, fontSize: 10, fontWeight: "700" },
+
+  // Gross fare number
+  grossFare: { color: colors.text, fontSize: 40, fontWeight: "800", letterSpacing: -1, marginBottom: 2 },
+  grossFareLabel: { color: colors.textDim, fontSize: 11, marginBottom: 10 },
+
+  // Platform fee row
+  feeRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "rgba(255,60,60,0.07)", borderRadius: radius.sm, borderWidth: 1, borderColor: "rgba(255,60,60,0.15)" },
+  feeLabel: { color: colors.textMuted, fontSize: 12, flex: 1 },
+  feeAmt: { color: colors.red, fontSize: 13, fontWeight: "800" },
+
+  // Divider
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 12 },
+
+  // Bottom 3-column breakdown
+  bottomRow: { flexDirection: "row", alignItems: "flex-start" },
+  bottomStat: { flex: 1 },
+  bottomStatCenter: { alignItems: "center" },
+  bottomStatLabel: { color: colors.textDim, fontSize: 9, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 },
+  bottomStatVal: { fontSize: 14, fontWeight: "800", letterSpacing: -0.3 },
+
+  // Rating
+  ratingRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  ratingText: { color: colors.textMuted, fontSize: 11, fontWeight: "600" },
+
+  // Passenger card
+  balanceLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8 },
   balanceAmt: { color: colors.text, fontSize: 38, fontWeight: "800", marginTop: 8, letterSpacing: -1 },
-  statsRow: { flexDirection: "row", marginTop: 18, gap: 16 },
-  stat: { flex: 1 },
-  statLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1 },
-  statVal: { color: colors.text, fontSize: 16, fontWeight: "700", marginTop: 4 },
+
+  // Shared
   section: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4, marginTop: 24, marginBottom: 12 },
   qaRow: { flexDirection: "row", gap: 12 },
   recentHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
