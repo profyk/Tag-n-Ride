@@ -18,7 +18,7 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-bg flex">
       <Sidebar />
-      <main className="flex-1 ml-60 p-6 overflow-auto">
+      <main className="flex-1 ml-[220px] p-6 overflow-auto">
         <div className="max-w-7xl mx-auto">
           <h1 className="text-text text-2xl font-extrabold tracking-tight mb-6">
             {title}

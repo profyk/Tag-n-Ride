@@ -67,6 +67,8 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
   const [cashupDest, setCashupDest] = useState<any>(null);
   const [hiddenRoutes, setHiddenRoutes] = useState<string[]>([]);
   const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [todayGross, setTodayGross] = useState<number>(0);
+  const [todayPlatformFee, setTodayPlatformFee] = useState<number>(0);
   const prevPaymentCount = useRef(0);
 
   if (state.status !== "authed") return null;
@@ -86,7 +88,11 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
       setRouteData(routeRes);
       setCashupStatus(statusRes);
       setHiddenRoutes(hidden);
-      if (walletRes) setWalletBalance(walletRes.total_earnings ?? 0);
+      if (walletRes) {
+        setWalletBalance(walletRes.balance ?? walletRes.total_earnings ?? 0);
+        setTodayGross(walletRes.today_gross ?? 0);
+        setTodayPlatformFee(walletRes.today_platform_fee ?? 0);
+      }
     } catch (e) {}
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -183,16 +189,35 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
           <Text style={s.pageTitle}>Earnings</Text>
 
           <View style={s.earningsCard}>
-            <View style={s.earningsRow}>
-              <View style={s.earningsStat}>
-                <Text style={s.earningsLabel}>TOTAL EARNINGS</Text>
-                <Text style={s.earningsVal}>{formatZAR(walletBalance)}</Text>
-                <Text style={s.earningsSub}>Lifetime</Text>
+            <View style={s.earningsHeaderRow}>
+              <Text style={s.earningsHeaderLabel}>FARE COLLECTED TODAY</Text>
+              {(routeData?.today_count ?? 0) > 0 && (
+                <View style={s.tripCountBadge}>
+                  <Text style={s.tripCountText}>{routeData?.today_count ?? 0} trip{(routeData?.today_count ?? 0) !== 1 ? "s" : ""}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={s.grossFareAmt}>{formatZAR(todayGross)}</Text>
+            <Text style={s.grossFareSub}>Gross fare paid by passengers</Text>
+            {todayPlatformFee > 0 && (
+              <View style={s.feeRow}>
+                <Text style={s.feeRowLabel}>Platform fee</Text>
+                <Text style={s.feeRowAmt}>−{formatZAR(todayPlatformFee)}</Text>
               </View>
-              <View style={[s.earningsStat, { borderLeftWidth: 1, borderLeftColor: colors.border, paddingLeft: 16 }]}>
-                <Text style={s.earningsLabel}>TODAY</Text>
-                <Text style={[s.earningsVal, { color: colors.cyan }]}>{formatZAR(routeData?.today_total ?? 0)}</Text>
-                <Text style={s.earningsSub}>{routeData?.today_count ?? 0} app payments</Text>
+            )}
+            <View style={s.earningsDivider} />
+            <View style={s.earningsBottomRow}>
+              <View style={s.earningsBottomStat}>
+                <Text style={s.earningsBottomLabel}>TOTAL BALANCE</Text>
+                <Text style={s.earningsBottomVal}>{formatZAR(walletBalance)}</Text>
+              </View>
+              <View style={[s.earningsBottomStat, s.earningsBottomBorder]}>
+                <Text style={[s.earningsBottomLabel, { color: colors.red }]}>PLATFORM FEE</Text>
+                <Text style={[s.earningsBottomVal, { color: colors.red }]}>{formatZAR(todayPlatformFee)}</Text>
+              </View>
+              <View style={[s.earningsBottomStat, s.earningsBottomBorder]}>
+                <Text style={[s.earningsBottomLabel, { color: colors.cyan }]}>AVAILABLE</Text>
+                <Text style={[s.earningsBottomVal, { color: colors.cyan }]}>{formatZAR(Math.max(0, todayGross - todayPlatformFee))}</Text>
               </View>
             </View>
           </View>
@@ -600,11 +625,21 @@ const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   pageTitle: { color: colors.text, fontSize: 24, fontWeight: "800", marginBottom: 16 },
   earningsCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 20, marginBottom: 16 },
-  earningsRow: { flexDirection: "row", gap: 16 },
-  earningsStat: { flex: 1 },
-  earningsLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 4 },
-  earningsVal: { color: colors.green, fontSize: 24, fontWeight: "800" },
-  earningsSub: { color: colors.textDim, fontSize: 11, marginTop: 2 },
+  earningsHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  earningsHeaderLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
+  tripCountBadge: { backgroundColor: colors.bg3 || colors.bg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.border },
+  tripCountText: { color: colors.textMuted, fontSize: 10, fontWeight: "700" },
+  grossFareAmt: { color: colors.green, fontSize: 36, fontWeight: "900", letterSpacing: -1 },
+  grossFareSub: { color: colors.textDim, fontSize: 11, marginTop: 2, marginBottom: 12 },
+  feeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.red + "15", borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
+  feeRowLabel: { color: colors.red, fontSize: 12, fontWeight: "600" },
+  feeRowAmt: { color: colors.red, fontSize: 14, fontWeight: "800" },
+  earningsDivider: { height: 1, backgroundColor: colors.border, marginBottom: 12 },
+  earningsBottomRow: { flexDirection: "row" },
+  earningsBottomStat: { flex: 1, alignItems: "center" },
+  earningsBottomBorder: { borderLeftWidth: 1, borderLeftColor: colors.border },
+  earningsBottomLabel: { color: colors.textMuted, fontSize: 9, fontWeight: "700", letterSpacing: 1.2, marginBottom: 3, textAlign: "center" },
+  earningsBottomVal: { color: colors.text, fontSize: 14, fontWeight: "800" },
   cashupCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: "#A064FF44", padding: 16, marginBottom: 16 },
   cashupHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
   cashupTitle: { color: colors.text, fontWeight: "800", fontSize: 15, flex: 1 },
