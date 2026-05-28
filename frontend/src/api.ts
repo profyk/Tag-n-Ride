@@ -396,6 +396,31 @@ export const api = {
       "/api/owner/toggle-driver-mode",
       { method: "POST", body: JSON.stringify({ active }) }
     ),
+
+  // ── Driver transfer ──
+  transferRequest: (owner_code: string) =>
+    request<{ ok: boolean; transfer_id: string; status: string }>("/api/driver/transfer/request", {
+      method: "POST",
+      body: JSON.stringify({ owner_code }),
+    }),
+
+  transferActive: () =>
+    request<{ transfer: DriverTransfer | null }>("/api/driver/transfer/active"),
+
+  transferCancel: (transfer_id: string) =>
+    request<{ ok: boolean }>(`/api/driver/transfer/${transfer_id}`, { method: "DELETE" }),
+
+  ownerTransfers: () =>
+    request<DriverTransfer[]>("/api/owner/transfers"),
+
+  ownerTransferApprove: (transfer_id: string) =>
+    request<{ ok: boolean }>(`/api/owner/transfer/${transfer_id}/approve`, { method: "POST" }),
+
+  ownerTransferReject: (transfer_id: string, reason: string) =>
+    request<{ ok: boolean }>(`/api/owner/transfer/${transfer_id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
 };
 
 // ── Types ──
@@ -462,6 +487,27 @@ export type PayoutAccount = {
   bank_name: string;
   account_number: string;
   account_name?: string;
+  created_at: string;
+};
+
+export type DriverTransfer = {
+  id: string;
+  driver_user_id: string;
+  driver_name: string;
+  driver_phone: string;
+  old_owner_id: string | null;
+  old_owner_user_id: string | null;
+  old_owner_name: string | null;
+  new_owner_id: string;
+  new_owner_user_id: string;
+  new_owner_name: string;
+  status: string;
+  old_owner_reject_reason: string | null;
+  new_owner_reject_reason: string | null;
+  reminder_sent_at: string | null;
+  escalated_at: string | null;
+  admin_override_note: string | null;
+  completed_at: string | null;
   created_at: string;
 };
 

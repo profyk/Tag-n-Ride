@@ -673,4 +673,46 @@ export const api = {
     client.post(`/api/admin/salary-payments/${id}/reject`, { reason }),
   paySalary: (id: string) => client.post<{ ok: boolean; reference: string; net_amount: number }>(`/api/admin/salary-payments/${id}/pay`),
   systemWallet: () => client.get<{ balance: number; total_fees_collected: number; total_salary_paid: number; available: number }>("/api/admin/system-wallet"),
+
+  // Driver transfers
+  adminTransfers: (status?: string) =>
+    client.get<DriverTransfer[]>("/api/admin/transfers", { params: status ? { status } : {} }),
+  adminTransferContactAttempts: (id: string) =>
+    client.get<ContactAttempt[]>(`/api/admin/transfers/${id}/contact-attempts`),
+  adminLogContact: (id: string, body: { contact_method: string; outcome: string; notes?: string }) =>
+    client.post<{ ok: boolean }>(`/api/admin/transfers/${id}/contact-attempt`, body),
+  adminTransferApprove: (id: string, note: string) =>
+    client.post<{ ok: boolean }>(`/api/admin/transfers/${id}/admin-approve`, { note }),
+  adminTransferReject: (id: string, note: string) =>
+    client.post<{ ok: boolean }>(`/api/admin/transfers/${id}/admin-reject`, { note }),
+};
+
+export type DriverTransfer = {
+  id: string;
+  driver_user_id: string;
+  driver_name: string;
+  driver_phone: string;
+  old_owner_id: string | null;
+  old_owner_user_id: string | null;
+  old_owner_name: string | null;
+  new_owner_id: string;
+  new_owner_user_id: string;
+  new_owner_name: string;
+  status: string;
+  old_owner_reject_reason: string | null;
+  new_owner_reject_reason: string | null;
+  reminder_sent_at: string | null;
+  escalated_at: string | null;
+  admin_override_note: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
+export type ContactAttempt = {
+  id: string;
+  admin_name: string;
+  contact_method: string;
+  outcome: string;
+  notes: string | null;
+  attempted_at: string;
 };

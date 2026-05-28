@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+import asyncio
 import asyncpg
 import bcrypt
 import jwt
@@ -352,6 +353,7 @@ async def lifespan(app: FastAPI):
             await conn.execute(CREATE_TABLES_SQL)
         print("DB pool created, tables ready")
         await create_new_tables()
+        asyncio.create_task(transfer_escalation_loop())
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
@@ -2862,6 +2864,38 @@ async def create_new_tables():
                 await conn.execute(
                     "INSERT INTO system_wallet (id) VALUES ('main') ON CONFLICT DO NOTHING"
                 )
+                # ── Driver transfer requests ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS driver_transfer_requests (
+                        id TEXT PRIMARY KEY,
+                        driver_user_id TEXT NOT NULL REFERENCES users(id),
+                        old_owner_id TEXT REFERENCES fleet_owners(id),
+                        old_owner_user_id TEXT REFERENCES users(id),
+                        new_owner_id TEXT NOT NULL REFERENCES fleet_owners(id),
+                        new_owner_user_id TEXT NOT NULL REFERENCES users(id),
+                        status TEXT NOT NULL DEFAULT 'pending_old_owner',
+                        old_owner_reject_reason TEXT,
+                        new_owner_reject_reason TEXT,
+                        reminder_sent_at TIMESTAMPTZ,
+                        escalated_at TIMESTAMPTZ,
+                        admin_override_by TEXT REFERENCES users(id),
+                        admin_override_at TIMESTAMPTZ,
+                        admin_override_note TEXT,
+                        completed_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS transfer_contact_attempts (
+                        id TEXT PRIMARY KEY,
+                        transfer_id TEXT NOT NULL REFERENCES driver_transfer_requests(id),
+                        admin_id TEXT NOT NULL REFERENCES users(id),
+                        contact_method TEXT NOT NULL,
+                        outcome TEXT NOT NULL,
+                        notes TEXT,
+                        attempted_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
                 # ── Salary payments ──
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS salary_payments (
@@ -2909,6 +2943,43 @@ class DisputeIn(BaseModel):
 
 class ResolveDisputeIn(BaseModel):
     resolution: str = Field(min_length=5, max_length=500)
+
+# ── Driver Transfer Models ─────────────────────────────────────
+class TransferRequestIn(BaseModel):
+    owner_code: str
+
+class TransferRejectIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+class ContactAttemptIn(BaseModel):
+    contact_method: str
+    outcome: str
+    notes: Optional[str] = None
+
+class AdminTransferOverrideIn(BaseModel):
+    note: str = Field(min_length=5, max_length=500)
+
+def _fmt_transfer(t: dict) -> dict:
+    return {
+        "id": t["id"],
+        "driver_user_id": t["driver_user_id"],
+        "driver_name": t.get("driver_name", ""),
+        "driver_phone": t.get("driver_phone", ""),
+        "old_owner_id": t.get("old_owner_id"),
+        "old_owner_user_id": t.get("old_owner_user_id"),
+        "old_owner_name": t.get("old_owner_name"),
+        "new_owner_id": t["new_owner_id"],
+        "new_owner_user_id": t["new_owner_user_id"],
+        "new_owner_name": t.get("new_owner_name", ""),
+        "status": t["status"],
+        "old_owner_reject_reason": t.get("old_owner_reject_reason"),
+        "new_owner_reject_reason": t.get("new_owner_reject_reason"),
+        "reminder_sent_at": iso(t["reminder_sent_at"]) if t.get("reminder_sent_at") else None,
+        "escalated_at": iso(t["escalated_at"]) if t.get("escalated_at") else None,
+        "admin_override_note": t.get("admin_override_note"),
+        "completed_at": iso(t["completed_at"]) if t.get("completed_at") else None,
+        "created_at": iso(t["created_at"]),
+    }
 
 class BlacklistIn(BaseModel):
     phone_number: str = Field(min_length=7, max_length=20)
@@ -8374,6 +8445,394 @@ async def admin_db_query(body: DbQueryIn, admin: dict = Depends(require_admin)):
                 return {"columns": [], "rows": [], "count": count, "duration_ms": duration_ms}
         except Exception as e:
             return {"columns": [], "rows": [], "count": 0, "error": str(e)}
+
+
+# ── Driver Transfer Endpoints ─────────────────────────────────
+
+@api.post("/driver/transfer/request")
+async def driver_transfer_request(body: TransferRequestIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    code = body.owner_code.strip()
+    async with pool.acquire() as conn:
+        open_cashup = await conn.fetchrow(
+            "SELECT id FROM cashup_records WHERE driver_user_id=$1 AND status='open'", user["id"]
+        )
+        if open_cashup:
+            raise HTTPException(status_code=400, detail="Close your current cashup before switching owners")
+
+        existing = await conn.fetchrow(
+            "SELECT id FROM driver_transfer_requests WHERE driver_user_id=$1 AND status NOT IN ('completed','cancelled','rejected_by_old_owner','rejected_by_new_owner')",
+            user["id"]
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="You already have a pending transfer request")
+
+        new_owner_user = await conn.fetchrow(
+            "SELECT u.id, u.full_name, u.phone_number FROM users u JOIN fleet_owners fo ON fo.user_id=u.id WHERE u.id=$1 OR u.phone_number=$1",
+            code
+        )
+        if not new_owner_user:
+            raise HTTPException(status_code=404, detail="Owner not found with that code")
+        new_owner = await conn.fetchrow("SELECT id FROM fleet_owners WHERE user_id=$1", new_owner_user["id"])
+        if not new_owner:
+            raise HTTPException(status_code=404, detail="That user is not a registered fleet owner")
+
+        current_link = await conn.fetchrow(
+            """SELECT od.owner_id, fo.user_id as owner_user_id, u.full_name as owner_name
+               FROM owner_drivers od
+               JOIN fleet_owners fo ON fo.id=od.owner_id
+               JOIN users u ON u.id=fo.user_id
+               WHERE od.driver_user_id=$1 LIMIT 1""",
+            user["id"]
+        )
+        if current_link and current_link["owner_id"] == new_owner["id"]:
+            raise HTTPException(status_code=400, detail="You are already linked to this owner")
+
+        old_owner_id = current_link["owner_id"] if current_link else None
+        old_owner_user_id = current_link["owner_user_id"] if current_link else None
+        initial_status = "pending_old_owner" if old_owner_id else "pending_new_owner"
+
+        transfer_id = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO driver_transfer_requests
+               (id,driver_user_id,old_owner_id,old_owner_user_id,new_owner_id,new_owner_user_id,status)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+            transfer_id, user["id"], old_owner_id, old_owner_user_id, new_owner["id"], new_owner_user["id"], initial_status
+        )
+        if old_owner_user_id:
+            await notify_user(conn, "Driver Transfer Request",
+                f"{user['full_name']} wants to leave your fleet and join another owner. Please review in the app.",
+                "transfer", old_owner_user_id)
+        pending_msg = (f"{user['full_name']} has requested to join your fleet. Awaiting old owner approval first."
+                       if old_owner_id else
+                       f"{user['full_name']} has requested to join your fleet. Please approve or reject.")
+        await notify_user(conn, "Driver Wants to Join Your Fleet", pending_msg, "transfer", new_owner_user["id"])
+        await audit(conn, user["id"], "transfer_request", transfer_id, "driver_transfer",
+                    {"new_owner": new_owner_user["id"]}, "", True)
+    return {"ok": True, "transfer_id": transfer_id, "status": initial_status}
+
+
+@api.get("/driver/transfer/active")
+async def driver_transfer_active(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT dtr.*,
+                      u_drv.full_name as driver_name, u_drv.phone_number as driver_phone,
+                      u_old.full_name as old_owner_name,
+                      u_new.full_name as new_owner_name
+               FROM driver_transfer_requests dtr
+               JOIN users u_drv ON u_drv.id=dtr.driver_user_id
+               LEFT JOIN users u_old ON u_old.id=dtr.old_owner_user_id
+               JOIN users u_new ON u_new.id=dtr.new_owner_user_id
+               WHERE dtr.driver_user_id=$1
+                 AND dtr.status NOT IN ('completed','cancelled','rejected_by_old_owner','rejected_by_new_owner')
+               ORDER BY dtr.created_at DESC LIMIT 1""",
+            user["id"]
+        )
+    return {"transfer": _fmt_transfer(dict(row)) if row else None}
+
+
+@api.delete("/driver/transfer/{transfer_id}")
+async def driver_cancel_transfer(transfer_id: str, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id,old_owner_user_id,new_owner_user_id,status FROM driver_transfer_requests WHERE id=$1 AND driver_user_id=$2",
+            transfer_id, user["id"]
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer not found")
+        if row["status"] in ("completed", "cancelled"):
+            raise HTTPException(status_code=400, detail="Cannot cancel a completed or already cancelled transfer")
+        await conn.execute("UPDATE driver_transfer_requests SET status='cancelled' WHERE id=$1", transfer_id)
+        if row["old_owner_user_id"]:
+            await notify_user(conn, "Transfer Cancelled",
+                f"{user['full_name']} cancelled their transfer request.", "transfer", row["old_owner_user_id"])
+        await notify_user(conn, "Transfer Cancelled",
+            f"{user['full_name']} cancelled their transfer request.", "transfer", row["new_owner_user_id"])
+    return {"ok": True}
+
+
+@api.get("/owner/transfers")
+async def owner_get_transfers(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        rows = await conn.fetch(
+            """SELECT dtr.*,
+                      u_drv.full_name as driver_name, u_drv.phone_number as driver_phone,
+                      u_old.full_name as old_owner_name,
+                      u_new.full_name as new_owner_name
+               FROM driver_transfer_requests dtr
+               JOIN users u_drv ON u_drv.id=dtr.driver_user_id
+               LEFT JOIN users u_old ON u_old.id=dtr.old_owner_user_id
+               JOIN users u_new ON u_new.id=dtr.new_owner_user_id
+               WHERE (dtr.old_owner_id=$1 OR dtr.new_owner_id=$1)
+                 AND dtr.status NOT IN ('cancelled')
+               ORDER BY dtr.created_at DESC""",
+            owner["id"]
+        )
+    return [_fmt_transfer(dict(r)) for r in rows]
+
+
+@api.post("/owner/transfer/{transfer_id}/approve")
+async def owner_approve_transfer(transfer_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        row = await conn.fetchrow("SELECT * FROM driver_transfer_requests WHERE id=$1", transfer_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer not found")
+        drv_name_row = await conn.fetchrow("SELECT full_name FROM users WHERE id=$1", row["driver_user_id"])
+        drv_name = drv_name_row["full_name"] if drv_name_row else "Driver"
+
+        if row["old_owner_id"] == owner["id"] and row["status"] in ("pending_old_owner", "escalated_to_admin"):
+            await conn.execute(
+                "UPDATE driver_transfer_requests SET status='pending_new_owner' WHERE id=$1", transfer_id
+            )
+            await notify_user(conn, "Old Owner Approved Transfer",
+                f"{drv_name}'s previous owner approved the transfer. Please review and accept or reject.",
+                "transfer", row["new_owner_user_id"])
+            await notify_user(conn, "Transfer Approved by Previous Owner",
+                "Your previous owner approved your transfer. Waiting for new owner to accept.",
+                "transfer", row["driver_user_id"])
+        elif row["new_owner_id"] == owner["id"] and row["status"] == "pending_new_owner":
+            async with conn.transaction():
+                if row["old_owner_id"]:
+                    await conn.execute(
+                        "DELETE FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
+                        row["old_owner_id"], row["driver_user_id"]
+                    )
+                exists = await conn.fetchrow(
+                    "SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
+                    owner["id"], row["driver_user_id"]
+                )
+                if not exists:
+                    await conn.execute(
+                        "INSERT INTO owner_drivers (id,owner_id,driver_user_id) VALUES ($1,$2,$3)",
+                        str(uuid.uuid4()), owner["id"], row["driver_user_id"]
+                    )
+                await conn.execute(
+                    "UPDATE driver_transfer_requests SET status='completed',completed_at=NOW() WHERE id=$1",
+                    transfer_id
+                )
+            await notify_user(conn, "Transfer Complete!",
+                f"You have been successfully transferred to {user['full_name']}'s fleet.",
+                "transfer", row["driver_user_id"])
+            if row["old_owner_user_id"]:
+                await notify_user(conn, "Driver Transfer Completed",
+                    f"{drv_name} has joined their new fleet and has been removed from yours.",
+                    "transfer", row["old_owner_user_id"])
+        else:
+            raise HTTPException(status_code=400, detail="You cannot approve this transfer at this stage")
+        await audit(conn, user["id"], "transfer_approved", transfer_id, "driver_transfer",
+                    {"owner_id": owner["id"]}, "", True)
+    return {"ok": True}
+
+
+@api.post("/owner/transfer/{transfer_id}/reject")
+async def owner_reject_transfer(transfer_id: str, body: TransferRejectIn, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        row = await conn.fetchrow("SELECT * FROM driver_transfer_requests WHERE id=$1", transfer_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer not found")
+        drv_name_row = await conn.fetchrow("SELECT full_name FROM users WHERE id=$1", row["driver_user_id"])
+        drv_name = drv_name_row["full_name"] if drv_name_row else "Driver"
+
+        if row["old_owner_id"] == owner["id"] and row["status"] in ("pending_old_owner", "escalated_to_admin"):
+            await conn.execute(
+                "UPDATE driver_transfer_requests SET status='rejected_by_old_owner',old_owner_reject_reason=$1 WHERE id=$2",
+                body.reason, transfer_id
+            )
+            await notify_user(conn, "Transfer Request Rejected",
+                f"Your transfer was rejected by your current owner. Reason: {body.reason}",
+                "transfer", row["driver_user_id"])
+            await notify_user(conn, "Transfer Request Rejected",
+                f"{drv_name}'s transfer request was rejected.", "transfer", row["new_owner_user_id"])
+        elif row["new_owner_id"] == owner["id"] and row["status"] == "pending_new_owner":
+            await conn.execute(
+                "UPDATE driver_transfer_requests SET status='rejected_by_new_owner',new_owner_reject_reason=$1 WHERE id=$2",
+                body.reason, transfer_id
+            )
+            await notify_user(conn, "Transfer Request Rejected",
+                f"The new owner rejected your transfer. Reason: {body.reason}",
+                "transfer", row["driver_user_id"])
+            if row["old_owner_user_id"]:
+                await notify_user(conn, "Transfer Not Proceeding",
+                    f"{drv_name} will remain in your fleet. The new owner rejected them.",
+                    "transfer", row["old_owner_user_id"])
+        else:
+            raise HTTPException(status_code=400, detail="You cannot reject this transfer at this stage")
+        await audit(conn, user["id"], "transfer_rejected", transfer_id, "driver_transfer",
+                    {"reason": body.reason}, "", True)
+    return {"ok": True}
+
+
+@api.get("/admin/transfers")
+async def admin_get_transfers(status: Optional[str] = None, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        if status:
+            rows = await conn.fetch(
+                """SELECT dtr.*,
+                          u_drv.full_name as driver_name, u_drv.phone_number as driver_phone,
+                          u_old.full_name as old_owner_name,
+                          u_new.full_name as new_owner_name
+                   FROM driver_transfer_requests dtr
+                   JOIN users u_drv ON u_drv.id=dtr.driver_user_id
+                   LEFT JOIN users u_old ON u_old.id=dtr.old_owner_user_id
+                   JOIN users u_new ON u_new.id=dtr.new_owner_user_id
+                   WHERE dtr.status=$1
+                   ORDER BY dtr.created_at DESC LIMIT 200""", status
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT dtr.*,
+                          u_drv.full_name as driver_name, u_drv.phone_number as driver_phone,
+                          u_old.full_name as old_owner_name,
+                          u_new.full_name as new_owner_name
+                   FROM driver_transfer_requests dtr
+                   JOIN users u_drv ON u_drv.id=dtr.driver_user_id
+                   LEFT JOIN users u_old ON u_old.id=dtr.old_owner_user_id
+                   JOIN users u_new ON u_new.id=dtr.new_owner_user_id
+                   ORDER BY dtr.created_at DESC LIMIT 200"""
+            )
+    return [_fmt_transfer(dict(r)) for r in rows]
+
+
+@api.post("/admin/transfers/{transfer_id}/contact-attempt")
+async def admin_log_contact(transfer_id: str, body: ContactAttemptIn, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT id FROM driver_transfer_requests WHERE id=$1", transfer_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer not found")
+        await conn.execute(
+            """INSERT INTO transfer_contact_attempts (id,transfer_id,admin_id,contact_method,outcome,notes)
+               VALUES ($1,$2,$3,$4,$5,$6)""",
+            str(uuid.uuid4()), transfer_id, admin["id"], body.contact_method, body.outcome, body.notes
+        )
+    return {"ok": True}
+
+
+@api.get("/admin/transfers/{transfer_id}/contact-attempts")
+async def admin_get_contact_attempts(transfer_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT ca.*, u.full_name as admin_name
+               FROM transfer_contact_attempts ca
+               JOIN users u ON u.id=ca.admin_id
+               WHERE ca.transfer_id=$1
+               ORDER BY ca.attempted_at DESC""",
+            transfer_id
+        )
+    return [{"id": r["id"], "admin_name": r["admin_name"], "contact_method": r["contact_method"],
+             "outcome": r["outcome"], "notes": r["notes"], "attempted_at": iso(r["attempted_at"])} for r in rows]
+
+
+@api.post("/admin/transfers/{transfer_id}/admin-approve")
+async def admin_transfer_approve(transfer_id: str, body: AdminTransferOverrideIn, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM driver_transfer_requests WHERE id=$1", transfer_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer not found")
+        if row["status"] not in ("escalated_to_admin", "pending_old_owner"):
+            raise HTTPException(status_code=400, detail="Transfer is not awaiting admin action")
+        attempts = await conn.fetchval(
+            "SELECT COUNT(*) FROM transfer_contact_attempts WHERE transfer_id=$1", transfer_id
+        )
+        if attempts == 0:
+            raise HTTPException(status_code=400, detail="Log at least one contact attempt before overriding")
+        drv_name_row = await conn.fetchrow("SELECT full_name FROM users WHERE id=$1", row["driver_user_id"])
+        drv_name = drv_name_row["full_name"] if drv_name_row else "Driver"
+        await conn.execute(
+            """UPDATE driver_transfer_requests
+               SET status='pending_new_owner', admin_override_by=$1, admin_override_at=NOW(), admin_override_note=$2
+               WHERE id=$3""",
+            admin["id"], body.note, transfer_id
+        )
+        await notify_user(conn, "Transfer Approved by Admin",
+            "Admin reviewed your transfer and approved it. Waiting for new owner to accept.",
+            "transfer", row["driver_user_id"])
+        await notify_user(conn, "Driver Transfer Ready for Review",
+            f"Admin approved {drv_name}'s transfer. Please accept or reject.",
+            "transfer", row["new_owner_user_id"])
+        if row["old_owner_user_id"]:
+            await notify_user(conn, "Transfer Override by Admin",
+                f"Tag-n-Ride admin overrode your inaction on {drv_name}'s transfer after multiple contact attempts.",
+                "transfer", row["old_owner_user_id"])
+        await audit(conn, admin["id"], "admin_transfer_override", transfer_id, "driver_transfer",
+                    {"note": body.note}, "", True)
+    return {"ok": True}
+
+
+@api.post("/admin/transfers/{transfer_id}/admin-reject")
+async def admin_transfer_reject(transfer_id: str, body: AdminTransferOverrideIn, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM driver_transfer_requests WHERE id=$1", transfer_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Transfer not found")
+        if row["status"] in ("completed", "cancelled"):
+            raise HTTPException(status_code=400, detail="Transfer is already finalised")
+        await conn.execute(
+            """UPDATE driver_transfer_requests
+               SET status='rejected_by_old_owner', old_owner_reject_reason=$1,
+                   admin_override_by=$2, admin_override_at=NOW(), admin_override_note=$1
+               WHERE id=$3""",
+            body.note, admin["id"], transfer_id
+        )
+        await notify_user(conn, "Transfer Closed by Admin",
+            f"Your transfer request was closed by admin: {body.note}",
+            "transfer", row["driver_user_id"])
+        await audit(conn, admin["id"], "admin_transfer_reject", transfer_id, "driver_transfer",
+                    {"note": body.note}, "", True)
+    return {"ok": True}
+
+
+# ── Background escalation ─────────────────────────────────────
+async def transfer_escalation_loop():
+    await asyncio.sleep(60)
+    while True:
+        try:
+            if pool:
+                async with pool.acquire() as conn:
+                    pending_24h = await conn.fetch(
+                        """SELECT dtr.*, u_drv.full_name as driver_name
+                           FROM driver_transfer_requests dtr
+                           JOIN users u_drv ON u_drv.id=dtr.driver_user_id
+                           WHERE dtr.status='pending_old_owner'
+                             AND dtr.reminder_sent_at IS NULL
+                             AND dtr.created_at < NOW() - INTERVAL '24 hours'"""
+                    )
+                    for t in pending_24h:
+                        if t["old_owner_user_id"]:
+                            await notify_user(conn, "Reminder: Driver Transfer Awaiting Approval",
+                                f"{t['driver_name']} is waiting for your approval to transfer fleets. Please respond within 24 hours.",
+                                "transfer", t["old_owner_user_id"])
+                        await conn.execute(
+                            "UPDATE driver_transfer_requests SET reminder_sent_at=NOW() WHERE id=$1", t["id"]
+                        )
+
+                    to_escalate = await conn.fetch(
+                        """SELECT dtr.*, u_drv.full_name as driver_name
+                           FROM driver_transfer_requests dtr
+                           JOIN users u_drv ON u_drv.id=dtr.driver_user_id
+                           WHERE dtr.status='pending_old_owner'
+                             AND dtr.reminder_sent_at IS NOT NULL
+                             AND dtr.reminder_sent_at < NOW() - INTERVAL '24 hours'"""
+                    )
+                    for t in to_escalate:
+                        await conn.execute(
+                            "UPDATE driver_transfer_requests SET status='escalated_to_admin',escalated_at=NOW() WHERE id=$1",
+                            t["id"]
+                        )
+                        await notify_user(conn, "Transfer Escalated to Admin",
+                            "Your transfer request has been escalated to admin since your previous owner hasn't responded.",
+                            "transfer", t["driver_user_id"])
+        except Exception as e:
+            print(f"[TRANSFER ESCALATION ERROR] {e}")
+        await asyncio.sleep(3600)
 
 
 # ════════════════════════════════════════════════════════════════

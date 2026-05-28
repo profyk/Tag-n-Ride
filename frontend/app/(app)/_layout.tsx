@@ -123,6 +123,7 @@ function AppTabs() {
       <Tabs.Screen name="withdraw" options={{ href: null }} />
       <Tabs.Screen name="kyc" options={{ href: null }} />
       <Tabs.Screen name="my-qr" options={{ href: null }} />
+      <Tabs.Screen name="transfer" options={{ href: null }} />
     </Tabs>
   );
 }

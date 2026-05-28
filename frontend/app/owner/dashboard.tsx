@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
-import { api } from "../../src/api";
+import { api, DriverTransfer } from "../../src/api";
 import { colors, formatZAR, formatDate, radius } from "../../src/theme";
 import { Button } from "../../src/ui";
 
@@ -64,17 +64,23 @@ export default function OwnerDashboard() {
   const [targetInput, setTargetInput] = useState("");
   const [settingTarget, setSettingTarget] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("drivers");
+  const [transfers, setTransfers] = useState<DriverTransfer[]>([]);
+  const [transferModal, setTransferModal] = useState<DriverTransfer | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [actingTransfer, setActingTransfer] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [dashRes, outRes, histRes] = await Promise.all([
+      const [dashRes, outRes, histRes, txRes] = await Promise.all([
         api.ownerDashboard(),
         api.ownerOutstanding().catch(() => null),
         api.ownerCashupHistory().catch(() => null),
+        api.ownerTransfers().catch(() => []),
       ]);
       setData(dashRes);
       setOutstanding(outRes);
       setCashupHistory(histRes);
+      setTransfers(txRes as DriverTransfer[]);
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to load dashboard");
     } finally { setLoading(false); setRefreshing(false); }
@@ -212,6 +218,19 @@ export default function OwnerDashboard() {
                 <Ionicons name="chevron-forward" size={14} color="#FFD60A" />
               </TouchableOpacity>
             )}
+
+            {/* Pending transfer banners */}
+            {transfers.filter(t => t.status === "pending_old_owner" || t.status === "pending_new_owner").map(t => (
+              <TouchableOpacity key={t.id} style={s.transferBanner} onPress={() => { setTransferModal(t); setRejectReason(""); }}>
+                <Ionicons name="swap-horizontal-outline" size={16} color="#FF9F0A" />
+                <Text style={s.transferBannerText} numberOfLines={1}>
+                  {t.status === "pending_old_owner"
+                    ? `${t.driver_name} wants to leave your fleet`
+                    : `${t.driver_name} wants to join your fleet`}
+                </Text>
+                <Text style={s.transferBannerAction}>Review</Text>
+              </TouchableOpacity>
+            ))}
 
             {/* Tabs */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
@@ -552,6 +571,87 @@ export default function OwnerDashboard() {
           </Pressable>
         </Modal>
       )}
+
+      {/* Transfer review modal */}
+      {transferModal && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setTransferModal(null)}>
+          <Pressable style={s.overlay} onPress={() => setTransferModal(null)}>
+            <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
+              <View style={s.sheetHandle} />
+              <View style={[s.sheetIconWrap, { backgroundColor: "#FF9F0A18", borderColor: "#FF9F0A44" }]}>
+                <Ionicons name="swap-horizontal-outline" size={26} color="#FF9F0A" />
+              </View>
+              <Text style={s.sheetTitle}>Driver Transfer Request</Text>
+              <Text style={s.sheetSub}>
+                {transferModal.status === "pending_old_owner"
+                  ? `${transferModal.driver_name} wants to leave your fleet and join another owner.`
+                  : `${transferModal.driver_name} is requesting to join your fleet.`}
+              </Text>
+              <View style={{ marginBottom: 16 }}>
+                {transferModal.old_owner_name && (
+                  <View style={s.summaryRow}>
+                    <Text style={s.summaryLabel}>From fleet</Text>
+                    <Text style={s.summaryVal}>{transferModal.old_owner_name}</Text>
+                  </View>
+                )}
+                <View style={s.summaryRow}>
+                  <Text style={s.summaryLabel}>To fleet</Text>
+                  <Text style={s.summaryVal}>{transferModal.new_owner_name}</Text>
+                </View>
+                <View style={s.summaryRow}>
+                  <Text style={s.summaryLabel}>Driver</Text>
+                  <Text style={s.summaryVal}>{transferModal.driver_name}</Text>
+                </View>
+              </View>
+              <Text style={s.inputLabel}>REJECTION REASON (if rejecting)</Text>
+              <TextInput
+                style={s.input}
+                value={rejectReason}
+                onChangeText={setRejectReason}
+                placeholder="Optional reason for rejection"
+                placeholderTextColor={colors.textDim}
+              />
+              <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    label={actingTransfer ? "…" : "Reject"}
+                    variant="destructive"
+                    loading={actingTransfer}
+                    onPress={async () => {
+                      if (!rejectReason.trim()) { Alert.alert("Required", "Enter a rejection reason."); return; }
+                      setActingTransfer(true);
+                      try {
+                        await api.ownerTransferReject(transferModal.id, rejectReason.trim());
+                        Alert.alert("Rejected", "Transfer request rejected.");
+                        setTransferModal(null); load();
+                      } catch (e: any) { Alert.alert("Error", e?.message); }
+                      finally { setActingTransfer(false); }
+                    }}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    label={actingTransfer ? "…" : "Approve"}
+                    loading={actingTransfer}
+                    onPress={async () => {
+                      setActingTransfer(true);
+                      try {
+                        await api.ownerTransferApprove(transferModal.id);
+                        const msg = transferModal.status === "pending_old_owner"
+                          ? "Approved — waiting for new owner to accept."
+                          : "Approved — driver has been added to your fleet!";
+                        Alert.alert("Approved", msg);
+                        setTransferModal(null); load();
+                      } catch (e: any) { Alert.alert("Error", e?.message); }
+                      finally { setActingTransfer(false); }
+                    }}
+                  />
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -575,6 +675,9 @@ const s = StyleSheet.create({
   infoBannerVal: { fontSize: 18, fontWeight: "900", marginTop: 1 },
   warningBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFD60A11", borderRadius: radius.md, borderWidth: 1, borderColor: "#FFD60A33", padding: 12, marginTop: 10 },
   warningBannerText: { color: "#FFD60A", fontSize: 13, fontWeight: "700", flex: 1 },
+  transferBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FF9F0A11", borderRadius: radius.md, borderWidth: 1, borderColor: "#FF9F0A33", padding: 12, marginTop: 10 },
+  transferBannerText: { color: "#FF9F0A", fontSize: 13, fontWeight: "700", flex: 1 },
+  transferBannerAction: { color: "#FF9F0A", fontSize: 12, fontWeight: "800", textDecorationLine: "underline" },
   tabRow: { flexDirection: "row", gap: 6, marginTop: 16, marginBottom: 4 },
   tab: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md, backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
   tabActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },

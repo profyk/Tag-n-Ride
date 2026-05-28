@@ -368,6 +368,20 @@ const APP_VERSION = "1.0.0";export default function Profile() {
           </>
         )}
 
+        {/* Switch owner */}
+        {isDriver && (
+          <>
+            <Text style={s.section}>FLEET</Text>
+            <Row
+              icon="swap-horizontal-outline"
+              label="Switch Owner / Change Taxi"
+              onPress={() => router.push("/(app)/transfer")}
+              testID="row-switch-owner"
+              colors={colors}
+            />
+          </>
+        )}
+
         {/* Appearance */}
         <Text style={s.section}>APPEARANCE</Text>
         <View style={s.themeCard}>
