@@ -13,6 +13,7 @@ const ROLES = [
   { value: "admin",     label: "Admin",     desc: "Users, drivers, verification",    color: "text-cyan" },
   { value: "finance",   label: "Finance",   desc: "Withdrawals, payouts, balances",  color: "text-green" },
   { value: "support",   label: "Support",   desc: "PIN reset, view data",            color: "text-purple" },
+  { value: "hr",        label: "HR",        desc: "Staff, analytics, statements",    color: "text-pink-400" },
   { value: "cfo",       label: "CFO",       desc: "Full financial control",          color: "text-yellow" },
   { value: "cto",       label: "CTO",       desc: "System & audit access",           color: "text-cyan" },
   { value: "ceo",       label: "CEO",       desc: "Near-full access",                color: "text-orange-400" },

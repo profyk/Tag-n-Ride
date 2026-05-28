@@ -74,7 +74,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tagnride")
 
-ADMIN_ROLES = ("superadmin", "ceo", "cto", "cfo", "admin", "finance", "support")
+ADMIN_ROLES = ("superadmin", "ceo", "cto", "cfo", "admin", "finance", "support", "hr")
 
 ROLE_PERMISSIONS = {
     "superadmin": [
@@ -126,6 +126,11 @@ ROLE_PERMISSIONS = {
         "manage_refunds",
     ],
     "support": ["reset_pin", "manage_users"],
+    "hr": [
+        "view_audit", "view_analytics", "export_data",
+        "manage_users", "manage_drivers", "flag_accounts",
+        "download_statements",
+    ],
 }
 
 # ── extend superadmin/ceo/cfo with new permissions ────────────────
@@ -595,7 +600,7 @@ class CreateAdminIn(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v):
-        if v not in ("admin","finance","support","cfo","cto","ceo"):
+        if v not in ("admin","finance","support","cfo","cto","ceo","hr"):
             raise ValueError("Invalid role")
         return v
 
@@ -608,7 +613,7 @@ class UpdateAdminIn(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v):
-        if v is not None and v not in ("admin","finance","support","cfo","cto","ceo"):
+        if v is not None and v not in ("admin","finance","support","cfo","cto","ceo","hr"):
             raise ValueError("Invalid role")
         return v
 
@@ -1155,7 +1160,7 @@ async def get_kyc_selfie_url(user: dict = Depends(get_current_user)):
 @api.get("/admin/dashboard")
 async def admin_dashboard(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
-        total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo')")
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')")
         total_drivers = await conn.fetchval("SELECT COUNT(*) FROM drivers")
         total_passengers = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='passenger'")
         total_owners = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='owner'")
@@ -1205,7 +1210,7 @@ async def admin_users(search: Optional[str] = None, admin: dict = Depends(requir
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT id,phone_number,full_name,role,is_active,flagged,created_at FROM users
-               WHERE ($1 OR role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo'))
+               WHERE ($1 OR role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr'))
                AND ($2::text IS NULL OR phone_number ILIKE $2 OR full_name ILIKE $2)
                ORDER BY created_at DESC""",
             is_super, f"%{search}%" if search else None
@@ -1687,7 +1692,7 @@ async def export_users(request: Request, admin: dict = Depends(require_admin)):
     if not has_permission(admin, "export_data"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT u.full_name,u.phone_number,u.role,u.is_active,COALESCE(w.balance,0) as balance,u.created_at FROM users u LEFT JOIN wallets w ON w.user_id=u.id WHERE u.role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo') ORDER BY u.created_at DESC")
+        rows = await conn.fetch("SELECT u.full_name,u.phone_number,u.role,u.is_active,COALESCE(w.balance,0) as balance,u.created_at FROM users u LEFT JOIN wallets w ON w.user_id=u.id WHERE u.role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr') ORDER BY u.created_at DESC")
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Full Name","Phone","Role","Active","Balance","Joined"])
@@ -1701,7 +1706,7 @@ async def export_users(request: Request, admin: dict = Depends(require_admin)):
 async def superadmin_list_admins(admin: dict = Depends(require_superadmin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT u.id,u.full_name,u.email,u.role,u.extra_roles,u.is_active,u.last_login,u.created_at,u.created_by,cb.full_name as created_by_name FROM users u LEFT JOIN users cb ON cb.id=u.created_by WHERE u.role IN ('admin','superadmin','finance','support','ceo','cto','cfo') ORDER BY u.created_at DESC"
+            "SELECT u.id,u.full_name,u.email,u.role,u.extra_roles,u.is_active,u.last_login,u.created_at,u.created_by,cb.full_name as created_by_name FROM users u LEFT JOIN users cb ON cb.id=u.created_by WHERE u.role IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr') ORDER BY u.created_at DESC"
         )
     return [{
         **{k: v for k, v in dict(r).items() if k not in ("last_login","created_at")},
@@ -1874,25 +1879,51 @@ async def superadmin_get_wallet(user_id: str, admin: dict = Depends(require_supe
         "recent_transactions": [{**dict(t), "amount": float(t["amount"]), "created_at": iso(t["created_at"])} for t in txns]
     }
 
+async def _delete_user(conn, user_id: str, admin_id: str, ip: str):
+    """Shared user deletion logic — handles all roles including owners."""
+    target = await conn.fetchrow("SELECT role,full_name FROM users WHERE id=$1", user_id)
+    if not target: raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] in ADMIN_ROLES: raise HTTPException(status_code=403, detail="Cannot delete admin accounts here")
+    async with conn.transaction():
+        # Ratings
+        await conn.execute("DELETE FROM ratings WHERE driver_user_id=$1 OR passenger_user_id=$1", user_id)
+        # Financial
+        await conn.execute("DELETE FROM withdrawal_requests WHERE user_id=$1", user_id)
+        await conn.execute("DELETE FROM payout_accounts WHERE user_id=$1", user_id)
+        # Identity
+        await conn.execute("DELETE FROM kyc_documents WHERE user_id=$1", user_id)
+        await conn.execute("DELETE FROM flagged_accounts WHERE user_id=$1", user_id)
+        # Transactions — nullify references instead of cascading delete
+        await conn.execute("UPDATE transactions SET sender_id=NULL WHERE sender_id=$1", user_id)
+        await conn.execute("UPDATE transactions SET receiver_id=NULL WHERE receiver_id=$1", user_id)
+        # Driver records
+        await conn.execute("DELETE FROM owner_drivers WHERE driver_user_id=$1", user_id)
+        await conn.execute("DELETE FROM drivers WHERE user_id=$1", user_id)
+        # Cashup records
+        await conn.execute("UPDATE cashup_records SET driver_user_id=NULL WHERE driver_user_id=$1", user_id)
+        await conn.execute("UPDATE cashup_records SET owner_user_id=NULL WHERE owner_user_id=$1", user_id)
+        await conn.execute("UPDATE outstanding_balances SET driver_user_id=NULL WHERE driver_user_id=$1", user_id)
+        await conn.execute("UPDATE outstanding_balances SET owner_user_id=NULL WHERE owner_user_id=$1", user_id)
+        # Owner records — must delete owner_drivers by owner_id first
+        owner = await conn.fetchrow("SELECT id FROM fleet_owners WHERE user_id=$1", user_id)
+        if owner:
+            await conn.execute("DELETE FROM owner_drivers WHERE owner_id=$1", owner["id"])
+            await conn.execute("DELETE FROM fleet_owners WHERE id=$1", owner["id"])
+        # Wallet + user
+        await conn.execute("DELETE FROM wallets WHERE user_id=$1", user_id)
+        await conn.execute("DELETE FROM users WHERE id=$1", user_id)
+        await audit(conn, admin_id, "DELETE_USER", user_id, "user", {"name": target["full_name"]}, ip)
+
+@api.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, request: Request, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        await _delete_user(conn, user_id, admin["id"], request.client.host if request.client else "unknown")
+    return {"ok": True}
+
 @api.delete("/superadmin/users/{user_id}")
 async def superadmin_delete_user(user_id: str, request: Request, admin: dict = Depends(require_superadmin)):
     async with pool.acquire() as conn:
-        target = await conn.fetchrow("SELECT role,full_name FROM users WHERE id=$1", user_id)
-        if not target: raise HTTPException(status_code=404, detail="User not found")
-        if target["role"] in ADMIN_ROLES: raise HTTPException(status_code=403, detail="Cannot delete admin accounts here")
-        async with conn.transaction():
-            await conn.execute("DELETE FROM ratings WHERE driver_user_id=$1 OR passenger_user_id=$1", user_id)
-            await conn.execute("DELETE FROM withdrawal_requests WHERE user_id=$1", user_id)
-            await conn.execute("DELETE FROM payout_accounts WHERE user_id=$1", user_id)
-            await conn.execute("DELETE FROM kyc_documents WHERE user_id=$1", user_id)
-            await conn.execute("DELETE FROM flagged_accounts WHERE user_id=$1", user_id)
-            await conn.execute("UPDATE transactions SET sender_id=NULL WHERE sender_id=$1", user_id)
-            await conn.execute("UPDATE transactions SET receiver_id=NULL WHERE receiver_id=$1", user_id)
-            await conn.execute("DELETE FROM owner_drivers WHERE driver_user_id=$1", user_id)
-            await conn.execute("DELETE FROM drivers WHERE user_id=$1", user_id)
-            await conn.execute("DELETE FROM wallets WHERE user_id=$1", user_id)
-            await conn.execute("DELETE FROM users WHERE id=$1", user_id)
-            await audit(conn, admin["id"], "DELETE_USER", user_id, "user", {"name": target["full_name"]}, request.client.host)
+        await _delete_user(conn, user_id, admin["id"], request.client.host if request.client else "unknown")
     return {"ok": True}
 
 # ── Owner app ────────────────────────────────────────────────
@@ -3307,7 +3338,7 @@ async def onboarding_pipeline(admin: dict = Depends(require_admin)):
                    w.balance
             FROM users u
             LEFT JOIN wallets w ON w.user_id=u.id
-            WHERE u.role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo')
+            WHERE u.role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')
             AND u.created_at >= NOW()-INTERVAL '7 days'
             ORDER BY u.created_at DESC
         """)
