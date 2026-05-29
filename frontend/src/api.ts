@@ -435,9 +435,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ reason }),
     }),
+
+  // ── Admin: Payout settings ──
+  getPayoutSettings: () =>
+    request<PayoutSettings>("/api/admin/payout-settings"),
+
+  updatePayoutSettings: (body: Partial<PayoutSettings>) =>
+    request<PayoutSettings>("/api/admin/payout-settings", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 };
 
 // ── Types ──
+export type PayoutSettings = {
+  require_approval: boolean;
+  auto_approve_limit: number;
+  pay_fuel_enabled: boolean;
+  pay_fuel_max_per_txn: number;
+  pay_fuel_daily_limit: number;
+  updated_at: string | null;
+};
+
 export type User = {
   id: string;
   phone_number: string;

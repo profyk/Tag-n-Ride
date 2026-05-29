@@ -548,6 +548,26 @@ async def _do_withdraw(user, amount, bank_name, account_number, account_name, pa
 
 async def _do_pay_fuel(user, amount, bank_name, account_number, account_name):
     """Pay Fuel — bypasses admin approval, triggers gateway immediately."""
+    # Enforce Pay Fuel limits from payout_settings
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow("SELECT * FROM payout_settings WHERE id='default'")
+        today_total = await conn.fetchval(
+            """SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests
+               WHERE user_id=$1 AND payout_type='pay_fuel'
+               AND DATE(created_at) = CURRENT_DATE""",
+            user["id"]
+        )
+    if settings:
+        if not settings["pay_fuel_enabled"]:
+            raise HTTPException(status_code=403, detail="Pay Fuel is currently disabled by admin.")
+        max_per_txn = float(settings["pay_fuel_max_per_txn"] or 0)
+        daily_limit = float(settings["pay_fuel_daily_limit"] or 0)
+        if max_per_txn > 0 and amount > max_per_txn:
+            raise HTTPException(status_code=400, detail=f"Pay Fuel amount exceeds the maximum of R{max_per_txn:.2f} per transaction.")
+        if daily_limit > 0 and float(today_total or 0) + amount > daily_limit:
+            remaining = max(0.0, daily_limit - float(today_total or 0))
+            raise HTTPException(status_code=400, detail=f"Daily Pay Fuel limit of R{daily_limit:.2f} reached. You have R{remaining:.2f} remaining today.")
+
     req_id = str(uuid.uuid4()); txn_id = str(uuid.uuid4()); ref = gen_ref()
     new_balance = 0.0
     async with pool.acquire() as conn:
@@ -1460,36 +1480,50 @@ async def get_payout_settings(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM payout_settings WHERE id='default'")
     if not row:
-        return {"require_approval": True, "auto_approve_limit": 0.0, "updated_at": None}
+        return {
+            "require_approval": True, "auto_approve_limit": 0.0,
+            "pay_fuel_enabled": True, "pay_fuel_max_per_txn": 500.0,
+            "pay_fuel_daily_limit": 1000.0, "updated_at": None,
+        }
     return {
         "require_approval": row["require_approval"],
         "auto_approve_limit": float(row["auto_approve_limit"] or 0),
+        "pay_fuel_enabled": row["pay_fuel_enabled"],
+        "pay_fuel_max_per_txn": float(row["pay_fuel_max_per_txn"] or 0),
+        "pay_fuel_daily_limit": float(row["pay_fuel_daily_limit"] or 0),
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
 class PayoutSettingsIn(BaseModel):
     require_approval: Optional[bool] = None
     auto_approve_limit: Optional[float] = Field(default=None, ge=0)
+    pay_fuel_enabled: Optional[bool] = None
+    pay_fuel_max_per_txn: Optional[float] = Field(default=None, ge=0)
+    pay_fuel_daily_limit: Optional[float] = Field(default=None, ge=0)
 
 @api.patch("/admin/payout-settings")
 async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(require_admin)):
     if not has_permission(admin, "edit_system"):
         raise HTTPException(status_code=403, detail="Permission denied")
+    updates = {}
+    if body.require_approval is not None: updates["require_approval"] = body.require_approval
+    if body.auto_approve_limit is not None: updates["auto_approve_limit"] = body.auto_approve_limit
+    if body.pay_fuel_enabled is not None: updates["pay_fuel_enabled"] = body.pay_fuel_enabled
+    if body.pay_fuel_max_per_txn is not None: updates["pay_fuel_max_per_txn"] = body.pay_fuel_max_per_txn
+    if body.pay_fuel_daily_limit is not None: updates["pay_fuel_daily_limit"] = body.pay_fuel_daily_limit
     async with pool.acquire() as conn:
-        if body.require_approval is not None:
+        for col, val in updates.items():
             await conn.execute(
-                "UPDATE payout_settings SET require_approval=$1, updated_at=NOW(), updated_by=$2 WHERE id='default'",
-                body.require_approval, admin["id"]
-            )
-        if body.auto_approve_limit is not None:
-            await conn.execute(
-                "UPDATE payout_settings SET auto_approve_limit=$1, updated_at=NOW(), updated_by=$2 WHERE id='default'",
-                body.auto_approve_limit, admin["id"]
+                f"UPDATE payout_settings SET {col}=$1, updated_at=NOW(), updated_by=$2 WHERE id='default'",
+                val, admin["id"]
             )
         row = await conn.fetchrow("SELECT * FROM payout_settings WHERE id='default'")
     return {
         "require_approval": row["require_approval"],
         "auto_approve_limit": float(row["auto_approve_limit"] or 0),
+        "pay_fuel_enabled": row["pay_fuel_enabled"],
+        "pay_fuel_max_per_txn": float(row["pay_fuel_max_per_txn"] or 0),
+        "pay_fuel_daily_limit": float(row["pay_fuel_daily_limit"] or 0),
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -3114,6 +3148,9 @@ async def create_new_tables():
                         id TEXT PRIMARY KEY DEFAULT 'default',
                         require_approval BOOLEAN DEFAULT TRUE,
                         auto_approve_limit NUMERIC(14,2) DEFAULT 0,
+                        pay_fuel_enabled BOOLEAN DEFAULT TRUE,
+                        pay_fuel_max_per_txn NUMERIC(14,2) DEFAULT 500,
+                        pay_fuel_daily_limit NUMERIC(14,2) DEFAULT 1000,
                         updated_at TIMESTAMPTZ DEFAULT NOW(),
                         updated_by TEXT
                     )
@@ -3121,6 +3158,10 @@ async def create_new_tables():
                 await conn.execute(
                     "INSERT INTO payout_settings (id) VALUES ('default') ON CONFLICT DO NOTHING"
                 )
+                # Migrate existing payout_settings rows
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS pay_fuel_enabled BOOLEAN DEFAULT TRUE")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS pay_fuel_max_per_txn NUMERIC(14,2) DEFAULT 500")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS pay_fuel_daily_limit NUMERIC(14,2) DEFAULT 1000")
                 # withdrawal_requests extra columns
                 await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS payout_type TEXT DEFAULT 'payout'")
                 await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
