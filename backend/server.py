@@ -2196,6 +2196,14 @@ async def driver_cashup_destination(user: dict = Depends(get_current_user)):
 
 class DriverCashupV2In(BaseModel):
     owner_user_id: str
+    method: str = "wallet"
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, v):
+        if v not in ("wallet", "bank"):
+            raise ValueError("Method must be 'wallet' or 'bank'")
+        return v
 
 @api.post("/driver/cashup/v2")
 async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_current_user)):
@@ -2221,7 +2229,9 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
         cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
         driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
         shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
-        method = link["cashup_method"] or "wallet"
+        method = body.method
+        if method == "bank" and not link.get("bank_name"):
+            raise HTTPException(status_code=400, detail="Owner has not set up a bank account")
         payout_fee = 3.50 if method == "bank" else 0.0
         net_cashup = cashup_amount - payout_fee if method == "bank" else cashup_amount
         async with conn.transaction():

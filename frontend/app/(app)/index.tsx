@@ -76,9 +76,10 @@ export default function Home() {
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
   const [cashUpModal, setCashUpModal] = useState(false);
-  const [cashUpAmount, setCashUpAmount] = useState("");
-  const [cashUpType, setCashUpType] = useState<"self" | "owner">("self");
+  const [cashUpMethod, setCashUpMethod] = useState<"wallet" | "bank">("wallet");
   const [cashUpLoading, setCashUpLoading] = useState(false);
+  const [cashupStatus, setCashupStatus] = useState<any>(null);
+  const [cashupStatusLoading, setCashupStatusLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -128,31 +129,45 @@ export default function Home() {
     } finally { setFuelLoading(false); }
   };
 
+  const openCashUpModal = async () => {
+    setCashUpModal(true);
+    setCashupStatus(null);
+    setCashupStatusLoading(true);
+    try {
+      const status = await api.driverCashupStatus();
+      setCashupStatus(status);
+      setCashUpMethod("wallet");
+    } catch {
+      setCashupStatus(null);
+    } finally {
+      setCashupStatusLoading(false);
+    }
+  };
+
   const handleCashUp = async () => {
-    const amount = parseFloat(cashUpAmount);
-    if (!cashUpAmount || isNaN(amount) || amount <= 0) {
-      Alert.alert("Invalid amount", "Please enter a valid amount."); return;
-    }
-    if (amount > (wallet?.balance ?? 0)) {
-      Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
-    }
-    if (amount < 5) { Alert.alert("Minimum amount", "Minimum CashUp amount is R5.00."); return; }
+    if (!cashupStatus?.has_owner) return;
     setCashUpLoading(true);
     try {
-      await api.cashup({ amount, type: cashUpType });
-      setCashUpModal(false); setCashUpAmount("");
-      Alert.alert("CashUp submitted", `R${amount.toFixed(2)} is being paid to ${cashUpType === "self" ? "your bank account" : "the owner's account"}.`);
+      const res = await api.driverCashupV2(cashupStatus.owner_user_id, cashUpMethod);
+      setCashUpModal(false);
+      const dest = cashUpMethod === "wallet" ? "owner's Tag n Ride wallet" : "owner's bank account";
+      const feeNote = res.payout_fee > 0 ? ` (R${res.payout_fee.toFixed(2)} fee deducted)` : "";
+      Alert.alert("CashUp Done", `${formatZAR(res.cashup_amount)} sent to ${dest}${feeNote}.`);
       load();
     } catch (e: any) {
       const msg = e?.message || "";
-      if (msg.includes("payout account") || msg.includes("No '")) {
-        const accountType = cashUpType === "self" ? "My Account" : "Owner Account";
-        Alert.alert(`${accountType} not set up`, `Add ${accountType} bank details in Profile.`,
-          [{ text: "Go to Profile", onPress: () => { setCashUpModal(false); router.push("/(app)/profile"); } }, { text: "Cancel", style: "cancel" }]);
-      } else if (msg.includes("Insufficient") || msg.includes("balance")) {
-        Alert.alert("Insufficient balance", `Not enough to CashUp R${amount.toFixed(2)}.`);
-      } else { Alert.alert("Failed", msg || "Could not process. Please try again."); }
-    } finally { setCashUpLoading(false); }
+      if (msg.includes("bank account")) {
+        Alert.alert("No bank account", "The owner has not set up a bank account. Use the wallet option instead.");
+      } else if (msg.includes("No earnings")) {
+        Alert.alert("No earnings", "You have no earnings to cash up today.");
+      } else if (msg.includes("Insufficient")) {
+        Alert.alert("Insufficient balance", "Not enough in your wallet to cash up.");
+      } else {
+        Alert.alert("Failed", msg || "Could not process. Please try again.");
+      }
+    } finally {
+      setCashUpLoading(false);
+    }
   };
 
   const s = makeStyles(colors);
@@ -281,7 +296,7 @@ export default function Home() {
             </View>
             <View style={[s.qaRow, { marginTop: 12 }]}>
               <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />
-              <QA icon="wallet-outline" label="CashUp" tone="purple" colors={colors} onPress={() => setCashUpModal(true)} testID="qa-cashup" />
+              <QA icon="wallet-outline" label="CashUp" tone="purple" colors={colors} onPress={openCashUpModal} testID="qa-cashup" />
               <QA icon="notifications-outline" label="Alerts" tone="muted" colors={colors} onPress={() => router.push("/(app)/notifications")} testID="qa-notifs" />
             </View>
           </>
@@ -339,25 +354,105 @@ export default function Home() {
           <View style={s.modalSheet}>
             <View style={s.modalHandle} />
             <View style={s.modalIconWrap}><Ionicons name="wallet-outline" size={28} color="#A064FF" /></View>
-            <Text style={s.modalTitle}>CashUp</Text>
-            <Text style={s.modalSub}>Choose which account to cash out to.</Text>
-            {wallet && <View style={s.balancePill}><Text style={s.balancePillText}>Available: {formatZAR(wallet.balance)}</Text></View>}
-            <View style={s.toggleRow}>
-              <TouchableOpacity style={[s.toggleBtn, cashUpType === "self" && s.toggleBtnActive]} onPress={() => setCashUpType("self")} testID="cashup-type-self">
-                <Ionicons name="person-outline" size={16} color={cashUpType === "self" ? colors.bg : colors.textMuted} />
-                <Text style={[s.toggleText, cashUpType === "self" && s.toggleTextActive]}>My Account</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.toggleBtn, cashUpType === "owner" && s.toggleBtnActive]} onPress={() => setCashUpType("owner")} testID="cashup-type-owner">
-                <Ionicons name="car-outline" size={16} color={cashUpType === "owner" ? colors.bg : colors.textMuted} />
-                <Text style={[s.toggleText, cashUpType === "owner" && s.toggleTextActive]}>Owner's Account</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={s.inputLabel}>AMOUNT (ZAR)</Text>
-            <TextInput style={s.input} value={cashUpAmount} onChangeText={setCashUpAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim} testID="cashup-amount-input" />
-            <View style={s.modalActions}>
-              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => { setCashUpModal(false); setCashUpAmount(""); }} /></View>
-              <View style={{ flex: 1 }}><Button label="CashUp" onPress={handleCashUp} loading={cashUpLoading} testID="cashup-confirm-btn" /></View>
-            </View>
+            <Text style={s.modalTitle}>CashUp to Owner</Text>
+            <Text style={s.modalSub}>Choose how to send today's earnings to your fleet owner.</Text>
+
+            {cashupStatusLoading ? (
+              <ActivityIndicator color={colors.cyan} style={{ marginVertical: 24 }} />
+            ) : !cashupStatus?.has_owner ? (
+              <View style={{ alignItems: "center", paddingVertical: 16 }}>
+                <Ionicons name="link-outline" size={36} color={colors.textDim} />
+                <Text style={{ color: colors.text, fontWeight: "700", marginTop: 10, fontSize: 15 }}>No owner linked</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4 }}>
+                  You need to be linked to a fleet owner to use CashUp.
+                </Text>
+              </View>
+            ) : (
+              <>
+                {/* Owner info */}
+                <View style={s.cashupOwnerRow}>
+                  <View style={s.cashupOwnerIcon}>
+                    <Ionicons name="business-outline" size={18} color={colors.cyan} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.cashupOwnerName}>{cashupStatus.owner_name}</Text>
+                    <Text style={s.cashupOwnerSub}>
+                      Today's earnings: {formatZAR(cashupStatus.today_earned)}
+                      {cashupStatus.cashup_amount < cashupStatus.today_earned
+                        ? `  ·  Cashup: ${formatZAR(cashupStatus.cashup_amount)}`
+                        : ""}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Method options */}
+                <Text style={s.inputLabel}>SEND TO</Text>
+                <TouchableOpacity
+                  testID="cashup-method-wallet"
+                  onPress={() => setCashUpMethod("wallet")}
+                  style={[s.cashupMethodCard, cashUpMethod === "wallet" && s.cashupMethodCardActive]}>
+                  <View style={[s.cashupMethodIcon, { backgroundColor: colors.cyanDim }]}>
+                    <Ionicons name="phone-portrait-outline" size={20} color={colors.cyan} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.cashupMethodLabel, cashUpMethod === "wallet" && { color: colors.cyan }]}>
+                      Tag n Ride Wallet
+                    </Text>
+                    <Text style={s.cashupMethodSub}>Instant · Free · Owner's in-app wallet</Text>
+                  </View>
+                  {cashUpMethod === "wallet" && <Ionicons name="checkmark-circle" size={20} color={colors.cyan} />}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  testID="cashup-method-bank"
+                  onPress={() => setCashUpMethod("bank")}
+                  style={[s.cashupMethodCard, cashUpMethod === "bank" && s.cashupMethodCardActiveBank]}>
+                  <View style={[s.cashupMethodIcon, { backgroundColor: "rgba(160,100,255,0.12)" }]}>
+                    <Ionicons name="card-outline" size={20} color="#A064FF" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.cashupMethodLabel, cashUpMethod === "bank" && { color: "#A064FF" }]}>
+                      Bank Account
+                    </Text>
+                    <Text style={s.cashupMethodSub}>Owner's bank account · R3.50 fee</Text>
+                  </View>
+                  {cashUpMethod === "bank" && <Ionicons name="checkmark-circle" size={20} color="#A064FF" />}
+                </TouchableOpacity>
+
+                {/* Amount preview */}
+                <View style={s.cashupAmountPreview}>
+                  <Text style={s.cashupAmountLabel}>AMOUNT TO BE SENT</Text>
+                  <Text style={s.cashupAmountVal}>
+                    {formatZAR(
+                      cashUpMethod === "bank"
+                        ? Math.max(0, cashupStatus.cashup_amount - 3.50)
+                        : cashupStatus.cashup_amount
+                    )}
+                  </Text>
+                  {cashUpMethod === "bank" && (
+                    <Text style={s.cashupAmountFee}>Includes R3.50 bank transfer fee</Text>
+                  )}
+                </View>
+
+                <View style={s.modalActions}>
+                  <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setCashUpModal(false)} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Button
+                      label="CashUp"
+                      onPress={handleCashUp}
+                      loading={cashUpLoading}
+                      testID="cashup-confirm-btn"
+                    />
+                  </View>
+                </View>
+              </>
+            )}
+
+            {!cashupStatusLoading && !cashupStatus?.has_owner && (
+              <View style={{ marginTop: 12 }}>
+                <Button label="Close" variant="secondary" onPress={() => setCashUpModal(false)} />
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -509,4 +604,18 @@ const makeStyles = (colors: any) => StyleSheet.create({
   toggleText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
   toggleTextActive: { color: colors.bg },
   modalActions: { flexDirection: "row", gap: 12 },
+  cashupOwnerRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 16 },
+  cashupOwnerIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
+  cashupOwnerName: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  cashupOwnerSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  cashupMethodCard: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg, padding: 14, marginBottom: 10 },
+  cashupMethodCardActive: { borderColor: colors.cyan, backgroundColor: colors.cyanDim },
+  cashupMethodCardActiveBank: { borderColor: "#A064FF", backgroundColor: "rgba(160,100,255,0.10)" },
+  cashupMethodIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  cashupMethodLabel: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  cashupMethodSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  cashupAmountPreview: { backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, alignItems: "center", marginBottom: 16, marginTop: 4 },
+  cashupAmountLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
+  cashupAmountVal: { color: colors.text, fontSize: 28, fontWeight: "900", marginTop: 4 },
+  cashupAmountFee: { color: colors.red, fontSize: 11, marginTop: 4 },
 });

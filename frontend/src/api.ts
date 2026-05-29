@@ -172,10 +172,10 @@ export const api = {
 
   driverCashupDestination: () => request<any>("/api/driver/cashup-destination"),
 
-  driverCashupV2: (owner_user_id: string) =>
+  driverCashupV2: (owner_user_id: string, method: "wallet" | "bank") =>
     request<any>("/api/driver/cashup/v2", {
       method: "POST",
-      body: JSON.stringify({ owner_user_id }),
+      body: JSON.stringify({ owner_user_id, method }),
     }),
 
   driverOutstanding: () => request<any>("/api/driver/outstanding"),
