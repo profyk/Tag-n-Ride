@@ -150,8 +150,8 @@ export default function Home() {
       if (status?.cashup_amount > 0) {
         setCashUpAmount(status.cashup_amount.toFixed(2));
       }
-      const selfAccount = (accounts as any[]).find((a: any) => a.type === "self");
-      setDriverBank(selfAccount || null);
+      const ownerAccount = (accounts as any[]).find((a: any) => a.type === "owner");
+      setDriverBank(ownerAccount || null);
     } catch {
       setCashupStatus(null);
     } finally {
@@ -203,14 +203,14 @@ export default function Home() {
     }
     setCashUpLoading(true);
     try {
-      await api.driverPayout(amount);
+      await api.cashup({ amount, type: "owner" });
       setCashUpModal(false); setCashUpAmount("");
-      Alert.alert("CashUp Submitted", `${formatZAR(amount)} has been submitted for admin approval. You will be notified once your funds are on their way to your bank account.`);
+      Alert.alert("CashUp Submitted", `${formatZAR(amount)} has been submitted for admin approval. You will be notified once your funds are on their way to the bank account.`);
       load();
     } catch (e: any) {
       const msg = e?.message || "";
-      if (msg.includes("payout account") || msg.includes("No saved")) {
-        Alert.alert("No bank account", "Add your bank account in Profile → My Account.",
+      if (msg.includes("owner") || msg.includes("payout account")) {
+        Alert.alert("No owner bank account", "Add the owner's banking details in Profile → Owner Account.",
           [{ text: "Go to Profile", onPress: () => { setCashUpModal(false); router.push("/(app)/profile"); } },
            { text: "Cancel", style: "cancel" }]);
       } else if (msg.includes("Insufficient")) {
@@ -485,7 +485,7 @@ export default function Home() {
                 ) : (
                   <>
                     <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 8 }}>
-                      No bank account saved. Add your bank details in Profile first.
+                      No owner bank account saved. Add the owner's banking details in Profile → Owner Account.
                     </Text>
                     <View style={{ marginTop: 16 }}>
                       <Button label="Go to Profile" onPress={() => { setCashUpModal(false); router.push("/(app)/profile"); }} />
