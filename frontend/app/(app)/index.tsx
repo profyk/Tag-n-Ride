@@ -81,6 +81,7 @@ export default function Home() {
   const [cashUpLoading, setCashUpLoading] = useState(false);
   const [cashupStatus, setCashupStatus] = useState<any>(null);
   const [cashupStatusLoading, setCashupStatusLoading] = useState(false);
+  const [driverBank, setDriverBank] = useState<any>(null);
   const [payOutModal, setPayOutModal] = useState(false);
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
@@ -137,14 +138,20 @@ export default function Home() {
     setCashUpModal(true);
     setCashupStatus(null);
     setCashUpAmount("");
+    setDriverBank(null);
     setCashupStatusLoading(true);
     try {
-      const status = await api.driverCashupStatus();
+      const [status, accounts] = await Promise.all([
+        api.driverCashupStatus(),
+        api.getPayoutAccounts().catch(() => []),
+      ]);
       setCashupStatus(status);
       setCashUpMethod("wallet");
       if (status?.cashup_amount > 0) {
         setCashUpAmount(status.cashup_amount.toFixed(2));
       }
+      const selfAccount = (accounts as any[]).find((a: any) => a.type === "self");
+      setDriverBank(selfAccount || null);
     } catch {
       setCashupStatus(null);
     } finally {
@@ -177,6 +184,37 @@ export default function Home() {
         Alert.alert("No bank account", "No bank account found for owner. Ask the owner to set one up, or add it in Profile → Owner Account.");
       } else if (msg.includes("Insufficient")) {
         Alert.alert("Insufficient balance", "Not enough in your wallet to cash up.");
+      } else {
+        Alert.alert("Failed", msg || "Could not process. Please try again.");
+      }
+    } finally {
+      setCashUpLoading(false);
+    }
+  };
+
+  const handleCashUpNoOwner = async () => {
+    const amount = parseFloat(cashUpAmount);
+    if (!cashUpAmount || isNaN(amount) || amount <= 0) {
+      Alert.alert("Invalid amount", "Please enter a valid amount."); return;
+    }
+    if (amount < 5) { Alert.alert("Minimum amount", "Minimum CashUp amount is R5.00."); return; }
+    if (amount > (wallet?.balance ?? 0)) {
+      Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
+    }
+    setCashUpLoading(true);
+    try {
+      await api.driverPayout(amount);
+      setCashUpModal(false); setCashUpAmount("");
+      Alert.alert("CashUp Submitted", `${formatZAR(amount)} has been submitted for admin approval. You will be notified once your funds are on their way to your bank account.`);
+      load();
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.includes("payout account") || msg.includes("No saved")) {
+        Alert.alert("No bank account", "Add your bank account in Profile → My Account.",
+          [{ text: "Go to Profile", onPress: () => { setCashUpModal(false); router.push("/(app)/profile"); } },
+           { text: "Cancel", style: "cancel" }]);
+      } else if (msg.includes("Insufficient")) {
+        Alert.alert("Insufficient balance", "Not enough in your wallet.");
       } else {
         Alert.alert("Failed", msg || "Could not process. Please try again.");
       }
@@ -406,13 +444,58 @@ export default function Home() {
             {cashupStatusLoading ? (
               <ActivityIndicator color={colors.cyan} style={{ marginVertical: 24 }} />
             ) : !cashupStatus?.has_owner ? (
-              <View style={{ alignItems: "center", paddingVertical: 16 }}>
-                <Ionicons name="link-outline" size={36} color={colors.textDim} />
-                <Text style={{ color: colors.text, fontWeight: "700", marginTop: 10, fontSize: 15 }}>No owner linked</Text>
-                <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4 }}>
-                  You need to be linked to a fleet owner to use CashUp.
-                </Text>
-              </View>
+              <>
+                <View style={{ alignItems: "center", paddingVertical: 8 }}>
+                  <Ionicons name="information-circle-outline" size={28} color={colors.textDim} />
+                  <Text style={{ color: colors.text, fontWeight: "700", marginTop: 8, fontSize: 15 }}>No owner linked</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4 }}>
+                    Cashup will go to your own bank account and is subject to admin approval.
+                  </Text>
+                </View>
+                {driverBank ? (
+                  <>
+                    <View style={s.cashupOwnerRow}>
+                      <View style={[s.cashupOwnerIcon, { backgroundColor: colors.cyanDim }]}>
+                        <Ionicons name="card-outline" size={18} color={colors.cyan} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.cashupOwnerName}>{driverBank.bank_name}</Text>
+                        <Text style={s.cashupOwnerSub}>
+                          {driverBank.account_number}{driverBank.account_name ? ` · ${driverBank.account_name}` : ""}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.inputLabel}>AMOUNT (ZAR)</Text>
+                    <TextInput
+                      style={s.input}
+                      value={cashUpAmount}
+                      onChangeText={setCashUpAmount}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor={colors.textDim}
+                    />
+                    <Text style={s.cashupAmountFee}>Pending admin approval before EFT is processed</Text>
+                    <View style={s.modalActions}>
+                      <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setCashUpModal(false)} /></View>
+                      <View style={{ flex: 1 }}>
+                        <Button label="CashUp" onPress={handleCashUpNoOwner} loading={cashUpLoading} />
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 8 }}>
+                      No bank account saved. Add your bank details in Profile first.
+                    </Text>
+                    <View style={{ marginTop: 16 }}>
+                      <Button label="Go to Profile" onPress={() => { setCashUpModal(false); router.push("/(app)/profile"); }} />
+                    </View>
+                    <View style={{ marginTop: 8 }}>
+                      <Button label="Close" variant="secondary" onPress={() => setCashUpModal(false)} />
+                    </View>
+                  </>
+                )}
+              </>
             ) : (
               <>
                 {/* Owner info */}
@@ -494,11 +577,6 @@ export default function Home() {
               </>
             )}
 
-            {!cashupStatusLoading && !cashupStatus?.has_owner && (
-              <View style={{ marginTop: 12 }}>
-                <Button label="Close" variant="secondary" onPress={() => setCashUpModal(false)} />
-              </View>
-            )}
           </View>
         </View>
       </Modal>
