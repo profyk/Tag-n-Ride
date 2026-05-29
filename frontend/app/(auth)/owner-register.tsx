@@ -158,14 +158,14 @@ export default function OwnerRegister() {
         full_name: fullName.trim(), phone_number: phone.trim(),
         pin, role: "owner", business_name: businessName.trim() || undefined,
       });
-      const loginRes = await api.login(phone.trim(), pin);
+      await signIn(phone.trim(), pin);
       if (driverMode && selfie && licenceFront) {
         await api.kycSubmit(selfie, licenceFront);
       }
       if (firstDriverCode.trim()) {
         try { await api.ownerLinkDriver(firstDriverCode.trim().toUpperCase()); } catch {}
       }
-      await signIn(loginRes.token, loginRes.user);
+      router.replace("/owner");
     } catch (e: any) {
       Alert.alert("Registration Failed", e?.message || "Please try again.");
     } finally {

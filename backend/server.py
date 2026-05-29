@@ -687,6 +687,10 @@ async def register(body: RegisterIn):
                     "INSERT INTO fleet_owners (id,user_id,business_name) VALUES ($1,$2,$3)",
                     str(uuid.uuid4()), user_id, body.business_name
                 )
+                await conn.execute(
+                    "INSERT INTO drivers (id,user_id,qr_code,vehicle_plate) VALUES ($1,$2,$3,$4)",
+                    str(uuid.uuid4()), user_id, generate_qr_code(), ""
+                )
     log.info("register | id=%s role=%s", user_id, body.role)
     token = create_access_token(user_id, body.role)
     return {

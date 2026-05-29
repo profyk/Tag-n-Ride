@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
+import { useRouter } from "expo-router";
 import { api, DriverTransfer } from "../../src/api";
 import { colors, formatZAR, formatDate, radius } from "../../src/theme";
 import { Button } from "../../src/ui";
@@ -51,6 +52,7 @@ function MiniBar({ progress, color }: { progress: number; color: string }) {
 }
 
 export default function OwnerDashboard() {
+  const router = useRouter();
   const { state, signOut } = useAuth();
   const [data, setData] = useState<any>(null);
   const [outstanding, setOutstanding] = useState<any>(null);
@@ -176,12 +178,18 @@ export default function OwnerDashboard() {
               <Text style={s.ownerName}>{state.user.full_name}</Text>
             </View>
           </View>
-          <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
-            { text: "Cancel", style: "cancel" },
-            { text: "Sign out", style: "destructive", onPress: signOut },
-          ])} style={s.avatar}>
-            <Ionicons name="business-outline" size={20} color={colors.cyan} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <TouchableOpacity onPress={() => router.push("/owner/driver-mode")} style={s.driveBtn}>
+              <Ionicons name="qr-code-outline" size={18} color={colors.bg} />
+              <Text style={s.driveBtnText}>Drive</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
+              { text: "Cancel", style: "cancel" },
+              { text: "Sign out", style: "destructive", onPress: signOut },
+            ])} style={s.avatar}>
+              <Ionicons name="business-outline" size={20} color={colors.cyan} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {loading ? (
@@ -664,6 +672,8 @@ const s = StyleSheet.create({
   greeting: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
   ownerName: { color: colors.text, fontSize: 20, fontWeight: "800" },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan, alignItems: "center", justifyContent: "center" },
+  driveBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.cyan, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
+  driveBtnText: { color: colors.bg, fontWeight: "800", fontSize: 13 },
   statsGrid: { flexDirection: "row", gap: 10 },
   statCard: { flex: 1, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, padding: 14 },
   statIcon: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", marginBottom: 8 },
