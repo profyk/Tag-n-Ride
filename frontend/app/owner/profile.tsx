@@ -5,7 +5,7 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { api } from "../../src/api";
-import { colors, radius } from "../../src/theme";
+import { colors, formatZAR, radius } from "../../src/theme";
 import { Button } from "../../src/ui";
 
 const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank", "African Bank", "Investec", "Other"];export default function OwnerProfile() {
@@ -18,22 +18,55 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
   const [saving, setSaving] = useState(false);
   const [cashupMethod, setCashupMethod] = useState<"wallet" | "bank">("wallet");
   const [savingMethod, setSavingMethod] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [payOutModal, setPayOutModal] = useState(false);
+  const [payOutAmount, setPayOutAmount] = useState("");
+  const [payOutLoading, setPayOutLoading] = useState(false);
 
   if (state.status !== "authed") return null;
   const user = state.user;
 
   const load = useCallback(async () => {
     try {
-      const res = await api.ownerGetBank();
-      setBankData(res);
-      setCashupMethod(res.cashup_method || "wallet");
-      if (res.bank_account) {
-        setBankName(res.bank_account.bank_name || "");
-        setAccountNumber(res.bank_account.account_number || "");
-        setAccountName(res.bank_account.account_name || "");
+      const [bankRes, walletRes] = await Promise.all([
+        api.ownerGetBank(),
+        api.ownerWallet().catch(() => null),
+      ]);
+      setBankData(bankRes);
+      setCashupMethod(bankRes.cashup_method || "wallet");
+      if (bankRes.bank_account) {
+        setBankName(bankRes.bank_account.bank_name || "");
+        setAccountNumber(bankRes.bank_account.account_number || "");
+        setAccountName(bankRes.bank_account.account_name || "");
       }
+      if (walletRes) setWalletBalance(walletRes.balance ?? null);
     } catch (e) {}
   }, []);
+
+  const handlePayOut = async () => {
+    const amount = parseFloat(payOutAmount);
+    if (!payOutAmount || isNaN(amount) || amount <= 0) {
+      Alert.alert("Invalid amount", "Please enter a valid amount."); return;
+    }
+    if (amount < 5) { Alert.alert("Minimum amount", "Minimum payout is R5.00."); return; }
+    if (walletBalance !== null && amount > walletBalance) {
+      Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(walletBalance)}.`); return;
+    }
+    if (!bankData?.bank_name) {
+      Alert.alert("No bank account", "Please add your banking details first."); return;
+    }
+    setPayOutLoading(true);
+    try {
+      await api.ownerPayout(amount);
+      setPayOutModal(false); setPayOutAmount("");
+      Alert.alert("Payout Submitted", `${formatZAR(amount)} has been submitted for admin approval. You will be notified once it is processed to your bank account.`);
+      load();
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not process payout. Please try again.");
+    } finally {
+      setPayOutLoading(false);
+    }
+  };
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -117,16 +150,16 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
         </View>
 
         <Text style={[styles.section, { marginTop: 24 }]}>BANKING DETAILS</Text>
-        {bankData?.bank_account ? (
+        {bankData?.bank_name ? (
           <View style={styles.bankCard}>
             <View style={styles.bankCardLeft}>
               <View style={styles.bankIcon}>
                 <Ionicons name="card-outline" size={20} color={colors.cyan} />
               </View>
               <View>
-                <Text style={styles.bankName}>{bankData.bank_account.bank_name}</Text>
-                <Text style={styles.bankAccount}>**** {bankData.bank_account.account_number?.slice(-4)}</Text>
-                {bankData.bank_account.account_name && <Text style={styles.bankHolder}>{bankData.bank_account.account_name}</Text>}
+                <Text style={styles.bankName}>{bankData.bank_name}</Text>
+                <Text style={styles.bankAccount}>**** {bankData.account_number?.slice(-4)}</Text>
+                {bankData.account_name && <Text style={styles.bankHolder}>{bankData.account_name}</Text>}
               </View>
             </View>
             <TouchableOpacity onPress={() => setBankModal(true)} style={styles.editBtn}>
@@ -139,6 +172,27 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
             <Ionicons name="add-circle-outline" size={20} color={colors.cyan} />
             <Text style={styles.addBankText}>Add Banking Details</Text>
           </TouchableOpacity>
+        )}
+
+        {/* Pay Out */}
+        <Text style={[styles.section, { marginTop: 24 }]}>WALLET</Text>
+        <View style={styles.walletCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.walletLabel}>AVAILABLE BALANCE</Text>
+            <Text style={styles.walletBalance}>
+              {walletBalance !== null ? formatZAR(walletBalance) : "—"}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => { setPayOutAmount(""); setPayOutModal(true); }}
+            style={[styles.payOutBtn, !bankData?.bank_name && { opacity: 0.4 }]}
+            disabled={!bankData?.bank_name}>
+            <Ionicons name="arrow-up-circle-outline" size={18} color={colors.bg} />
+            <Text style={styles.payOutBtnText}>Pay Out</Text>
+          </TouchableOpacity>
+        </View>
+        {!bankData?.bank_name && (
+          <Text style={styles.payOutNote}>Add banking details above to enable payouts</Text>
         )}
 
         <Text style={[styles.section, { marginTop: 24 }]}>ACCOUNT</Text>
@@ -170,6 +224,42 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
 
         <Text style={styles.version}>Tag n Ride · Fleet Owner · v1.0</Text>
       </ScrollView>
+
+      {/* Pay Out modal */}
+      <Modal visible={payOutModal} transparent animationType="slide" onRequestClose={() => setPayOutModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Pay Out</Text>
+            <Text style={styles.modalSub}>
+              Withdraw to your bank account.{"\n"}
+              {bankData?.bank_name ? `${bankData.bank_name} · **** ${bankData.account_number?.slice(-4)}` : ""}
+            </Text>
+            {walletBalance !== null && (
+              <View style={styles.balancePill}>
+                <Text style={styles.balancePillText}>Available: {formatZAR(walletBalance)}</Text>
+              </View>
+            )}
+            <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={payOutAmount}
+              onChangeText={setPayOutAmount}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={colors.textDim}
+            />
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Button label="Cancel" variant="secondary" onPress={() => { setPayOutModal(false); setPayOutAmount(""); }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button label="Pay Out" onPress={handlePayOut} loading={payOutLoading} />
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={bankModal} transparent animationType="slide" onRequestClose={() => setBankModal(false)}>
         <View style={styles.modalOverlay}>
@@ -242,6 +332,14 @@ const styles = StyleSheet.create({
   menuIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   menuTitle: { color: colors.text, fontWeight: "700", fontSize: 15 },
   menuSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  walletCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 8 },
+  walletLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
+  walletBalance: { color: colors.text, fontSize: 24, fontWeight: "900", marginTop: 2 },
+  payOutBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.green, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999 },
+  payOutBtnText: { color: colors.bg, fontWeight: "800", fontSize: 14 },
+  payOutNote: { color: colors.textDim, fontSize: 11, marginBottom: 8, marginTop: -4 },
+  balancePill: { alignSelf: "center", backgroundColor: colors.bg, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
+  balancePillText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
   signOutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.redDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red, padding: 16, marginTop: 24 },
   signOutText: { color: colors.red, fontWeight: "800", fontSize: 15 },
   version: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 24 },

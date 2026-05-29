@@ -77,9 +77,13 @@ export default function Home() {
   const [fuelLoading, setFuelLoading] = useState(false);
   const [cashUpModal, setCashUpModal] = useState(false);
   const [cashUpMethod, setCashUpMethod] = useState<"wallet" | "bank">("wallet");
+  const [cashUpAmount, setCashUpAmount] = useState("");
   const [cashUpLoading, setCashUpLoading] = useState(false);
   const [cashupStatus, setCashupStatus] = useState<any>(null);
   const [cashupStatusLoading, setCashupStatusLoading] = useState(false);
+  const [payOutModal, setPayOutModal] = useState(false);
+  const [payOutAmount, setPayOutAmount] = useState("");
+  const [payOutLoading, setPayOutLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -132,11 +136,15 @@ export default function Home() {
   const openCashUpModal = async () => {
     setCashUpModal(true);
     setCashupStatus(null);
+    setCashUpAmount("");
     setCashupStatusLoading(true);
     try {
       const status = await api.driverCashupStatus();
       setCashupStatus(status);
       setCashUpMethod("wallet");
+      if (status?.cashup_amount > 0) {
+        setCashUpAmount(status.cashup_amount.toFixed(2));
+      }
     } catch {
       setCashupStatus(null);
     } finally {
@@ -146,20 +154,27 @@ export default function Home() {
 
   const handleCashUp = async () => {
     if (!cashupStatus?.has_owner) return;
+    const amount = parseFloat(cashUpAmount);
+    if (!cashUpAmount || isNaN(amount) || amount <= 0) {
+      Alert.alert("Invalid amount", "Please enter a valid amount."); return;
+    }
+    if (amount < 5) { Alert.alert("Minimum amount", "Minimum CashUp amount is R5.00."); return; }
+    if (amount > (wallet?.balance ?? 0)) {
+      Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
+    }
     setCashUpLoading(true);
     try {
-      const res = await api.driverCashupV2(cashupStatus.owner_user_id, cashUpMethod);
-      setCashUpModal(false);
+      const res = await api.driverCashupV2(cashupStatus.owner_user_id, cashUpMethod, amount);
+      setCashUpModal(false); setCashUpAmount("");
       const dest = cashUpMethod === "wallet" ? "owner's Tag n Ride wallet" : "owner's bank account";
       const feeNote = res.payout_fee > 0 ? ` (R${res.payout_fee.toFixed(2)} fee deducted)` : "";
-      Alert.alert("CashUp Done", `${formatZAR(res.cashup_amount)} sent to ${dest}${feeNote}.`);
+      const approvalNote = cashUpMethod === "bank" ? "\n\nYour payout is pending admin approval before it is processed to the bank." : "";
+      Alert.alert("CashUp Done", `${formatZAR(res.cashup_amount)} sent to ${dest}${feeNote}.${approvalNote}`);
       load();
     } catch (e: any) {
       const msg = e?.message || "";
-      if (msg.includes("bank account")) {
-        Alert.alert("No bank account", "The owner has not set up a bank account. Use the wallet option instead.");
-      } else if (msg.includes("No earnings")) {
-        Alert.alert("No earnings", "You have no earnings to cash up today.");
+      if (msg.includes("bank account") || msg.includes("No bank")) {
+        Alert.alert("No bank account", "No bank account found for owner. Ask the owner to set one up, or add it in Profile → Owner Account.");
       } else if (msg.includes("Insufficient")) {
         Alert.alert("Insufficient balance", "Not enough in your wallet to cash up.");
       } else {
@@ -167,6 +182,37 @@ export default function Home() {
       }
     } finally {
       setCashUpLoading(false);
+    }
+  };
+
+  const handlePayOut = async () => {
+    const amount = parseFloat(payOutAmount);
+    if (!payOutAmount || isNaN(amount) || amount <= 0) {
+      Alert.alert("Invalid amount", "Please enter a valid amount."); return;
+    }
+    if (amount < 5) { Alert.alert("Minimum amount", "Minimum payout is R5.00."); return; }
+    if (amount > (wallet?.balance ?? 0)) {
+      Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
+    }
+    setPayOutLoading(true);
+    try {
+      await api.driverPayout(amount);
+      setPayOutModal(false); setPayOutAmount("");
+      Alert.alert("Payout Submitted", `${formatZAR(amount)} has been submitted for admin approval. You will be notified once your funds are on their way to your bank account.`);
+      load();
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.includes("payout account") || msg.includes("No saved")) {
+        Alert.alert("No bank account", "Add your bank account in Profile → My Account.",
+          [{ text: "Go to Profile", onPress: () => { setPayOutModal(false); router.push("/(app)/profile"); } },
+           { text: "Cancel", style: "cancel" }]);
+      } else if (msg.includes("Insufficient")) {
+        Alert.alert("Insufficient balance", "Not enough in your wallet.");
+      } else {
+        Alert.alert("Failed", msg || "Could not process. Please try again.");
+      }
+    } finally {
+      setPayOutLoading(false);
     }
   };
 
@@ -297,7 +343,7 @@ export default function Home() {
             <View style={[s.qaRow, { marginTop: 12 }]}>
               <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />
               <QA icon="wallet-outline" label="CashUp" tone="purple" colors={colors} onPress={openCashUpModal} testID="qa-cashup" />
-              <QA icon="notifications-outline" label="Alerts" tone="muted" colors={colors} onPress={() => router.push("/(app)/notifications")} testID="qa-notifs" />
+              <QA icon="arrow-up-circle-outline" label="Pay Out" tone="green" colors={colors} onPress={() => { setPayOutAmount(""); setPayOutModal(true); }} testID="qa-payout" />
             </View>
           </>
         ) : (
@@ -419,20 +465,20 @@ export default function Home() {
                   {cashUpMethod === "bank" && <Ionicons name="checkmark-circle" size={20} color="#A064FF" />}
                 </TouchableOpacity>
 
-                {/* Amount preview */}
-                <View style={s.cashupAmountPreview}>
-                  <Text style={s.cashupAmountLabel}>AMOUNT TO BE SENT</Text>
-                  <Text style={s.cashupAmountVal}>
-                    {formatZAR(
-                      cashUpMethod === "bank"
-                        ? Math.max(0, cashupStatus.cashup_amount - 3.50)
-                        : cashupStatus.cashup_amount
-                    )}
-                  </Text>
-                  {cashUpMethod === "bank" && (
-                    <Text style={s.cashupAmountFee}>Includes R3.50 bank transfer fee</Text>
-                  )}
-                </View>
+                {/* Amount input */}
+                <Text style={s.inputLabel}>AMOUNT (ZAR)</Text>
+                <TextInput
+                  style={s.input}
+                  value={cashUpAmount}
+                  onChangeText={setCashUpAmount}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textDim}
+                  testID="cashup-amount-input"
+                />
+                {cashUpMethod === "bank" && (
+                  <Text style={s.cashupAmountFee}>R3.50 bank transfer fee will be deducted</Text>
+                )}
 
                 <View style={s.modalActions}>
                   <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setCashUpModal(false)} /></View>
@@ -453,6 +499,38 @@ export default function Home() {
                 <Button label="Close" variant="secondary" onPress={() => setCashUpModal(false)} />
               </View>
             )}
+          </View>
+        </View>
+      </Modal>
+      {/* Pay Out modal */}
+      <Modal visible={payOutModal} transparent animationType="slide" onRequestClose={() => setPayOutModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalSheet}>
+            <View style={s.modalHandle} />
+            <View style={[s.modalIconWrap, { backgroundColor: colors.greenDim, borderColor: colors.green }]}>
+              <Ionicons name="arrow-up-circle-outline" size={28} color={colors.green} />
+            </View>
+            <Text style={s.modalTitle}>Pay Out</Text>
+            <Text style={s.modalSub}>Withdraw to your bank account set in Profile.</Text>
+            {wallet && <View style={s.balancePill}><Text style={s.balancePillText}>Available: {formatZAR(wallet.balance)}</Text></View>}
+            <Text style={s.inputLabel}>AMOUNT (ZAR)</Text>
+            <TextInput
+              style={s.input}
+              value={payOutAmount}
+              onChangeText={setPayOutAmount}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={colors.textDim}
+              testID="payout-amount-input"
+            />
+            <View style={s.modalActions}>
+              <View style={{ flex: 1 }}>
+                <Button label="Cancel" variant="secondary" onPress={() => { setPayOutModal(false); setPayOutAmount(""); }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button label="Pay Out" onPress={handlePayOut} loading={payOutLoading} testID="payout-confirm-btn" />
+              </View>
+            </View>
           </View>
         </View>
       </Modal>

@@ -481,38 +481,123 @@ async def get_owner_record(conn, user_id: str):
         raise HTTPException(status_code=404, detail="Owner account not found")
     return owner
 
-# ── Withdraw helper ──────────────────────────────────────────
-async def _do_withdraw(conn, user, amount, bank_name, account_number, account_name):
-    async with conn.transaction():
-        wallet = await conn.fetchrow(
-            "SELECT balance,is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
+# ── Withdraw helpers ─────────────────────────────────────────
+
+async def _do_withdraw(user, amount, bank_name, account_number, account_name, payout_type: str = "payout"):
+    """All payouts except Pay Fuel. Creates pending record; auto-approves if settings allow."""
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow(
+            "SELECT require_approval, auto_approve_limit FROM payout_settings WHERE id='default'"
         )
-        if not wallet or wallet["is_frozen"]:
-            raise HTTPException(status_code=400, detail="Wallet not available")
-        if float(wallet["balance"]) < amount:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-        new_balance = float(wallet["balance"]) - amount
-        await conn.execute("UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"])
-        req_id = str(uuid.uuid4())
-        await conn.execute(
-            """INSERT INTO withdrawal_requests
-               (id,user_id,amount,bank_name,account_number,account_name)
-               VALUES ($1,$2,$3,$4,$5,$6)""",
-            req_id, user["id"], amount, bank_name, account_number,
-            account_name or user["full_name"]
-        )
-        txn_id = str(uuid.uuid4()); ref = gen_ref()
-        await conn.execute(
-            """INSERT INTO transactions
-               (id,reference,type,status,amount,sender_id,receiver_id,note)
-               VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
-            txn_id, ref, amount, user["id"], f"Withdraw to {bank_name} {account_number}"
-        )
+    require_approval = settings["require_approval"] if settings else True
+    auto_approve_limit = float(settings["auto_approve_limit"] or 0) if settings else 0.0
+    auto_approve = (not require_approval) or (auto_approve_limit > 0 and amount <= auto_approve_limit)
+    initial_status = "auto_approved" if auto_approve else "pending"
+
+    req_id = str(uuid.uuid4()); txn_id = str(uuid.uuid4()); ref = gen_ref()
+    new_balance = 0.0
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            wallet = await conn.fetchrow(
+                "SELECT balance,is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
+            )
+            if not wallet or wallet["is_frozen"]:
+                raise HTTPException(status_code=400, detail="Wallet not available")
+            if float(wallet["balance"]) < amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+            new_balance = float(wallet["balance"]) - amount
+            await conn.execute("UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"])
+            await conn.execute(
+                """INSERT INTO withdrawal_requests
+                   (id,user_id,amount,bank_name,account_number,account_name,status,payout_type)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+                req_id, user["id"], amount, bank_name, account_number,
+                account_name or user["full_name"], initial_status, payout_type
+            )
+            await conn.execute(
+                """INSERT INTO transactions
+                   (id,reference,type,status,amount,sender_id,receiver_id,note)
+                   VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
+                txn_id, ref, amount, user["id"], f"Withdraw to {bank_name} {account_number}"
+            )
         req_row = await conn.fetchrow("SELECT * FROM withdrawal_requests WHERE id=$1", req_id)
         txn_row = await conn.fetchrow("SELECT * FROM transactions WHERE id=$1", txn_id)
     req = dict(req_row); req["amount"] = float(req["amount"]); req["created_at"] = iso(req["created_at"])
     txn = dict(txn_row); txn["amount"] = float(txn["amount"]); txn["created_at"] = iso(txn["created_at"])
-    return {"balance": new_balance, "withdrawal": req, "transaction": txn}
+
+    if auto_approve:
+        try:
+            await stitch_payout(
+                amount=amount, bank_name=bank_name, account_number=account_number,
+                account_holder=account_name or user["full_name"], reference=ref,
+                withdrawal_id=req_id, user_id=user["id"],
+                phone_number=user.get("phone_number", ""),
+            )
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE withdrawal_requests SET status='paid', reviewed_at=NOW(), reviewed_by='auto-system' WHERE id=$1", req_id
+                )
+                await conn.execute("UPDATE transactions SET status='completed' WHERE id=$1", txn_id)
+        except Exception as e:
+            log.error(f"[AUTO-PAYOUT] Failed for withdrawal {req_id}: {e}")
+            async with pool.acquire() as conn:
+                await conn.execute("UPDATE withdrawal_requests SET status='payout_failed' WHERE id=$1", req_id)
+
+    return {"balance": new_balance, "withdrawal": req, "transaction": txn, "pending_approval": not auto_approve}
+
+
+async def _do_pay_fuel(user, amount, bank_name, account_number, account_name):
+    """Pay Fuel — bypasses admin approval, triggers gateway immediately."""
+    req_id = str(uuid.uuid4()); txn_id = str(uuid.uuid4()); ref = gen_ref()
+    new_balance = 0.0
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            wallet = await conn.fetchrow(
+                "SELECT balance,is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"]
+            )
+            if not wallet or wallet["is_frozen"]:
+                raise HTTPException(status_code=400, detail="Wallet not available")
+            if float(wallet["balance"]) < amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+            new_balance = float(wallet["balance"]) - amount
+            await conn.execute("UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"])
+            await conn.execute(
+                """INSERT INTO withdrawal_requests
+                   (id,user_id,amount,bank_name,account_number,account_name,status,payout_type)
+                   VALUES ($1,$2,$3,$4,$5,$6,'auto_approved','pay_fuel')""",
+                req_id, user["id"], amount, bank_name, account_number,
+                account_name or user["full_name"]
+            )
+            await conn.execute(
+                """INSERT INTO transactions
+                   (id,reference,type,status,amount,sender_id,receiver_id,note)
+                   VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
+                txn_id, ref, amount, user["id"], f"Pay Fuel to {bank_name} {account_number}"
+            )
+        req_row = await conn.fetchrow("SELECT * FROM withdrawal_requests WHERE id=$1", req_id)
+        txn_row = await conn.fetchrow("SELECT * FROM transactions WHERE id=$1", txn_id)
+    req = dict(req_row); req["amount"] = float(req["amount"]); req["created_at"] = iso(req["created_at"])
+    txn = dict(txn_row); txn["amount"] = float(txn["amount"]); txn["created_at"] = iso(txn["created_at"])
+
+    try:
+        await stitch_payout(
+            amount=amount, bank_name=bank_name, account_number=account_number,
+            account_holder=account_name or user["full_name"], reference=ref,
+            withdrawal_id=req_id, user_id=user["id"],
+            phone_number=user.get("phone_number", ""),
+        )
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE withdrawal_requests SET status='paid', reviewed_at=NOW(), reviewed_by='auto-gateway' WHERE id=$1", req_id
+            )
+            await conn.execute("UPDATE transactions SET status='completed' WHERE id=$1", txn_id)
+    except Exception as e:
+        log.error(f"[PAY-FUEL] Payout failed for withdrawal {req_id}: {e}")
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE withdrawal_requests SET status='payout_failed' WHERE id=$1", req_id)
+        raise HTTPException(status_code=500, detail=f"Pay Fuel payout failed: {str(e)}")
+
+    return {"balance": new_balance, "withdrawal": req, "transaction": txn, "pending_approval": False}
 
 # ── Models ───────────────────────────────────────────────────
 class RegisterIn(BaseModel):
@@ -964,16 +1049,16 @@ async def withdraw(body: WithdrawIn, user: dict = Depends(get_current_user)):
     if user["role"] != "driver":
         raise HTTPException(status_code=403, detail="Only drivers can withdraw")
     bank_name = body.bank_name; account_number = body.account_number; account_name = body.account_name
-    async with pool.acquire() as conn:
-        if not bank_name or not account_number:
+    if not bank_name or not account_number:
+        async with pool.acquire() as conn:
             saved = await conn.fetchrow(
                 "SELECT * FROM payout_accounts WHERE user_id=$1 AND type='self'", user["id"]
             )
-            if not saved:
-                raise HTTPException(status_code=400, detail="No saved payout account found.")
-            bank_name = saved["bank_name"]; account_number = saved["account_number"]
-            account_name = saved["account_name"] or account_name
-        result = await _do_withdraw(conn, user, body.amount, bank_name, account_number, account_name)
+        if not saved:
+            raise HTTPException(status_code=400, detail="No saved payout account found.")
+        bank_name = saved["bank_name"]; account_number = saved["account_number"]
+        account_name = saved["account_name"] or account_name
+    result = await _do_withdraw(user, body.amount, bank_name, account_number, account_name, payout_type="driver_payout")
     return result
 
 @api.post("/wallet/payout-account")
@@ -1017,9 +1102,14 @@ async def cashup(body: CashUpIn, user: dict = Depends(get_current_user)):
         account = await conn.fetchrow(
             "SELECT * FROM payout_accounts WHERE user_id=$1 AND type=$2", user["id"], body.type
         )
-        if not account:
-            raise HTTPException(status_code=400, detail=f"No '{body.type}' payout account saved.")
-        result = await _do_withdraw(conn, user, body.amount, account["bank_name"], account["account_number"], account["account_name"])
+    if not account:
+        raise HTTPException(status_code=400, detail=f"No '{body.type}' payout account saved.")
+    if body.type == "self":
+        # Pay Fuel — immediate gateway, no admin approval
+        result = await _do_pay_fuel(user, body.amount, account["bank_name"], account["account_number"], account["account_name"])
+    else:
+        # Owner cashup — requires admin approval
+        result = await _do_withdraw(user, body.amount, account["bank_name"], account["account_number"], account["account_name"], payout_type="cashup_owner")
     return {**result, "payout_type": body.type}
 
 @api.post("/wallet/rate")
@@ -1363,6 +1453,45 @@ async def admin_transactions(
             {where} ORDER BY t.created_at DESC LIMIT 500
         """, *params)
     return [{**dict(r), "amount": float(r["amount"]), "created_at": iso(r["created_at"])} for r in rows]
+
+# ── Admin: Payout settings ───────────────────────────────────
+@api.get("/admin/payout-settings")
+async def get_payout_settings(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM payout_settings WHERE id='default'")
+    if not row:
+        return {"require_approval": True, "auto_approve_limit": 0.0, "updated_at": None}
+    return {
+        "require_approval": row["require_approval"],
+        "auto_approve_limit": float(row["auto_approve_limit"] or 0),
+        "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
+    }
+
+class PayoutSettingsIn(BaseModel):
+    require_approval: Optional[bool] = None
+    auto_approve_limit: Optional[float] = Field(default=None, ge=0)
+
+@api.patch("/admin/payout-settings")
+async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "edit_system"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        if body.require_approval is not None:
+            await conn.execute(
+                "UPDATE payout_settings SET require_approval=$1, updated_at=NOW(), updated_by=$2 WHERE id='default'",
+                body.require_approval, admin["id"]
+            )
+        if body.auto_approve_limit is not None:
+            await conn.execute(
+                "UPDATE payout_settings SET auto_approve_limit=$1, updated_at=NOW(), updated_by=$2 WHERE id='default'",
+                body.auto_approve_limit, admin["id"]
+            )
+        row = await conn.fetchrow("SELECT * FROM payout_settings WHERE id='default'")
+    return {
+        "require_approval": row["require_approval"],
+        "auto_approve_limit": float(row["auto_approve_limit"] or 0),
+        "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
+    }
 
 # ── Admin: Withdrawals ───────────────────────────────────────
 @api.get("/admin/withdrawals")
@@ -2096,6 +2225,23 @@ async def owner_get_bank(user: dict = Depends(require_owner)):
     return {"bank_name": row["bank_name"], "account_number": row["account_number"],
             "account_name": row["account_name"], "cashup_method": row["cashup_method"] or "wallet"}
 
+class OwnerPayoutIn(BaseModel):
+    amount: float = Field(gt=0, le=1_000_000)
+
+@api.post("/owner/payout")
+async def owner_payout(body: OwnerPayoutIn, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        fo = await conn.fetchrow(
+            "SELECT bank_name, account_number, account_name FROM fleet_owners WHERE user_id=$1", user["id"]
+        )
+    if not fo or not fo["bank_name"] or not fo["account_number"]:
+        raise HTTPException(status_code=400, detail="No bank account set up. Add your banking details in Profile first.")
+    result = await _do_withdraw(
+        user, body.amount, fo["bank_name"], fo["account_number"], fo["account_name"],
+        payout_type="owner_payout"
+    )
+    return result
+
 @api.get("/owner/outstanding")
 async def owner_outstanding(user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
@@ -2197,6 +2343,7 @@ async def driver_cashup_destination(user: dict = Depends(get_current_user)):
 class DriverCashupV2In(BaseModel):
     owner_user_id: str
     method: str = "wallet"
+    amount: Optional[float] = Field(default=None, gt=0, le=1_000_000)
 
     @field_validator("method")
     @classmethod
@@ -2219,28 +2366,77 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
         """, user["id"], body.owner_user_id)
         if not link:
             raise HTTPException(status_code=404, detail="Owner not linked")
+
         today_earned = float(await conn.fetchval(
             "SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE",
             user["id"]
         ) or 0)
-        if today_earned <= 0:
-            raise HTTPException(status_code=400, detail="No earnings to cash up today")
         daily_target = float(link["daily_target"] or 0)
-        cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
-        driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
-        shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
+
+        # Use driver-supplied amount if provided, else auto-calculate from today's earnings
+        if body.amount is not None:
+            cashup_amount = body.amount
+        else:
+            if today_earned <= 0:
+                raise HTTPException(status_code=400, detail="No earnings to cash up today")
+            cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
+
+        driver_profit = max(0, today_earned - cashup_amount) if today_earned > cashup_amount else 0
+        shortfall = max(0, daily_target - cashup_amount) if daily_target > 0 else 0
+
         method = body.method
-        if method == "bank" and not link.get("bank_name"):
-            raise HTTPException(status_code=400, detail="Owner has not set up a bank account")
         payout_fee = 3.50 if method == "bank" else 0.0
         net_cashup = cashup_amount - payout_fee if method == "bank" else cashup_amount
+
+        # Resolve bank account for bank cashup:
+        # 1. Owner's bank set in fleet_owners
+        # 2. Fall back to driver's saved payout_account type='owner'
+        bank_name = bank_account_number = bank_account_name = None
+        if method == "bank":
+            if link.get("bank_name") and link.get("account_number"):
+                bank_name = link["bank_name"]
+                bank_account_number = link["account_number"]
+                bank_account_name = link["account_name"]
+            else:
+                fallback = await conn.fetchrow(
+                    "SELECT * FROM payout_accounts WHERE user_id=$1 AND type='owner'", user["id"]
+                )
+                if fallback:
+                    bank_name = fallback["bank_name"]
+                    bank_account_number = fallback["account_number"]
+                    bank_account_name = fallback["account_name"]
+            if not bank_name:
+                raise HTTPException(status_code=400, detail="No bank account found for owner. Ask owner to set one up, or save it in your Profile.")
+
         async with conn.transaction():
-            driver_wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"])
-            if not driver_wallet or float(driver_wallet["balance"]) < cashup_amount:
+            driver_wallet = await conn.fetchrow("SELECT balance,is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", user["id"])
+            if not driver_wallet or driver_wallet["is_frozen"]:
+                raise HTTPException(status_code=400, detail="Wallet not available")
+            if float(driver_wallet["balance"]) < cashup_amount:
                 raise HTTPException(status_code=400, detail="Insufficient wallet balance for cashup")
+
             await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", cashup_amount, user["id"])
+
             if method == "wallet":
+                # Internal: credit owner's wallet directly
                 await conn.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2", net_cashup, body.owner_user_id)
+            else:
+                # Bank: create withdrawal_request so the gateway processes the payout
+                wr_id = str(uuid.uuid4())
+                await conn.execute(
+                    """INSERT INTO withdrawal_requests (id,user_id,amount,bank_name,account_number,account_name)
+                       VALUES ($1,$2,$3,$4,$5,$6)""",
+                    wr_id, user["id"], net_cashup, bank_name, bank_account_number,
+                    bank_account_name or link.get("account_name") or user["full_name"]
+                )
+                txn_id = str(uuid.uuid4()); ref = gen_ref()
+                await conn.execute(
+                    """INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note)
+                       VALUES ($1,$2,'withdrawal','pending',$3,$4,NULL,$5)""",
+                    txn_id, ref, net_cashup, user["id"],
+                    f"Cashup to owner bank: {bank_name} {bank_account_number}"
+                )
+
             record_id = str(uuid.uuid4())
             await conn.execute("""
                 INSERT INTO cashup_records (id,owner_user_id,driver_user_id,target_amount,earned_amount,
@@ -2248,11 +2444,13 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed')
             """, record_id, body.owner_user_id, user["id"], daily_target, today_earned,
                 net_cashup, shortfall, driver_profit, method, payout_fee)
+
             if shortfall > 0:
                 await conn.execute("""
                     INSERT INTO outstanding_balances (id,owner_user_id,driver_user_id,amount,reason,status)
                     VALUES ($1,$2,$3,$4,'Daily target shortfall','outstanding')
                 """, str(uuid.uuid4()), body.owner_user_id, user["id"], shortfall)
+
     return {"ok": True, "cashup_amount": net_cashup, "driver_profit": driver_profit,
             "shortfall": shortfall, "method": method, "payout_fee": payout_fee}
 
@@ -2910,6 +3108,23 @@ async def create_new_tables():
                         attempted_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                # ── Payout settings (admin-controlled approval gate) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS payout_settings (
+                        id TEXT PRIMARY KEY DEFAULT 'default',
+                        require_approval BOOLEAN DEFAULT TRUE,
+                        auto_approve_limit NUMERIC(14,2) DEFAULT 0,
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_by TEXT
+                    )
+                """)
+                await conn.execute(
+                    "INSERT INTO payout_settings (id) VALUES ('default') ON CONFLICT DO NOTHING"
+                )
+                # withdrawal_requests extra columns
+                await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS payout_type TEXT DEFAULT 'payout'")
+                await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
+                await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS reviewed_by TEXT")
                 # ── Salary payments ──
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS salary_payments (

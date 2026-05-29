@@ -172,10 +172,16 @@ export const api = {
 
   driverCashupDestination: () => request<any>("/api/driver/cashup-destination"),
 
-  driverCashupV2: (owner_user_id: string, method: "wallet" | "bank") =>
+  driverCashupV2: (owner_user_id: string, method: "wallet" | "bank", amount: number) =>
     request<any>("/api/driver/cashup/v2", {
       method: "POST",
-      body: JSON.stringify({ owner_user_id, method }),
+      body: JSON.stringify({ owner_user_id, method, amount }),
+    }),
+
+  driverPayout: (amount: number) =>
+    request<any>("/api/wallet/withdraw", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
     }),
 
   driverOutstanding: () => request<any>("/api/driver/outstanding"),
@@ -222,6 +228,14 @@ export const api = {
     }),
 
   ownerGetBank: () => request<any>("/api/owner/bank-account"),
+
+  ownerPayout: (amount: number) =>
+    request<any>("/api/owner/payout", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
+
+  ownerWallet: () => request<any>("/api/wallet"),
 
   ownerOutstanding: () => request<any>("/api/owner/outstanding"),
 
