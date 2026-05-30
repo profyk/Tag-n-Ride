@@ -62,6 +62,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Users",               href: "/admin/users",        icon: Users,       permission: "manage_users" },
       { label: "Drivers",             href: "/admin/drivers",      icon: Car,         permission: "manage_drivers" },
+      { label: "Fleet Owners",        href: "/admin/owners",       icon: Truck,       permission: "manage_drivers" },
       { label: "Fleet Transfers",     href: "/admin/transfers",    icon: Repeat2,     permission: "manage_drivers" },
       { label: "KYC Review",          href: "/admin/kyc",          icon: Fingerprint, permission: "review_kyc" },
       { label: "Passenger Analytics", href: "/admin/passengers",   icon: Users2,      permission: "view_analytics" },

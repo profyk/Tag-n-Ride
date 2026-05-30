@@ -1,0 +1,210 @@
+"use client";
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { AdminShell } from "@/components/layout/AdminShell";
+import { Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
+import { api, OwnerDetail, OwnerDriver } from "@/lib/api";
+import { formatZAR, formatDate } from "@/lib/utils";
+import { ArrowLeft, Car, Star, Phone, Building2, CreditCard, Wallet, ExternalLink } from "lucide-react";
+
+export default function OwnerDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const [data, setData] = useState<OwnerDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"drivers" | "cashups">("drivers");
+
+  useEffect(() => {
+    api.ownerDetail(id).then(r => setData(r.data)).finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) return <AdminShell title="Fleet Owner"><Spinner /></AdminShell>;
+  if (!data)   return <AdminShell title="Fleet Owner"><p className="text-red-400">Owner not found.</p></AdminShell>;
+
+  const { owner, drivers, cashup_history } = data;
+
+  const qrSrc = (() => {
+    const v = owner.qr_code;
+    if (!v) return "";
+    if (v.startsWith("data:") || v.startsWith("http")) return v;
+    return `data:image/png;base64,${v}`;
+  })();
+
+  const totalEarnings = drivers.reduce((s, d) => s + d.total_earnings, 0);
+  const confirmedCount = drivers.filter(d => d.confirmed).length;
+
+  return (
+    <AdminShell title={owner.full_name}>
+      <div className="space-y-6">
+
+        {/* Back */}
+        <Link href="/admin/owners">
+          <Button variant="ghost"><ArrowLeft size={13} /> All Owners</Button>
+        </Link>
+
+        {/* Top grid: owner info + QR */}
+        <div className="grid grid-cols-3 gap-5">
+
+          {/* Owner info card */}
+          <div className="col-span-2 bg-bg2 border border-border rounded-2xl p-6 space-y-5">
+            <div>
+              <h2 className="text-text text-xl font-extrabold">{owner.full_name}</h2>
+              {owner.business_name && (
+                <p className="text-textMuted text-sm mt-1 flex items-center gap-1.5">
+                  <Building2 size={13} /> {owner.business_name}
+                </p>
+              )}
+              <p className="text-textDim text-xs font-mono mt-1 flex items-center gap-1.5">
+                <Phone size={11} /> {owner.phone_number}
+              </p>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: "Wallet Balance", value: formatZAR(owner.balance), color: "text-cyan" },
+                { label: "Linked Drivers", value: drivers.length, color: "text-purple" },
+                { label: "Confirmed Drivers", value: confirmedCount, color: "text-green" },
+                { label: "Fleet Earnings", value: formatZAR(totalEarnings), color: "text-yellow" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="bg-bg3 rounded-xl p-3 text-center">
+                  <p className={`text-lg font-extrabold ${color}`}>{value}</p>
+                  <p className="text-[10px] text-textMuted mt-0.5">{label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Bank & cashup method */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-bg3 rounded-xl p-4">
+                <p className="text-[10px] text-textMuted uppercase tracking-wide mb-2">Cashup Method</p>
+                <div className="flex items-center gap-2">
+                  {owner.cashup_method === "wallet"
+                    ? <><Wallet size={15} className="text-cyan" /><span className="text-text font-semibold text-sm">TNR Wallet</span></>
+                    : <><CreditCard size={15} className="text-purple" /><span className="text-text font-semibold text-sm">Bank Account</span></>}
+                </div>
+              </div>
+              <div className="bg-bg3 rounded-xl p-4">
+                <p className="text-[10px] text-textMuted uppercase tracking-wide mb-2">Bank Account</p>
+                {owner.bank_name ? (
+                  <>
+                    <p className="text-text font-semibold text-sm">{owner.bank_name}</p>
+                    <p className="text-textMuted text-xs font-mono mt-0.5">{owner.account_number}</p>
+                    {owner.account_name && <p className="text-textDim text-xs mt-0.5">{owner.account_name}</p>}
+                  </>
+                ) : (
+                  <p className="text-textDim text-xs italic">Not set</p>
+                )}
+              </div>
+            </div>
+
+            <p className="text-textDim text-xs">Registered {formatDate(owner.created_at)}</p>
+          </div>
+
+          {/* QR code card */}
+          <div className="bg-bg2 border border-border rounded-2xl p-6 flex flex-col items-center justify-center gap-4">
+            <p className="text-xs text-textMuted uppercase tracking-wide">Owner QR Code</p>
+            <div className="w-44 h-44 bg-white rounded-2xl p-2.5 shadow-inner flex items-center justify-center">
+              {qrSrc ? (
+                <img src={qrSrc} alt="Owner QR" className="w-full h-full object-contain" />
+              ) : (
+                <p className="text-gray-400 text-xs text-center">No QR generated</p>
+              )}
+            </div>
+            <p className="text-textDim text-[10px] text-center">Used when owner drives a vehicle</p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 border-b border-border pb-0">
+          {(["drivers", "cashups"] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-5 py-2 text-sm font-semibold border-b-2 transition-colors capitalize ${
+                tab === t ? "border-cyan text-cyan" : "border-transparent text-textMuted hover:text-text"
+              }`}>
+              {t === "drivers" ? `Linked Drivers (${drivers.length})` : `Cashup History (${cashup_history.length})`}
+            </button>
+          ))}
+        </div>
+
+        {/* Drivers tab */}
+        {tab === "drivers" && (
+          drivers.length === 0
+            ? <p className="text-textMuted text-sm py-8 text-center">No drivers linked to this owner yet.</p>
+            : (
+              <Table headers={["Driver", "Phone", "Plate", "Earnings", "Rating", "Daily Target", "Status", "Actions"]} empty={false}>
+                {drivers.map((d: OwnerDriver) => (
+                  <Tr key={d.user_id}>
+                    <Td><p className="font-semibold">{d.full_name}</p></Td>
+                    <Td className="font-mono text-xs text-textMuted">{d.phone_number}</Td>
+                    <Td>
+                      {d.vehicle_plate
+                        ? <span className="font-mono text-xs bg-yellow/10 text-yellow px-2 py-0.5 rounded border border-yellow/20">{d.vehicle_plate}</span>
+                        : <span className="text-textDim text-xs">—</span>}
+                    </Td>
+                    <Td className="font-bold text-green">{formatZAR(d.total_earnings)}</Td>
+                    <Td>
+                      {d.rating_count > 0
+                        ? <span className="flex items-center gap-1 text-yellow text-xs font-bold">
+                            <Star size={11} fill="currentColor" />
+                            {d.rating_avg.toFixed(1)}
+                            <span className="text-textMuted font-normal">({d.rating_count})</span>
+                          </span>
+                        : <span className="text-textMuted text-xs italic">New</span>}
+                    </Td>
+                    <Td className="text-textMuted text-xs">
+                      {d.daily_target > 0 ? formatZAR(d.daily_target) : <span className="italic">Not set</span>}
+                    </Td>
+                    <Td>
+                      <div className="flex items-center gap-1.5">
+                        <Badge label={d.is_verified ? "Verified" : "Pending"} tone={d.is_verified ? "green" : "yellow"} />
+                        {d.confirmed && <Badge label="Confirmed" tone="cyan" />}
+                      </div>
+                    </Td>
+                    <Td>
+                      <Link href={`/admin/drivers/${d.user_id}`}>
+                        <Button variant="ghost"><ExternalLink size={13} /> View</Button>
+                      </Link>
+                    </Td>
+                  </Tr>
+                ))}
+              </Table>
+            )
+        )}
+
+        {/* Cashup history tab */}
+        {tab === "cashups" && (
+          cashup_history.length === 0
+            ? <p className="text-textMuted text-sm py-8 text-center">No cashup records yet.</p>
+            : (
+              <Table headers={["Driver", "Cashup Amount", "Driver Profit", "Shortfall", "Fee", "Method", "Status", "Date"]} empty={false}>
+                {cashup_history.map(c => (
+                  <Tr key={c.id}>
+                    <Td className="font-medium">{c.driver_name}</Td>
+                    <Td className="font-bold text-green">{formatZAR(c.cashup_amount)}</Td>
+                    <Td className="text-cyan">{formatZAR(c.driver_profit)}</Td>
+                    <Td>
+                      {c.shortfall > 0
+                        ? <span className="text-red-400 font-semibold">{formatZAR(c.shortfall)}</span>
+                        : <span className="text-textDim">—</span>}
+                    </Td>
+                    <Td className="text-textMuted text-xs">
+                      {c.payout_fee > 0 ? formatZAR(c.payout_fee) : "Free"}
+                    </Td>
+                    <Td>
+                      <Badge label={c.cashup_method === "wallet" ? "Wallet" : "Bank"} tone={c.cashup_method === "wallet" ? "cyan" : "purple"} />
+                    </Td>
+                    <Td><Badge label={c.status} tone={c.status === "completed" ? "green" : "yellow"} /></Td>
+                    <Td className="text-textMuted text-xs">{formatDate(c.created_at)}</Td>
+                  </Tr>
+                ))}
+              </Table>
+            )
+        )}
+
+      </div>
+    </AdminShell>
+  );
+}

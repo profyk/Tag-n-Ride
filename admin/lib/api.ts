@@ -106,6 +106,51 @@ export type Driver = {
   created_at: string;
 };
 
+export type Owner = {
+  user_id: string;
+  full_name: string;
+  phone_number: string;
+  business_name: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  cashup_method: "wallet" | "bank";
+  qr_code: string | null;
+  balance: number;
+  driver_count: number;
+  total_cashup: number;
+  created_at: string;
+};
+
+export type OwnerDriver = {
+  user_id: string;
+  full_name: string;
+  phone_number: string;
+  vehicle_plate: string | null;
+  qr_code: string | null;
+  rating_avg: number;
+  rating_count: number;
+  total_earnings: number;
+  is_verified: boolean;
+  daily_target: number;
+  confirmed: boolean;
+};
+
+export type OwnerDetail = {
+  owner: Owner & { account_name: string | null };
+  drivers: OwnerDriver[];
+  cashup_history: {
+    id: string;
+    driver_name: string;
+    cashup_amount: number;
+    driver_profit: number;
+    shortfall: number;
+    cashup_method: string;
+    payout_fee: number;
+    status: string;
+    created_at: string;
+  }[];
+};
+
 export type Transaction = {
   id: string;
   reference: string;
@@ -478,6 +523,9 @@ export const api = {
   drivers: () => client.get<Driver[]>("/api/admin/drivers"),
   driver: (id: string) => client.get<Driver>(`/api/admin/drivers/${id}`),
   verifyDriver: (id: string) => client.post(`/api/admin/verify-driver/${id}`),
+
+  owners: () => client.get<Owner[]>("/api/admin/owners"),
+  ownerDetail: (id: string) => client.get<OwnerDetail>(`/api/admin/owners/${id}`),
 
   transactions: (params?: {
     type?: string;

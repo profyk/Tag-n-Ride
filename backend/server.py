@@ -1446,6 +1446,121 @@ async def admin_verify_driver(user_id: str, request: Request, admin: dict = Depe
         await audit(conn, admin["id"], "VERIFY_DRIVER", user_id, "driver", {}, request.client.host)
     return {"ok": True}
 
+# ── Admin: Owners ────────────────────────────────────────────
+@api.get("/admin/owners")
+async def admin_owners(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.id as user_id, u.full_name, u.phone_number, u.created_at,
+                   fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
+                   d.qr_code,
+                   w.balance,
+                   COUNT(DISTINCT od.driver_user_id) as driver_count,
+                   COALESCE(SUM(cr.cashup_amount), 0) as total_cashup
+            FROM users u
+            JOIN fleet_owners fo ON fo.user_id = u.id
+            LEFT JOIN drivers d ON d.user_id = u.id
+            LEFT JOIN wallets w ON w.user_id = u.id
+            LEFT JOIN owner_drivers od ON od.owner_id = fo.id
+            LEFT JOIN cashup_records cr ON cr.owner_user_id = u.id
+            WHERE u.role = 'owner'
+            GROUP BY u.id, u.full_name, u.phone_number, u.created_at,
+                     fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
+                     d.qr_code, w.balance
+            ORDER BY u.created_at DESC
+        """)
+    return [{
+        "user_id": r["user_id"],
+        "full_name": r["full_name"],
+        "phone_number": r["phone_number"],
+        "business_name": r["business_name"],
+        "bank_name": r["bank_name"],
+        "account_number": r["account_number"],
+        "cashup_method": r["cashup_method"] or "wallet",
+        "qr_code": r["qr_code"],
+        "balance": float(r["balance"] or 0),
+        "driver_count": int(r["driver_count"] or 0),
+        "total_cashup": float(r["total_cashup"] or 0),
+        "created_at": iso(r["created_at"]),
+    } for r in rows]
+
+@api.get("/admin/owners/{owner_id}")
+async def admin_owner_detail(owner_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        owner = await conn.fetchrow("""
+            SELECT u.id as user_id, u.full_name, u.phone_number, u.created_at,
+                   fo.business_name, fo.bank_name, fo.account_number, fo.account_name, fo.cashup_method,
+                   d.qr_code,
+                   w.balance
+            FROM users u
+            JOIN fleet_owners fo ON fo.user_id = u.id
+            LEFT JOIN drivers d ON d.user_id = u.id
+            LEFT JOIN wallets w ON w.user_id = u.id
+            WHERE u.id = $1 AND u.role = 'owner'
+        """, owner_id)
+        if not owner:
+            raise HTTPException(status_code=404, detail="Owner not found")
+        drivers = await conn.fetch("""
+            SELECT u.id as user_id, u.full_name, u.phone_number,
+                   d.vehicle_plate, d.qr_code, d.rating_avg, d.rating_count,
+                   d.total_earnings, d.is_verified,
+                   od.daily_target, od.confirmed
+            FROM owner_drivers od
+            JOIN fleet_owners fo ON fo.id = od.owner_id
+            JOIN users u ON u.id = od.driver_user_id
+            LEFT JOIN drivers d ON d.user_id = od.driver_user_id
+            WHERE fo.user_id = $1
+            ORDER BY u.full_name ASC
+        """, owner_id)
+        cashup_history = await conn.fetch("""
+            SELECT cr.id, cr.cashup_amount, cr.driver_profit, cr.shortfall,
+                   cr.cashup_method, cr.payout_fee, cr.status, cr.created_at,
+                   u.full_name as driver_name
+            FROM cashup_records cr
+            JOIN users u ON u.id = cr.driver_user_id
+            WHERE cr.owner_user_id = $1
+            ORDER BY cr.created_at DESC LIMIT 30
+        """, owner_id)
+    return {
+        "owner": {
+            "user_id": owner["user_id"],
+            "full_name": owner["full_name"],
+            "phone_number": owner["phone_number"],
+            "business_name": owner["business_name"],
+            "bank_name": owner["bank_name"],
+            "account_number": owner["account_number"],
+            "account_name": owner["account_name"],
+            "cashup_method": owner["cashup_method"] or "wallet",
+            "qr_code": owner["qr_code"],
+            "balance": float(owner["balance"] or 0),
+            "created_at": iso(owner["created_at"]),
+        },
+        "drivers": [{
+            "user_id": d["user_id"],
+            "full_name": d["full_name"],
+            "phone_number": d["phone_number"],
+            "vehicle_plate": d["vehicle_plate"],
+            "qr_code": d["qr_code"],
+            "rating_avg": float(d["rating_avg"] or 0),
+            "rating_count": int(d["rating_count"] or 0),
+            "total_earnings": float(d["total_earnings"] or 0),
+            "is_verified": bool(d["is_verified"]),
+            "daily_target": float(d["daily_target"] or 0),
+            "confirmed": bool(d["confirmed"]),
+        } for d in drivers],
+        "cashup_history": [{
+            "id": r["id"],
+            "driver_name": r["driver_name"],
+            "cashup_amount": float(r["cashup_amount"] or 0),
+            "driver_profit": float(r["driver_profit"] or 0),
+            "shortfall": float(r["shortfall"] or 0),
+            "cashup_method": r["cashup_method"],
+            "payout_fee": float(r["payout_fee"] or 0),
+            "status": r["status"],
+            "created_at": iso(r["created_at"]),
+        } for r in cashup_history],
+    }
+
 # ── Admin: Transactions ──────────────────────────────────────
 @api.get("/admin/transactions")
 async def admin_transactions(
