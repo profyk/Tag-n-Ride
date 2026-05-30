@@ -173,10 +173,9 @@ export default function Home() {
     try {
       const res = await api.driverCashupV2(cashupStatus.owner_user_id, cashUpMethod, amount);
       setCashUpModal(false); setCashUpAmount("");
-      const dest = cashUpMethod === "wallet" ? "owner's Tag n Ride wallet" : "owner's bank account";
-      const feeNote = res.payout_fee > 0 ? ` (R${res.payout_fee.toFixed(2)} fee deducted)` : "";
-      const approvalNote = cashUpMethod === "bank" ? "\n\nYour payout is pending admin approval before it is processed to the bank." : "";
-      Alert.alert("CashUp Done", `${formatZAR(res.cashup_amount)} sent to ${dest}${feeNote}.${approvalNote}`);
+      const dest = cashUpMethod === "wallet" ? "owner's wallet" : "owner's bank account";
+      const feeNote = res.payout_fee > 0 ? ` · R${res.payout_fee.toFixed(2)} fee deducted` : "";
+      Alert.alert("CashUp Done", `${formatZAR(res.cashup_amount)} sent to ${dest}${feeNote}.`);
       load();
     } catch (e: any) {
       const msg = e?.message || "";
@@ -438,20 +437,12 @@ export default function Home() {
           <View style={s.modalSheet}>
             <View style={s.modalHandle} />
             <View style={s.modalIconWrap}><Ionicons name="wallet-outline" size={28} color="#A064FF" /></View>
-            <Text style={s.modalTitle}>CashUp to Owner</Text>
-            <Text style={s.modalSub}>Choose how to send today's earnings to your fleet owner.</Text>
+            <Text style={s.modalTitle}>CashUp</Text>
 
             {cashupStatusLoading ? (
               <ActivityIndicator color={colors.cyan} style={{ marginVertical: 24 }} />
             ) : !cashupStatus?.has_owner ? (
               <>
-                <View style={{ alignItems: "center", paddingVertical: 8 }}>
-                  <Ionicons name="information-circle-outline" size={28} color={colors.textDim} />
-                  <Text style={{ color: colors.text, fontWeight: "700", marginTop: 8, fontSize: 15 }}>No owner linked</Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4 }}>
-                    Cashup will go to your own bank account and is subject to admin approval.
-                  </Text>
-                </View>
                 {driverBank ? (
                   <>
                     <View style={s.cashupOwnerRow}>
@@ -474,7 +465,6 @@ export default function Home() {
                       placeholder="0.00"
                       placeholderTextColor={colors.textDim}
                     />
-                    <Text style={s.cashupAmountFee}>Pending admin approval before EFT is processed</Text>
                     <View style={s.modalActions}>
                       <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setCashUpModal(false)} /></View>
                       <View style={{ flex: 1 }}>
@@ -484,7 +474,7 @@ export default function Home() {
                   </>
                 ) : (
                   <>
-                    <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 8 }}>
+                    <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 12 }}>
                       No owner bank account saved. Add the owner's banking details in Profile → Owner Account.
                     </Text>
                     <View style={{ marginTop: 16 }}>
