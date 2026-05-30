@@ -474,12 +474,15 @@ export default function Home() {
                   </>
                 ) : (
                   <>
-                    <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 12 }}>
-                      No owner bank account saved. Add the owner's banking details in Profile → Owner Account.
-                    </Text>
-                    <View style={{ marginTop: 16 }}>
-                      <Button label="Go to Profile" onPress={() => { setCashUpModal(false); router.push("/(app)/profile"); }} />
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                      <Ionicons name="link-outline" size={16} color={colors.textDim} />
+                      <Text style={{ color: colors.textDim, fontSize: 13 }}>No owner linked</Text>
                     </View>
+                    <Text style={{ color: colors.text, fontSize: 14, marginBottom: 4 }}>No owner bank account saved.</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 20 }}>
+                      Add the owner's banking details in Profile → Owner Account.
+                    </Text>
+                    <Button label="Go to Profile" onPress={() => { setCashUpModal(false); router.push("/(app)/profile"); }} />
                     <View style={{ marginTop: 8 }}>
                       <Button label="Close" variant="secondary" onPress={() => setCashUpModal(false)} />
                     </View>
