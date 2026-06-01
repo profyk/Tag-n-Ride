@@ -1567,6 +1567,7 @@ async def admin_transactions(
     type: Optional[str] = None, from_date: Optional[str] = None,
     to_date: Optional[str] = None, search: Optional[str] = None,
     min_amount: Optional[float] = None, max_amount: Optional[float] = None,
+    user_id: Optional[str] = None,
     admin: dict = Depends(require_admin)
 ):
     conditions = []; params = []
@@ -1578,6 +1579,10 @@ async def admin_transactions(
         conditions.append(f"(t.reference ILIKE ${len(params)} OR su.full_name ILIKE ${len(params)} OR ru.full_name ILIKE ${len(params)})")
     if min_amount is not None: params.append(min_amount); conditions.append(f"t.amount>=${len(params)}")
     if max_amount is not None: params.append(max_amount); conditions.append(f"t.amount<=${len(params)}")
+    if user_id:
+        params.append(user_id)
+        n = len(params)
+        conditions.append(f"(t.sender_id=${n} OR t.receiver_id=${n})")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with pool.acquire() as conn:
         rows = await conn.fetch(f"""
@@ -3307,6 +3312,46 @@ async def create_new_tables():
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                # ── Signed documents vault ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS signed_documents (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        file_name TEXT NOT NULL,
+                        file_data TEXT NOT NULL,
+                        file_size INTEGER,
+                        mime_type TEXT DEFAULT 'application/pdf',
+                        category TEXT DEFAULT 'general',
+                        signed_by TEXT,
+                        signed_date DATE,
+                        counterparty TEXT,
+                        access_level TEXT DEFAULT 'restricted',
+                        uploaded_by TEXT REFERENCES users(id),
+                        deleted_by TEXT REFERENCES users(id),
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                # ── Company documents ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS company_documents (
+                        id TEXT PRIMARY KEY,
+                        folder_id TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        display_name TEXT NOT NULL,
+                        content TEXT NOT NULL DEFAULT '',
+                        access_level TEXT NOT NULL DEFAULT 'internal',
+                        version INTEGER DEFAULT 1,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_by TEXT REFERENCES users(id),
+                        updated_by TEXT REFERENCES users(id),
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        UNIQUE(folder_id, file_name)
+                    )
+                """)
         except Exception as e:
             print("New tables error:", e)
 
@@ -3321,6 +3366,27 @@ class SendNotificationIn(BaseModel):
 
 class UpdateConfigIn(BaseModel):
     value: str = Field(min_length=1, max_length=200)
+
+class DocumentCreateIn(BaseModel):
+    folder_id: str = Field(min_length=1, max_length=60)
+    file_name: str = Field(min_length=1, max_length=120)
+    display_name: str = Field(min_length=1, max_length=200)
+    content: str = Field(default="")
+    access_level: str = Field(default="internal")
+
+class DocumentUpdateIn(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=200)
+    content: Optional[str] = None
+    access_level: Optional[str] = None
+
+class SignedDocMetaIn(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=500)
+    category: str = Field(default="general", max_length=60)
+    signed_by: Optional[str] = Field(default=None, max_length=200)
+    signed_date: Optional[str] = Field(default=None)
+    counterparty: Optional[str] = Field(default=None, max_length=200)
+    access_level: str = Field(default="restricted")
 
 class DisputeIn(BaseModel):
     transaction_id: str
@@ -9219,6 +9285,293 @@ async def transfer_escalation_loop():
             print(f"[TRANSFER ESCALATION ERROR] {e}")
         await asyncio.sleep(3600)
 
+
+# ════════════════════════════════════════════════════════════════
+# Company Documents — CRUD
+# ════════════════════════════════════════════════════════════════
+
+_DOC_VIEW  = {"superadmin", "ceo", "cfo", "cto", "hr"}
+_DOC_EDIT  = {"superadmin", "ceo", "hr"}
+_DOC_EXEC  = {"superadmin", "ceo"}
+_EXEC_FOLDERS = {
+    "01-legal-incorporation", "02-equity-and-shares",
+    "03-investor-documents",  "06-fintech-regulatory", "07-marketing",
+    "09-tax-sars", "10-business-agreements", "11-financial-management", "12-corporate-governance",
+    "13-taxi-associations", "14-tender-documents", "15-legal-documents", "16-appointments-promotions",
+}
+
+FOLDER_META = {
+    "01-legal-incorporation":     {"label": "Legal & Incorporation",     "color": "purple"},
+    "02-equity-and-shares":       {"label": "Equity & Shares",           "color": "yellow"},
+    "03-investor-documents":      {"label": "Investor Documents",        "color": "cyan"},
+    "04-hr-documents":            {"label": "Human Resources",           "color": "green"},
+    "05-company-policies":        {"label": "Company Policies",          "color": "orange"},
+    "06-fintech-regulatory":      {"label": "Fintech & Regulatory",      "color": "red"},
+    "07-marketing":               {"label": "Marketing",                 "color": "pink"},
+    "08-daily-use":               {"label": "Daily Use Templates",       "color": "blue"},
+    "09-tax-sars":                {"label": "Tax & SARS",                "color": "yellow"},
+    "10-business-agreements":     {"label": "Business Agreements",       "color": "orange"},
+    "11-financial-management":    {"label": "Financial Management",      "color": "green"},
+    "12-corporate-governance":    {"label": "Corporate Governance",      "color": "purple"},
+    "13-taxi-associations":       {"label": "Taxi Associations",         "color": "orange"},
+    "14-tender-documents":        {"label": "Tender Documents",          "color": "red"},
+    "15-legal-documents":         {"label": "Legal Documents",           "color": "purple"},
+    "16-appointments-promotions": {"label": "Appointments & Promotions", "color": "green"},
+}
+
+@api.get("/admin/documents")
+async def list_company_documents(admin: dict = Depends(require_admin)):
+    if admin["role"] not in _DOC_VIEW:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, folder_id, file_name, display_name, access_level, version,
+                      created_at, updated_at
+               FROM company_documents
+               WHERE is_active = TRUE
+               ORDER BY folder_id, display_name"""
+        )
+    result: dict[str, list] = {}
+    for r in rows:
+        fid = r["folder_id"]
+        if fid not in result:
+            result[fid] = []
+        result[fid].append({
+            "dbId":        r["id"],
+            "name":        r["display_name"],
+            "path":        f"{r['folder_id']}/{r['file_name']}",
+            "folder":      r["folder_id"],
+            "fileName":    r["file_name"],
+            "accessLevel": r["access_level"],
+            "version":     r["version"],
+            "updatedAt":   iso(r["updated_at"]),
+            "createdAt":   iso(r["created_at"]),
+        })
+    return {"documents": result}
+
+@api.get("/admin/documents/{doc_id}")
+async def get_company_document(doc_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in _DOC_VIEW:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM company_documents WHERE id = $1 AND is_active = TRUE", doc_id
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    folder_id = row["folder_id"]
+    if folder_id in _EXEC_FOLDERS and admin["role"] not in _DOC_EXEC:
+        raise HTTPException(status_code=403, detail="Access denied — executive documents only")
+    return {
+        "dbId":        row["id"],
+        "folderId":    row["folder_id"],
+        "fileName":    row["file_name"],
+        "displayName": row["display_name"],
+        "content":     row["content"],
+        "accessLevel": row["access_level"],
+        "version":     row["version"],
+        "createdAt":   iso(row["created_at"]),
+        "updatedAt":   iso(row["updated_at"]),
+    }
+
+@api.post("/admin/documents")
+async def create_company_document(body: DocumentCreateIn, admin: dict = Depends(require_admin)):
+    if admin["role"] not in _DOC_EDIT:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if admin["role"] == "hr" and body.folder_id in _EXEC_FOLDERS:
+        raise HTTPException(status_code=403, detail="HR cannot create documents in executive folders")
+    if body.access_level not in {"public", "internal", "confidential", "restricted"}:
+        raise HTTPException(status_code=400, detail="Invalid access level")
+    doc_id = str(uuid.uuid4())
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(
+                """INSERT INTO company_documents
+                       (id, folder_id, file_name, display_name, content, access_level, created_by)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+                doc_id, body.folder_id, body.file_name,
+                body.display_name, body.content, body.access_level, admin["id"]
+            )
+        except Exception as e:
+            if "unique" in str(e).lower():
+                raise HTTPException(status_code=409, detail="A document with this filename already exists in this folder")
+            raise
+    return {"ok": True, "id": doc_id}
+
+@api.put("/admin/documents/{doc_id}")
+async def update_company_document(doc_id: str, body: DocumentUpdateIn, admin: dict = Depends(require_admin)):
+    if admin["role"] not in _DOC_EDIT:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT folder_id FROM company_documents WHERE id = $1 AND is_active = TRUE", doc_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if admin["role"] == "hr" and row["folder_id"] in _EXEC_FOLDERS:
+            raise HTTPException(status_code=403, detail="HR cannot edit executive documents")
+        if body.access_level and body.access_level not in {"public", "internal", "confidential", "restricted"}:
+            raise HTTPException(status_code=400, detail="Invalid access level")
+        clauses, params, i = [], [], 1
+        if body.display_name is not None:
+            clauses.append(f"display_name = ${i}"); params.append(body.display_name); i += 1
+        if body.content is not None:
+            clauses.append(f"content = ${i}"); params.append(body.content); i += 1
+        if body.access_level is not None:
+            clauses.append(f"access_level = ${i}"); params.append(body.access_level); i += 1
+        if not clauses:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+        clauses += [f"updated_by = ${i}", "updated_at = NOW()", "version = version + 1"]
+        params += [admin["id"], doc_id]
+        await conn.execute(
+            f"UPDATE company_documents SET {', '.join(clauses)} WHERE id = ${i + 1}",
+            *params
+        )
+    return {"ok": True}
+
+@api.delete("/admin/documents/{doc_id}")
+async def delete_company_document(doc_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in _DOC_EXEC:
+        raise HTTPException(status_code=403, detail="Only CEO or Superadmin can delete documents")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM company_documents WHERE id = $1 AND is_active = TRUE", doc_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        await conn.execute(
+            "UPDATE company_documents SET is_active = FALSE, updated_by = $1, updated_at = NOW() WHERE id = $2",
+            admin["id"], doc_id
+        )
+    return {"ok": True}
+
+# ════════════════════════════════════════════════════════════════
+# Signed Documents Vault
+# ════════════════════════════════════════════════════════════════
+
+_SIGNED_UPLOAD = {"superadmin", "ceo"}
+_SIGNED_VIEW   = {"superadmin", "ceo", "cfo"}
+_SIGNED_DELETE = {"superadmin", "ceo"}
+_SIGNED_CATEGORIES = {"general", "partnership", "nda", "employment", "vendor", "investment", "legal", "taxi", "tender", "other"}
+_MAX_FILE_MB = 20
+
+@api.get("/admin/signed-documents")
+async def list_signed_documents(admin: dict = Depends(require_admin)):
+    if admin["role"] not in _SIGNED_VIEW:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, title, description, file_name, file_size, mime_type,
+                      category, signed_by, signed_date, counterparty, access_level,
+                      uploaded_by, created_at, updated_at,
+                      u.full_name as uploader_name
+               FROM signed_documents sd
+               LEFT JOIN users u ON u.id = sd.uploaded_by
+               WHERE sd.is_active = TRUE
+               ORDER BY sd.created_at DESC"""
+        )
+    return {"documents": [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "description": r["description"],
+            "fileName": r["file_name"],
+            "fileSize": r["file_size"],
+            "mimeType": r["mime_type"],
+            "category": r["category"],
+            "signedBy": r["signed_by"],
+            "signedDate": str(r["signed_date"]) if r["signed_date"] else None,
+            "counterparty": r["counterparty"],
+            "accessLevel": r["access_level"],
+            "uploaderName": r["uploader_name"],
+            "createdAt": iso(r["created_at"]),
+            "updatedAt": iso(r["updated_at"]),
+        } for r in rows
+    ]}
+
+@api.post("/admin/signed-documents")
+async def upload_signed_document(
+    request: Request,
+    admin: dict = Depends(require_admin),
+    file: UploadFile = File(...),
+):
+    if admin["role"] not in _SIGNED_UPLOAD:
+        raise HTTPException(status_code=403, detail="Only CEO or Superadmin can upload signed documents")
+
+    # Read and validate file
+    content = await file.read()
+    file_size = len(content)
+    if file_size > _MAX_FILE_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File exceeds {_MAX_FILE_MB}MB limit")
+    if file.content_type not in {"application/pdf", "image/png", "image/jpeg"}:
+        raise HTTPException(status_code=415, detail="Only PDF, PNG, JPG files are accepted")
+
+    # Parse metadata from form
+    form = await request.form()
+    meta_raw = form.get("meta", "{}")
+    try:
+        import json as _json
+        meta = SignedDocMetaIn(**_json.loads(str(meta_raw)))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid metadata")
+    if meta.access_level not in {"public", "internal", "confidential", "restricted"}:
+        raise HTTPException(status_code=400, detail="Invalid access level")
+    if meta.category not in _SIGNED_CATEGORIES:
+        meta.category = "other"
+
+    file_b64 = base64.b64encode(content).decode()
+    doc_id = str(uuid.uuid4())
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO signed_documents
+                   (id, title, description, file_name, file_data, file_size, mime_type,
+                    category, signed_by, signed_date, counterparty, access_level, uploaded_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+            doc_id, meta.title, meta.description, file.filename or "document.pdf",
+            file_b64, file_size, file.content_type,
+            meta.category, meta.signed_by,
+            meta.signed_date if meta.signed_date else None,
+            meta.counterparty, meta.access_level, admin["id"]
+        )
+        await audit(conn, admin["id"], "SIGNED_DOC_UPLOAD", doc_id, "signed_documents",
+                    {"title": meta.title, "size": file_size}, request.client.host)
+    return {"ok": True, "id": doc_id}
+
+@api.get("/admin/signed-documents/{doc_id}/download")
+async def download_signed_document(doc_id: str, admin: dict = Depends(require_admin)):
+    if admin["role"] not in _SIGNED_VIEW:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT title, file_name, file_data, mime_type FROM signed_documents WHERE id=$1 AND is_active=TRUE",
+            doc_id
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    file_bytes = base64.b64decode(row["file_data"])
+    safe_name = row["file_name"].replace(" ", "_")
+    return StreamingResponse(
+        iter([file_bytes]),
+        media_type=row["mime_type"] or "application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'}
+    )
+
+@api.delete("/admin/signed-documents/{doc_id}")
+async def delete_signed_document(doc_id: str, request: Request, admin: dict = Depends(require_admin)):
+    if admin["role"] not in _SIGNED_DELETE:
+        raise HTTPException(status_code=403, detail="Only CEO or Superadmin can delete signed documents")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM signed_documents WHERE id=$1 AND is_active=TRUE", doc_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        await conn.execute(
+            "UPDATE signed_documents SET is_active=FALSE, deleted_by=$1, updated_at=NOW() WHERE id=$2",
+            admin["id"], doc_id
+        )
+        await audit(conn, admin["id"], "SIGNED_DOC_DELETE", doc_id, "signed_documents", {}, request.client.host)
+    return {"ok": True}
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line

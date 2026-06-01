@@ -534,6 +534,7 @@ export const api = {
     search?: string;
     min_amount?: number;
     max_amount?: number;
+    user_id?: string;
   }) => client.get<Transaction[]>("/api/admin/transactions", { params }),
 
   withdrawals: () => client.get<Withdrawal[]>("/api/admin/withdrawals"),

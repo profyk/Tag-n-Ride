@@ -14,7 +14,7 @@ import {
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
   Zap, Globe, Star, ToggleRight, Key, MessageCircle,
   ChevronDown, ChevronRight, Search, X,
-  Rocket, Target, Calculator, Database, Repeat2,
+  Rocket, Target, Calculator, Database, Repeat2, FolderLock,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -153,8 +153,9 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const HR_NAV: NavItem[] = [
-  { label: "HR · Staff",  href: "/admin/hr",      icon: Users2 },
-  { label: "Payroll",     href: "/admin/payroll",  icon: Banknote },
+  { label: "HR · Staff",    href: "/admin/hr",        icon: Users2 },
+  { label: "Payroll",       href: "/admin/payroll",    icon: Banknote },
+  { label: "HR Documents",  href: "/admin/documents",  icon: FolderLock },
 ];
 
 const SUPERADMIN_NAV: NavItem[] = [
@@ -272,7 +273,10 @@ export function Sidebar() {
   const path = usePathname();
   const role = getRole() || "";
   const superAdmin = isSuperAdmin();
-  const hrAllowed = ["superadmin", "ceo", "cfo"].includes(role);
+  // HR section visible to hr, cfo, ceo, superadmin
+  const hrAllowed  = ["superadmin", "ceo", "cfo", "hr"].includes(role);
+  // Full docs vault (CEO/Superadmin only) — separate from HR docs link
+  const execDocsAllowed = ["superadmin", "ceo"].includes(role);
   const [search, setSearch] = useState("");
   const [superOpen, setSuperOpen] = useState(false);
 
@@ -372,7 +376,14 @@ export function Sidebar() {
           ))}
         </div>
 
-        {/* Human Resources — CEO / CFO / Superadmin only */}
+        {/* Company Documents (full vault) — CEO & Superadmin only */}
+        {execDocsAllowed && (!search || "company documents".includes(search.toLowerCase())) && (
+          <div className="mt-2">
+            <NavLink href="/admin/documents" icon={FolderLock} label="Company Documents" />
+          </div>
+        )}
+
+        {/* Human Resources — CEO / CFO / HR / Superadmin */}
         {hrAllowed && (
           <div className="mt-2">
             <p className="px-3 py-1.5 text-[10px] font-extrabold tracking-widest uppercase text-yellow flex items-center gap-1.5">

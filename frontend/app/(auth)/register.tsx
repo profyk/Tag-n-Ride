@@ -216,6 +216,9 @@ export default function Register() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // T&C acceptance
+  const [tcAccepted, setTcAccepted] = useState(false);
+
   // KYC
   const [selfie, setSelfie] = useState<{ uri: string; base64: string } | null>(null);
   const [licence, setLicence] = useState<{ uri: string; base64: string } | null>(null);
@@ -233,6 +236,7 @@ export default function Register() {
     if (pin.length !== 4) { setErr("PIN must be 4 digits"); return false; }
     if (pin !== pin2) { setErr("PINs don't match"); return false; }
     if (role === "driver" && plate.trim().length < 2) { setErr("Enter your vehicle plate number"); return false; }
+    if (!tcAccepted) { setErr("You must accept the Terms of Service and Privacy Policy to continue"); return false; }
     return true;
   };
 
@@ -627,11 +631,33 @@ export default function Register() {
               {err ? (
                 <Text style={styles.err} testID="register-error">{err}</Text>
               ) : null}
-              <View style={{ height: 8 }} />
+
+              {/* Terms & Conditions */}
+              <View style={{ height: 12 }} />
+              <TouchableOpacity
+                testID="register-tc-checkbox"
+                activeOpacity={0.8}
+                onPress={() => setTcAccepted(v => !v)}
+                style={styles.tcRow}>
+                <View style={[styles.checkbox, tcAccepted && styles.checkboxChecked]}>
+                  {tcAccepted && (
+                    <Ionicons name="checkmark" size={13} color="#001218" />
+                  )}
+                </View>
+                <Text style={styles.tcText}>
+                  I have read and agree to the{" "}
+                  <Text style={styles.tcLink}>Terms of Service</Text>
+                  {" "}and{" "}
+                  <Text style={styles.tcLink}>Privacy Policy</Text>
+                </Text>
+              </TouchableOpacity>
+              <View style={{ height: 12 }} />
+
               <Button
                 label={role === "driver" ? "Next — Verify Identity" : "Create account"}
                 onPress={onNext}
                 loading={loading}
+                disabled={!tcAccepted}
                 testID="register-submit-btn"
                 icon={role === "driver" ? "arrow-forward-outline" : "rocket-outline"}
               />
@@ -737,6 +763,24 @@ const styles = StyleSheet.create({
   },
   driverNoticeText: { color: colors.text, fontSize: 12, lineHeight: 18, flex: 1 },
   err: { color: colors.red, fontSize: 13, marginTop: 4 },
+  tcRow: {
+    flexDirection: "row", alignItems: "flex-start", gap: 10,
+    paddingVertical: 4,
+  },
+  checkbox: {
+    width: 20, height: 20, borderRadius: 5,
+    borderWidth: 1.5, borderColor: colors.border,
+    backgroundColor: colors.bg2,
+    alignItems: "center", justifyContent: "center",
+    flexShrink: 0, marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.cyan, borderColor: colors.cyan,
+  },
+  tcText: {
+    flex: 1, color: colors.textMuted, fontSize: 12, lineHeight: 18,
+  },
+  tcLink: { color: colors.cyan, fontWeight: "700" },
   footer: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
   footerText: { color: colors.textMuted },
   link: { color: colors.cyan, fontWeight: "700" },
