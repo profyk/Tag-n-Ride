@@ -107,7 +107,10 @@ export default function OwnerRegister() {
   const [loading, setLoading] = useState(false);
 
   const [fullName, setFullName] = useState("");
+  const [surname, setSurname] = useState("");
   const [phone, setPhone] = useState("");
+  const [idNumber, setIdNumber] = useState("");
+  const [email, setEmail] = useState("");
   const [businessName, setBusinessName] = useState("");
 
   const [pin, setPin] = useState("");
@@ -123,7 +126,8 @@ export default function OwnerRegister() {
   const back = () => { if (step === 1) { router.back(); return; } setStep((s) => s - 1); };
 
   const submitStep1 = () => {
-    if (!fullName.trim()) { Alert.alert("Required", "Please enter your full name."); return; }
+    if (!fullName.trim()) { Alert.alert("Required", "Please enter your first name."); return; }
+    if (!surname.trim()) { Alert.alert("Required", "Please enter your surname."); return; }
     if (!phone.trim() || phone.length < 10) { Alert.alert("Required", "Please enter a valid phone number."); return; }
     next();
   };
@@ -155,8 +159,13 @@ export default function OwnerRegister() {
     setLoading(true);
     try {
       await api.register({
-        full_name: fullName.trim(), phone_number: phone.trim(),
-        pin, role: "owner", business_name: businessName.trim() || undefined,
+        full_name: fullName.trim(),
+        surname: surname.trim(),
+        phone_number: phone.trim(),
+        pin, role: "owner",
+        business_name: businessName.trim() || undefined,
+        id_number: idNumber.trim() || undefined,
+        email: email.trim() || undefined,
       });
       await signIn(phone.trim(), pin);
       if (driverMode && selfie && licenceFront) {
@@ -188,12 +197,27 @@ export default function OwnerRegister() {
               <View style={styles.iconWrap}><Ionicons name="business-outline" size={28} color={colors.cyan} /></View>
               <Text style={styles.stepTitle}>Fleet Owner Setup</Text>
               <Text style={styles.stepSub}>Set up your Tag n Ride fleet owner account.</Text>
-              <Text style={styles.label}>FULL NAME</Text>
-              <TextInput style={styles.input} value={fullName} onChangeText={setFullName}
-                placeholder="Your full name" placeholderTextColor={colors.textDim} autoCapitalize="words" />
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>FIRST NAME</Text>
+                  <TextInput style={styles.input} value={fullName} onChangeText={setFullName}
+                    placeholder="Jane" placeholderTextColor={colors.textDim} autoCapitalize="words" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>SURNAME</Text>
+                  <TextInput style={styles.input} value={surname} onChangeText={setSurname}
+                    placeholder="Doe" placeholderTextColor={colors.textDim} autoCapitalize="words" />
+                </View>
+              </View>
+              <Text style={styles.label}>ID / PASSPORT NUMBER</Text>
+              <TextInput style={styles.input} value={idNumber} onChangeText={setIdNumber}
+                placeholder="8001015009087" placeholderTextColor={colors.textDim} autoCapitalize="characters" />
               <Text style={styles.label}>PHONE NUMBER</Text>
               <TextInput style={styles.input} value={phone} onChangeText={setPhone}
                 placeholder="+27 XX XXX XXXX" placeholderTextColor={colors.textDim} keyboardType="phone-pad" />
+              <Text style={styles.label}>EMAIL (OPTIONAL)</Text>
+              <TextInput style={styles.input} value={email} onChangeText={setEmail}
+                placeholder="jane@example.com" placeholderTextColor={colors.textDim} keyboardType="email-address" autoCapitalize="none" />
               <Text style={styles.label}>BUSINESS NAME (OPTIONAL)</Text>
               <TextInput style={styles.input} value={businessName} onChangeText={setBusinessName}
                 placeholder="e.g. Profy Fleet Services" placeholderTextColor={colors.textDim} autoCapitalize="words" />

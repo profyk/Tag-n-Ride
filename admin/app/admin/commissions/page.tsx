@@ -1,0 +1,181 @@
+"use client";
+import { useEffect, useState } from "react";
+import { AdminShell } from "@/components/layout/AdminShell";
+import { Card, Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
+import { api } from "@/lib/api";
+import type { CommissionRequest } from "@/lib/api";
+import toast from "react-hot-toast";
+import { formatDate } from "@/lib/utils";
+import { CheckCircle, XCircle, Clock } from "lucide-react";
+
+const STATUS_COLORS: Record<string, "green" | "red" | "yellow" | "gray"> = {
+  approved: "green",
+  rejected: "red",
+  pending: "yellow",
+};
+
+export default function CommissionsPage() {
+  const [rows, setRows] = useState<CommissionRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>("pending");
+  const [acting, setActing] = useState<string | null>(null);
+
+  const load = (status?: string) => {
+    setLoading(true);
+    api.commissionRequests(status || undefined)
+      .then(setRows)
+      .catch(() => toast.error("Failed to load commission requests"))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(filter); }, [filter]);
+
+  const act = async (id: string, action: "approve" | "reject") => {
+    setActing(id);
+    try {
+      await api.reviewCommission(id, action);
+      toast.success(`Commission ${action}d`);
+      load(filter);
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to ${action}`);
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const pending = rows.filter(r => r.commission_status === "pending").length;
+
+  return (
+    <AdminShell title="Commission Split Requests">
+      <div className="space-y-6">
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4">
+          <Card className="p-4 text-center">
+            <div className="text-2xl font-bold text-yellow-500">{pending}</div>
+            <div className="text-sm text-gray-500">Pending Approval</div>
+          </Card>
+          <Card className="p-4 text-center">
+            <div className="text-2xl font-bold text-green-500">
+              {rows.filter(r => r.commission_status === "approved").length}
+            </div>
+            <div className="text-sm text-gray-500">Approved</div>
+          </Card>
+          <Card className="p-4 text-center">
+            <div className="text-2xl font-bold text-red-500">
+              {rows.filter(r => r.commission_status === "rejected").length}
+            </div>
+            <div className="text-sm text-gray-500">Rejected</div>
+          </Card>
+        </div>
+
+        {/* Filter tabs */}
+        <div className="flex gap-2">
+          {["pending", "approved", "rejected", ""].map(s => (
+            <button
+              key={s || "all"}
+              onClick={() => setFilter(s)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                filter === s
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "border-gray-300 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {s === "" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        <Card>
+          {loading ? (
+            <div className="p-8 flex justify-center"><Spinner /></div>
+          ) : rows.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">No commission requests found</div>
+          ) : (
+            <Table headers={["Owner", "Driver", "Driver %", "Owner %", "Status", "Requested", "Actions"]}>
+              {rows.map(r => (
+                <Tr key={r.id}>
+                  <Td>
+                    <div className="font-medium">{r.owner_name}</div>
+                    <div className="text-xs text-gray-400">{r.owner_phone}</div>
+                  </Td>
+                  <Td>
+                    <div className="font-medium">{r.driver_name}</div>
+                    <div className="text-xs text-gray-400">{r.driver_phone}</div>
+                  </Td>
+                  <Td>
+                    <span className="font-mono font-bold text-blue-600">
+                      {r.driver_commission_pct.toFixed(1)}%
+                    </span>
+                    <div className="text-xs text-gray-400">driver keeps</div>
+                  </Td>
+                  <Td>
+                    <span className="font-mono font-bold text-purple-600">
+                      {(100 - r.driver_commission_pct).toFixed(1)}%
+                    </span>
+                    <div className="text-xs text-gray-400">owner receives</div>
+                  </Td>
+                  <Td>
+                    <Badge color={STATUS_COLORS[r.commission_status] || "gray"}>
+                      {r.commission_status}
+                    </Badge>
+                  </Td>
+                  <Td>{r.commission_approved_at ? formatDate(r.commission_approved_at) : "—"}</Td>
+                  <Td>
+                    {r.commission_status === "pending" && (
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => act(r.id, "approve")}
+                          disabled={acting === r.id}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => act(r.id, "reject")}
+                          disabled={acting === r.id}
+                          className="border-red-400 text-red-600 hover:bg-red-50"
+                        >
+                          <XCircle className="w-3 h-3 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                    {r.commission_status !== "pending" && (
+                      <span className="text-gray-400 text-xs">
+                        {r.commission_status === "approved" ? (
+                          <span className="flex items-center gap-1 text-green-600">
+                            <CheckCircle className="w-3.5 h-3.5" /> Approved
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-red-500">
+                            <XCircle className="w-3.5 h-3.5" /> Rejected
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </Td>
+                </Tr>
+              ))}
+            </Table>
+          )}
+        </Card>
+
+        {/* Info box */}
+        <Card className="p-4 bg-blue-50 border-blue-200">
+          <h3 className="font-semibold text-blue-800 mb-2">How Commission Split Works</h3>
+          <ul className="text-sm text-blue-700 space-y-1 list-disc ml-4">
+            <li>Owner proposes a % split for a driver (e.g. driver keeps 60%, owner gets 40%)</li>
+            <li>Admin approves or rejects the proposal here</li>
+            <li>Once approved, cashup auto-deducts today&apos;s fuel payments first</li>
+            <li>Remaining net earnings are split by the agreed percentages</li>
+            <li>No daily target applies — driver earns their % regardless of total</li>
+          </ul>
+        </Card>
+      </div>
+    </AdminShell>
+  );
+}

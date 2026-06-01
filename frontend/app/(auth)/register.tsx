@@ -209,7 +209,10 @@ export default function Register() {
 
   // Form fields
   const [name, setName] = useState("");
+  const [surname, setSurname] = useState("");
   const [phone, setPhone] = useState("");
+  const [idNumber, setIdNumber] = useState("");
+  const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
   const [plate, setPlate] = useState("");
@@ -230,12 +233,14 @@ export default function Register() {
 
   const validateForm = () => {
     setErr(null);
-    if (name.trim().length < 2) { setErr("Enter your full name"); return false; }
+    if (name.trim().length < 2) { setErr("Enter your first name"); return false; }
+    if (surname.trim().length < 2) { setErr("Enter your surname"); return false; }
     const localDigits = phone.replace(/\D/g, "").replace(/^0+/, "");
     if (localDigits.length < 9) { setErr("Enter a valid SA phone number (9 digits)"); return false; }
     if (pin.length !== 4) { setErr("PIN must be 4 digits"); return false; }
     if (pin !== pin2) { setErr("PINs don't match"); return false; }
     if (role === "driver" && plate.trim().length < 2) { setErr("Enter your vehicle plate number"); return false; }
+    if (email.trim() && !/\S+@\S+\.\S+/.test(email.trim())) { setErr("Enter a valid email address"); return false; }
     if (!tcAccepted) { setErr("You must accept the Terms of Service and Privacy Policy to continue"); return false; }
     return true;
   };
@@ -302,9 +307,12 @@ export default function Register() {
       await signUp({
         phone_number: "+27" + localDigits,
         full_name: name.trim(),
+        surname: surname.trim(),
         pin,
         role,
         vehicle_plate: role === "driver" ? plate.trim().toUpperCase() : undefined,
+        id_number: idNumber.trim() || undefined,
+        email: email.trim() || undefined,
       });
       router.replace("/(app)");
     } catch (e: any) {
@@ -324,9 +332,12 @@ export default function Register() {
       await signUp({
         phone_number: "+27" + localDigits,
         full_name: name.trim(),
+        surname: surname.trim(),
         pin,
         role,
         vehicle_plate: plate.trim().toUpperCase(),
+        id_number: idNumber.trim() || undefined,
+        email: email.trim() || undefined,
       });
       try {
         await api.submitKyc(selfie.base64, licence.base64);
@@ -579,13 +590,44 @@ export default function Register() {
           {/* Form fields */}
           {role !== "owner" && (
             <>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Field
+                    label="First name"
+                    placeholder="Jane"
+                    value={name}
+                    onChangeText={setName}
+                    testID="register-name-input"
+                    autoCapitalize="words"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Field
+                    label="Surname"
+                    placeholder="Doe"
+                    value={surname}
+                    onChangeText={setSurname}
+                    testID="register-surname-input"
+                    autoCapitalize="words"
+                  />
+                </View>
+              </View>
               <Field
-                label="Full name"
-                placeholder="Jane Doe"
-                value={name}
-                onChangeText={setName}
-                testID="register-name-input"
-                autoCapitalize="words"
+                label="ID / Passport number"
+                placeholder="8001015009087"
+                value={idNumber}
+                onChangeText={(t) => setIdNumber(t.replace(/\s/g, "").slice(0, 30))}
+                testID="register-id-input"
+                autoCapitalize="characters"
+              />
+              <Field
+                label="Email address (optional)"
+                placeholder="jane@example.com"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                testID="register-email-input"
+                autoCapitalize="none"
               />
               <Field
                 label="Phone number"

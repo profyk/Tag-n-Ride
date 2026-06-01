@@ -86,6 +86,9 @@ export type User = {
   id: string;
   phone_number: string;
   full_name: string;
+  surname?: string | null;
+  id_number?: string | null;
+  email?: string | null;
   role: string;
   is_active: boolean;
   flagged: boolean;
@@ -95,6 +98,9 @@ export type User = {
 export type Driver = {
   user_id: string;
   full_name: string;
+  surname?: string | null;
+  id_number?: string | null;
+  email?: string | null;
   phone_number: string;
   vehicle_plate: string;
   total_earnings: number;
@@ -124,6 +130,7 @@ export type Owner = {
 export type OwnerDriver = {
   user_id: string;
   full_name: string;
+  surname?: string | null;
   phone_number: string;
   vehicle_plate: string | null;
   qr_code: string | null;
@@ -133,6 +140,25 @@ export type OwnerDriver = {
   is_verified: boolean;
   daily_target: number;
   confirmed: boolean;
+  payment_mode: "daily_target" | "commission_split";
+  driver_commission_pct: number;
+  commission_status: "pending" | "approved" | "rejected" | null;
+};
+
+export type CommissionRequest = {
+  id: string;
+  driver_user_id: string;
+  driver_name: string;
+  driver_phone: string;
+  owner_user_id: string;
+  owner_name: string;
+  owner_phone: string;
+  driver_commission_pct: number;
+  commission_status: "pending" | "approved" | "rejected";
+  commission_approved_by: string | null;
+  commission_approved_at: string | null;
+  payment_mode: string;
+  daily_target: number;
 };
 
 export type OwnerDetail = {
@@ -526,6 +552,11 @@ export const api = {
 
   owners: () => client.get<Owner[]>("/api/admin/owners"),
   ownerDetail: (id: string) => client.get<OwnerDetail>(`/api/admin/owners/${id}`),
+
+  commissionRequests: (status?: string) =>
+    client.get<CommissionRequest[]>("/api/admin/commission-requests", status ? { params: { status } } : undefined),
+  reviewCommission: (ownerDriverId: string, action: "approve" | "reject", notes?: string) =>
+    client.patch(`/api/admin/commission-requests/${ownerDriverId}`, { action, notes }),
 
   transactions: (params?: {
     type?: string;

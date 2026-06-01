@@ -623,10 +623,13 @@ async def _do_pay_fuel(user, amount, bank_name, account_number, account_name):
 class RegisterIn(BaseModel):
     phone_number: str = Field(min_length=7, max_length=20)
     full_name: str = Field(min_length=2, max_length=100)
+    surname: str = Field(min_length=2, max_length=100)
     pin: str = Field(min_length=4, max_length=4)
     role: str = Field(default="passenger")
     vehicle_plate: Optional[str] = None
     business_name: Optional[str] = None
+    id_number: Optional[str] = Field(default=None, min_length=5, max_length=30)
+    email: Optional[str] = Field(default=None, max_length=255)
 
     @field_validator("pin")
     @classmethod
@@ -645,6 +648,14 @@ class RegisterIn(BaseModel):
     @classmethod
     def validate_role(cls, v):
         if v not in ("passenger","driver","owner"): raise ValueError("Invalid role")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v):
+        if v is not None:
+            v = v.strip().lower()
+            if "@" not in v: raise ValueError("Invalid email address")
         return v
 
 class DriverProfileIn(BaseModel):
@@ -774,8 +785,8 @@ async def register(body: RegisterIn):
         user_id = str(uuid.uuid4())
         async with conn.transaction():
             await conn.execute(
-                "INSERT INTO users (id,phone_number,full_name,role,pin_hash) VALUES ($1,$2,$3,$4,$5)",
-                user_id, body.phone_number, body.full_name, body.role, hash_pin(body.pin)
+                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                user_id, body.phone_number, body.full_name, body.surname, body.id_number, body.email, body.role, hash_pin(body.pin)
             )
             await conn.execute(
                 "INSERT INTO wallets (id,user_id) VALUES ($1,$2)",
@@ -801,7 +812,7 @@ async def register(body: RegisterIn):
     return {
         "token": token,
         "user": {"id": user_id, "phone_number": body.phone_number,
-                 "full_name": body.full_name, "role": body.role}
+                 "full_name": body.full_name, "surname": body.surname, "role": body.role}
     }
 
 @api.post("/auth/login")
@@ -1325,9 +1336,9 @@ async def admin_users(search: Optional[str] = None, admin: dict = Depends(requir
     is_super = has_permission(admin, "manage_admins")
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT id,phone_number,full_name,role,is_active,flagged,created_at FROM users
+            """SELECT id,phone_number,full_name,surname,id_number,email,role,is_active,flagged,created_at FROM users
                WHERE ($1 OR role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr'))
-               AND ($2::text IS NULL OR phone_number ILIKE $2 OR full_name ILIKE $2)
+               AND ($2::text IS NULL OR phone_number ILIKE $2 OR full_name ILIKE $2 OR surname ILIKE $2)
                ORDER BY created_at DESC""",
             is_super, f"%{search}%" if search else None
         )
@@ -1427,11 +1438,13 @@ async def admin_drivers(admin: dict = Depends(require_admin)):
 async def admin_driver_detail(user_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT d.*,u.full_name,u.phone_number,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id WHERE d.user_id=$1",
+            "SELECT d.*,u.full_name,u.surname,u.id_number,u.email,u.phone_number,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id WHERE d.user_id=$1",
             user_id
         )
     if not row: raise HTTPException(status_code=404, detail="Driver not found")
-    return {"user_id": row["user_id"], "full_name": row["full_name"], "phone_number": row["phone_number"],
+    return {"user_id": row["user_id"], "full_name": row["full_name"], "surname": row["surname"],
+            "id_number": row["id_number"], "email": row["email"],
+            "phone_number": row["phone_number"],
             "vehicle_plate": row["vehicle_plate"], "total_earnings": float(row["total_earnings"]),
             "is_verified": row["is_verified"], "rating_avg": float(row["rating_avg"]),
             "rating_count": row["rating_count"], "qr_code": row["qr_code"],
@@ -1451,7 +1464,7 @@ async def admin_verify_driver(user_id: str, request: Request, admin: dict = Depe
 async def admin_owners(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT u.id as user_id, u.full_name, u.phone_number, u.created_at,
+            SELECT u.id as user_id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.created_at,
                    fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
                    d.qr_code,
                    w.balance,
@@ -1464,7 +1477,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
             LEFT JOIN owner_drivers od ON od.owner_id = fo.id
             LEFT JOIN cashup_records cr ON cr.owner_user_id = u.id
             WHERE u.role = 'owner'
-            GROUP BY u.id, u.full_name, u.phone_number, u.created_at,
+            GROUP BY u.id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.created_at,
                      fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
                      d.qr_code, w.balance
             ORDER BY u.created_at DESC
@@ -1501,10 +1514,11 @@ async def admin_owner_detail(owner_id: str, admin: dict = Depends(require_admin)
         if not owner:
             raise HTTPException(status_code=404, detail="Owner not found")
         drivers = await conn.fetch("""
-            SELECT u.id as user_id, u.full_name, u.phone_number,
+            SELECT u.id as user_id, u.full_name, u.surname, u.phone_number,
                    d.vehicle_plate, d.qr_code, d.rating_avg, d.rating_count,
                    d.total_earnings, d.is_verified,
-                   od.daily_target, od.confirmed
+                   od.daily_target, od.confirmed,
+                   od.payment_mode, od.driver_commission_pct, od.commission_status
             FROM owner_drivers od
             JOIN fleet_owners fo ON fo.id = od.owner_id
             JOIN users u ON u.id = od.driver_user_id
@@ -2221,7 +2235,7 @@ async def owner_dashboard(user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
         drivers = await conn.fetch(
-            "SELECT od.driver_user_id,u.full_name,u.phone_number,d.qr_code,d.vehicle_plate,d.total_earnings,d.rating_avg,d.rating_count,d.is_verified FROM owner_drivers od JOIN users u ON u.id=od.driver_user_id JOIN drivers d ON d.user_id=od.driver_user_id WHERE od.owner_id=$1",
+            "SELECT od.driver_user_id,od.payment_mode,od.driver_commission_pct,od.commission_status,od.daily_target,u.full_name,u.phone_number,d.qr_code,d.vehicle_plate,d.total_earnings,d.rating_avg,d.rating_count,d.is_verified FROM owner_drivers od JOIN users u ON u.id=od.driver_user_id JOIN drivers d ON d.user_id=od.driver_user_id WHERE od.owner_id=$1",
             owner["id"]
         )
         driver_ids = [d["driver_user_id"] for d in drivers]
@@ -2234,7 +2248,11 @@ async def owner_dashboard(user: dict = Depends(require_owner)):
         "driver_count": len(drivers),
         "drivers": [{"user_id": d["driver_user_id"], "full_name": d["full_name"], "phone_number": d["phone_number"],
                      "qr_code": d["qr_code"], "vehicle_plate": d["vehicle_plate"], "total_earnings": float(d["total_earnings"] or 0),
-                     "rating_avg": float(d["rating_avg"] or 0), "rating_count": d["rating_count"] or 0, "is_verified": d["is_verified"]} for d in drivers]
+                     "rating_avg": float(d["rating_avg"] or 0), "rating_count": d["rating_count"] or 0, "is_verified": d["is_verified"],
+                     "payment_mode": d["payment_mode"] or "daily_target",
+                     "driver_commission_pct": float(d["driver_commission_pct"] or 0),
+                     "commission_status": d["commission_status"],
+                     "daily_target": float(d["daily_target"] or 0)} for d in drivers]
     }
 
 @api.post("/owner/drivers/link")
@@ -2312,6 +2330,20 @@ async def owner_toggle_driver_mode(body: dict, user: dict = Depends(require_owne
 class SetTargetIn(BaseModel):
     daily_target: float
 
+class SetCommissionIn(BaseModel):
+    driver_commission_pct: float = Field(ge=1, le=99, description="% of net earnings (after fuel) that the driver keeps")
+
+class CommissionReviewIn(BaseModel):
+    action: str  # "approve" or "reject"
+    notes: Optional[str] = None
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v):
+        if v not in ("approve", "reject"):
+            raise ValueError("action must be 'approve' or 'reject'")
+        return v
+
 class OwnerBankIn(BaseModel):
     bank_name: str
     account_number: str
@@ -2330,6 +2362,125 @@ async def owner_set_target(driver_user_id: str, body: SetTargetIn, user: dict = 
         await conn.execute("UPDATE owner_drivers SET daily_target=$1 WHERE owner_id=$2 AND driver_user_id=$3",
                            body.daily_target, owner["id"], driver_user_id)
     return {"ok": True, "daily_target": body.daily_target}
+
+@api.post("/owner/drivers/{driver_user_id}/set-commission")
+async def owner_set_commission(driver_user_id: str, body: SetCommissionIn, user: dict = Depends(require_owner)):
+    """Owner proposes a commission % split for a driver. Becomes active only after admin approval."""
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow(
+            "SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
+            owner["id"], driver_user_id
+        )
+        if not link:
+            raise HTTPException(status_code=404, detail="Driver not in fleet")
+        await conn.execute(
+            """UPDATE owner_drivers
+               SET payment_mode='commission_split',
+                   driver_commission_pct=$1,
+                   commission_status='pending',
+                   commission_approved_by=NULL,
+                   commission_approved_at=NULL
+               WHERE owner_id=$2 AND driver_user_id=$3""",
+            body.driver_commission_pct, owner["id"], driver_user_id
+        )
+    return {
+        "ok": True,
+        "driver_commission_pct": body.driver_commission_pct,
+        "owner_commission_pct": round(100 - body.driver_commission_pct, 2),
+        "commission_status": "pending",
+        "message": "Commission split submitted — awaiting admin approval before it takes effect"
+    }
+
+@api.delete("/owner/drivers/{driver_user_id}/commission")
+async def owner_remove_commission(driver_user_id: str, user: dict = Depends(require_owner)):
+    """Revert driver back to daily_target payment mode."""
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow(
+            "SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
+            owner["id"], driver_user_id
+        )
+        if not link:
+            raise HTTPException(status_code=404, detail="Driver not in fleet")
+        await conn.execute(
+            """UPDATE owner_drivers
+               SET payment_mode='daily_target',
+                   driver_commission_pct=NULL,
+                   commission_status=NULL,
+                   commission_approved_by=NULL,
+                   commission_approved_at=NULL
+               WHERE owner_id=$2 AND driver_user_id=$3""",
+            owner["id"], driver_user_id
+        )
+    return {"ok": True, "payment_mode": "daily_target"}
+
+@api.get("/admin/commission-requests")
+async def admin_list_commission_requests(
+    status: Optional[str] = None,
+    admin: dict = Depends(require_admin)
+):
+    """List commission split requests — filter by status: pending / approved / rejected."""
+    async with pool.acquire() as conn:
+        where = "WHERE od.payment_mode='commission_split'"
+        params: list = []
+        if status:
+            where += f" AND od.commission_status=$1"
+            params.append(status)
+        rows = await conn.fetch(f"""
+            SELECT od.id, od.driver_user_id, od.driver_commission_pct,
+                   od.commission_status, od.commission_approved_by, od.commission_approved_at,
+                   od.daily_target, od.payment_mode,
+                   fo.user_id as owner_user_id,
+                   u_owner.full_name as owner_name, u_owner.phone_number as owner_phone,
+                   u_driver.full_name as driver_name, u_driver.phone_number as driver_phone
+            FROM owner_drivers od
+            JOIN fleet_owners fo ON fo.id=od.owner_id
+            JOIN users u_owner ON u_owner.id=fo.user_id
+            JOIN users u_driver ON u_driver.id=od.driver_user_id
+            {where}
+            ORDER BY od.commission_approved_at DESC NULLS FIRST, od.id
+        """, *params)
+    return [dict(r) for r in rows]
+
+@api.patch("/admin/commission-requests/{owner_driver_id}")
+async def admin_review_commission(
+    owner_driver_id: str,
+    body: CommissionReviewIn,
+    admin: dict = Depends(require_admin),
+    request: Request = None
+):
+    """Admin approves or rejects a commission split request."""
+    async with pool.acquire() as conn:
+        link = await conn.fetchrow(
+            "SELECT id, driver_commission_pct, commission_status, payment_mode FROM owner_drivers WHERE id=$1",
+            owner_driver_id
+        )
+        if not link:
+            raise HTTPException(status_code=404, detail="Commission request not found")
+        if link["payment_mode"] != "commission_split":
+            raise HTTPException(status_code=400, detail="This driver link is not in commission_split mode")
+        if link["commission_status"] not in ("pending", "approved", "rejected"):
+            raise HTTPException(status_code=400, detail="No pending commission to review")
+
+        new_status = "approved" if body.action == "approve" else "rejected"
+        await conn.execute(
+            """UPDATE owner_drivers
+               SET commission_status=$1,
+                   commission_approved_by=$2,
+                   commission_approved_at=NOW()
+               WHERE id=$3""",
+            new_status, admin["id"], owner_driver_id
+        )
+        await audit(conn, admin["id"], f"COMMISSION_{new_status.upper()}", owner_driver_id, "owner_drivers",
+                    {"pct": float(link["driver_commission_pct"] or 0), "notes": body.notes},
+                    request.client.host if request else None)
+    return {
+        "ok": True,
+        "commission_status": new_status,
+        "driver_commission_pct": float(link["driver_commission_pct"] or 0),
+        "owner_commission_pct": round(100 - float(link["driver_commission_pct"] or 0), 2)
+    }
 
 @api.post("/owner/drivers/{driver_user_id}/confirm")
 async def owner_confirm_driver(driver_user_id: str, user: dict = Depends(require_owner)):
@@ -2444,7 +2595,8 @@ async def driver_cashup_status(user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         link = await conn.fetchrow("""
             SELECT od.owner_id, od.daily_target, od.confirmed, fo.user_id as owner_user_id,
-                   u.full_name as owner_name, fo.cashup_method
+                   u.full_name as owner_name, fo.cashup_method,
+                   od.payment_mode, od.driver_commission_pct, od.commission_status
             FROM owner_drivers od
             JOIN fleet_owners fo ON fo.id=od.owner_id
             JOIN users u ON u.id=fo.user_id
@@ -2453,22 +2605,46 @@ async def driver_cashup_status(user: dict = Depends(get_current_user)):
         """, user["id"])
         if not link:
             return {"has_owner": False}
-        today_earned = await conn.fetchval(
+        today_earned = float(await conn.fetchval(
             "SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE",
             user["id"]
-        )
-        today_earned = float(today_earned or 0)
-        daily_target = float(link["daily_target"] or 0)
-        cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
-        driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
-        shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
+        ) or 0)
         outstanding = await conn.fetchval(
             "SELECT COALESCE(SUM(amount),0) FROM outstanding_balances WHERE driver_user_id=$1 AND status='outstanding'",
             user["id"]
         )
+
+        payment_mode = link["payment_mode"] or "daily_target"
+        commission_pct = float(link["driver_commission_pct"] or 0)
+        commission_status = link["commission_status"]
+
+        if payment_mode == "commission_split" and commission_status == "approved" and commission_pct > 0:
+            # Fuel paid out to driver today (deducted before split)
+            fuel_today = float(await conn.fetchval(
+                "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE user_id=$1 AND payout_type='pay_fuel' AND DATE(created_at)=CURRENT_DATE AND status IN ('approved','completed','auto_approved')",
+                user["id"]
+            ) or 0)
+            net_after_fuel = max(0, today_earned - fuel_today)
+            driver_share = round(net_after_fuel * (commission_pct / 100), 2)
+            owner_share = round(net_after_fuel - driver_share, 2)
+            cashup_amount = owner_share
+            driver_profit = driver_share
+            shortfall = 0.0
+            daily_target = 0.0
+        else:
+            fuel_today = 0.0
+            daily_target = float(link["daily_target"] or 0)
+            cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
+            driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
+            shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
+
     return {
         "has_owner": True, "owner_user_id": link["owner_user_id"], "owner_name": link["owner_name"],
+        "payment_mode": payment_mode,
+        "commission_pct": commission_pct,
+        "commission_status": commission_status,
         "daily_target": daily_target, "today_earned": today_earned,
+        "fuel_deducted": fuel_today if payment_mode == "commission_split" else 0.0,
         "cashup_amount": cashup_amount, "driver_profit": driver_profit, "shortfall": shortfall,
         "is_confirmed": link["confirmed"] or False, "cashup_method": link["cashup_method"] or "wallet",
         "outstanding_balance": float(outstanding or 0),
@@ -2513,7 +2689,8 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
     async with pool.acquire() as conn:
         link = await conn.fetchrow("""
             SELECT od.owner_id, od.daily_target, od.confirmed, fo.user_id as owner_user_id,
-                   fo.cashup_method, fo.bank_name, fo.account_number, fo.account_name
+                   fo.cashup_method, fo.bank_name, fo.account_number, fo.account_name,
+                   od.payment_mode, od.driver_commission_pct, od.commission_status
             FROM owner_drivers od
             JOIN fleet_owners fo ON fo.id=od.owner_id
             WHERE od.driver_user_id=$1 AND fo.user_id=$2
@@ -2525,18 +2702,41 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
             "SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE",
             user["id"]
         ) or 0)
-        daily_target = float(link["daily_target"] or 0)
 
-        # Use driver-supplied amount if provided, else auto-calculate from today's earnings
-        if body.amount is not None:
-            cashup_amount = body.amount
+        payment_mode = link["payment_mode"] or "daily_target"
+        commission_pct = float(link["driver_commission_pct"] or 0)
+        fuel_deducted = 0.0
+
+        if payment_mode == "commission_split":
+            if link["commission_status"] != "approved":
+                raise HTTPException(status_code=400, detail="Commission split is not yet approved by admin")
+            if commission_pct <= 0:
+                raise HTTPException(status_code=400, detail="Commission percentage not configured")
+            # Deduct fuel paid today before splitting
+            fuel_deducted = float(await conn.fetchval(
+                "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE user_id=$1 AND payout_type='pay_fuel' AND DATE(created_at)=CURRENT_DATE AND status IN ('approved','completed','auto_approved')",
+                user["id"]
+            ) or 0)
+            net_after_fuel = max(0, today_earned - fuel_deducted)
+            if net_after_fuel <= 0:
+                raise HTTPException(status_code=400, detail="No net earnings to split after fuel deduction")
+            driver_share = round(net_after_fuel * (commission_pct / 100), 2)
+            owner_share = round(net_after_fuel - driver_share, 2)
+            cashup_amount = body.amount if body.amount is not None else owner_share
+            driver_profit = round(net_after_fuel - cashup_amount, 2)
+            shortfall = 0.0
+            daily_target = 0.0
         else:
-            if today_earned <= 0:
-                raise HTTPException(status_code=400, detail="No earnings to cash up today")
-            cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
-
-        driver_profit = max(0, today_earned - cashup_amount) if today_earned > cashup_amount else 0
-        shortfall = max(0, daily_target - cashup_amount) if daily_target > 0 else 0
+            daily_target = float(link["daily_target"] or 0)
+            # Use driver-supplied amount if provided, else auto-calculate from today's earnings
+            if body.amount is not None:
+                cashup_amount = body.amount
+            else:
+                if today_earned <= 0:
+                    raise HTTPException(status_code=400, detail="No earnings to cash up today")
+                cashup_amount = min(today_earned, daily_target) if daily_target > 0 else today_earned
+            driver_profit = max(0, today_earned - cashup_amount) if today_earned > cashup_amount else 0
+            shortfall = max(0, daily_target - cashup_amount) if daily_target > 0 else 0
 
         method = body.method
         payout_fee = 3.50 if method == "bank" else 0.0
@@ -2594,10 +2794,12 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
             record_id = str(uuid.uuid4())
             await conn.execute("""
                 INSERT INTO cashup_records (id,owner_user_id,driver_user_id,target_amount,earned_amount,
-                    cashup_amount,shortfall,driver_profit,cashup_method,payout_fee,status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed')
+                    cashup_amount,shortfall,driver_profit,cashup_method,payout_fee,status,
+                    payment_mode,commission_pct,fuel_deducted)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12,$13)
             """, record_id, body.owner_user_id, user["id"], daily_target, today_earned,
-                net_cashup, shortfall, driver_profit, method, payout_fee)
+                net_cashup, shortfall, driver_profit, method, payout_fee,
+                payment_mode, commission_pct if payment_mode == "commission_split" else None, fuel_deducted)
 
             if shortfall > 0:
                 await conn.execute("""
@@ -2606,7 +2808,8 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
                 """, str(uuid.uuid4()), body.owner_user_id, user["id"], shortfall)
 
     return {"ok": True, "cashup_amount": net_cashup, "driver_profit": driver_profit,
-            "shortfall": shortfall, "method": method, "payout_fee": payout_fee}
+            "shortfall": shortfall, "method": method, "payout_fee": payout_fee,
+            "payment_mode": payment_mode, "fuel_deducted": fuel_deducted}
 
 @api.get("/driver/outstanding")
 async def driver_outstanding(user: dict = Depends(get_current_user)):
@@ -3133,11 +3336,24 @@ async def create_new_tables():
                 # owner_drivers cashup columns
                 await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS daily_target NUMERIC(14,2) DEFAULT 0")
                 await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS confirmed BOOLEAN DEFAULT FALSE")
+                # owner_drivers commission split columns
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT 'daily_target'")
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS driver_commission_pct NUMERIC(5,2)")
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS commission_status TEXT")
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS commission_approved_by TEXT")
+                await conn.execute("ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS commission_approved_at TIMESTAMPTZ")
+                # cashup_records commission tracking columns
+                await conn.execute("ALTER TABLE cashup_records ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT 'daily_target'")
+                await conn.execute("ALTER TABLE cashup_records ADD COLUMN IF NOT EXISTS commission_pct NUMERIC(5,2)")
+                await conn.execute("ALTER TABLE cashup_records ADD COLUMN IF NOT EXISTS fuel_deducted NUMERIC(14,2) DEFAULT 0")
                 # fleet_owners cashup method + bank details
                 await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS cashup_method TEXT DEFAULT 'wallet'")
                 await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS bank_name TEXT")
                 await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS account_number TEXT")
                 await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS account_name TEXT")
+                # users registration fields
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS surname TEXT")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS id_number TEXT")
                 # users ban_reason for block tracking
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT")
                 # admin multiple roles (extra_roles stored as comma-separated)
@@ -3854,9 +4070,10 @@ async def fleet_reports(admin: dict = Depends(require_admin)):
 async def fleet_owner_drivers(owner_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT d.user_id, u.full_name, u.phone_number, d.vehicle_plate,
+            """SELECT d.user_id, u.full_name, u.surname, u.phone_number, d.vehicle_plate,
                       d.total_earnings, d.is_verified, d.rating_avg, d.rating_count,
-                      od.daily_target, od.confirmed
+                      od.daily_target, od.confirmed,
+                      od.payment_mode, od.driver_commission_pct, od.commission_status
                FROM owner_drivers od
                JOIN drivers d ON d.user_id=od.driver_user_id
                JOIN users u ON u.id=d.user_id
@@ -3866,11 +4083,15 @@ async def fleet_owner_drivers(owner_id: str, admin: dict = Depends(require_admin
             owner_id
         )
     return [{
-        "user_id": r["user_id"], "full_name": r["full_name"], "phone_number": r["phone_number"],
+        "user_id": r["user_id"], "full_name": r["full_name"], "surname": r["surname"],
+        "phone_number": r["phone_number"],
         "vehicle_plate": r["vehicle_plate"], "total_earnings": float(r["total_earnings"]),
         "is_verified": r["is_verified"], "rating_avg": float(r["rating_avg"]),
         "rating_count": r["rating_count"], "daily_target": float(r["daily_target"] or 0),
-        "confirmed": r["confirmed"]
+        "confirmed": r["confirmed"],
+        "payment_mode": r["payment_mode"] or "daily_target",
+        "driver_commission_pct": float(r["driver_commission_pct"] or 0),
+        "commission_status": r["commission_status"]
     } for r in rows]
 
 # ── 10. ONBOARDING PIPELINE ──────────────────────────────────

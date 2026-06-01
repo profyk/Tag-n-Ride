@@ -14,7 +14,7 @@ import {
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
   Zap, Globe, Star, ToggleRight, Key, MessageCircle,
   ChevronDown, ChevronRight, Search, X,
-  Rocket, Target, Calculator, Database, Repeat2, FolderLock,
+  Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -64,6 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Drivers",             href: "/admin/drivers",      icon: Car,         permission: "manage_drivers" },
       { label: "Fleet Owners",        href: "/admin/owners",       icon: Truck,       permission: "manage_drivers" },
       { label: "Fleet Transfers",     href: "/admin/transfers",    icon: Repeat2,     permission: "manage_drivers" },
+      { label: "Commission Splits",   href: "/admin/commissions",  icon: Percent,     permission: "manage_drivers" },
       { label: "KYC Review",          href: "/admin/kyc",          icon: Fingerprint, permission: "review_kyc" },
       { label: "Passenger Analytics", href: "/admin/passengers",   icon: Users2,      permission: "view_analytics" },
       { label: "Driver Performance",  href: "/admin/performance",  icon: PieChart,    permission: "view_analytics" },

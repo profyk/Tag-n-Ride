@@ -36,10 +36,13 @@ export const api = {
   register: (body: {
     phone_number: string;
     full_name: string;
+    surname: string;
     pin: string;
     role: "passenger" | "driver" | "owner";
     vehicle_plate?: string;
     business_name?: string;
+    id_number?: string;
+    email?: string;
   }) =>
     request<{ token: string; user: User }>("/api/auth/register", {
       method: "POST",
@@ -339,8 +342,30 @@ export const api = {
         rating_avg: number;
         rating_count: number;
         is_verified: boolean;
+        payment_mode: "daily_target" | "commission_split";
+        driver_commission_pct: number;
+        commission_status: string | null;
+        daily_target: number;
       }[];
     }>("/api/owner/dashboard"),
+
+  ownerSetCommission: (driver_user_id: string, driver_commission_pct: number) =>
+    request<{ ok: boolean; commission_status: string; message: string }>(
+      `/api/owner/drivers/${driver_user_id}/set-commission`,
+      { method: "POST", body: JSON.stringify({ driver_commission_pct }) }
+    ),
+
+  ownerRemoveCommission: (driver_user_id: string) =>
+    request<{ ok: boolean; payment_mode: string }>(
+      `/api/owner/drivers/${driver_user_id}/commission`,
+      { method: "DELETE" }
+    ),
+
+  ownerSetTarget: (driver_user_id: string, daily_target: number) =>
+    request<{ ok: boolean; daily_target: number }>(
+      `/api/owner/drivers/${driver_user_id}/set-target`,
+      { method: "POST", body: JSON.stringify({ daily_target }) }
+    ),
 
   ownerLinkDriver: (driver_code: string) =>
     request<{
@@ -461,6 +486,9 @@ export type User = {
   id: string;
   phone_number: string;
   full_name: string;
+  surname?: string;
+  id_number?: string;
+  email?: string;
   role: "passenger" | "driver" | "owner";
   vehicle_plate?: string;
   is_verified?: boolean;
