@@ -557,6 +557,11 @@ export const api = {
     client.get<CommissionRequest[]>("/api/admin/commission-requests", status ? { params: { status } } : undefined),
   reviewCommission: (ownerDriverId: string, action: "approve" | "reject", notes?: string) =>
     client.patch(`/api/admin/commission-requests/${ownerDriverId}`, { action, notes }),
+  overrideCommission: (ownerDriverId: string, driver_commission_pct: number) =>
+    client.post<{ ok: boolean; driver_commission_pct: number; owner_commission_pct: number }>(
+      `/api/admin/commission-requests/${ownerDriverId}/override`,
+      { driver_commission_pct }
+    ),
 
   getPayoutSettings: () =>
     client.get<{
@@ -566,6 +571,7 @@ export const api = {
       pay_fuel_max_per_txn: number;
       pay_fuel_daily_limit: number;
       commission_auto_cashup_time: string | null;
+      default_commission_pct: number;
       updated_at: string | null;
     }>("/api/admin/payout-settings"),
   updatePayoutSettings: (body: Record<string, unknown>) =>
