@@ -400,6 +400,11 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         )}
         <Row icon="receipt-outline" label="Transaction history"
           onPress={() => router.push("/(app)/transactions")} testID="row-history" colors={colors} />
+        {isPassenger && (
+          <Row icon="document-text-outline" label="Monthly Expense Statement"
+            sub="Track your ride spending — small fee applies"
+            onPress={() => router.push("/(app)/statement")} testID="row-statement" colors={colors} />
+        )}
         <Row icon="lock-closed-outline" label="Change PIN"
           onPress={() => setPinModal(true)} testID="row-change-pin" colors={colors} />
 
@@ -548,8 +553,8 @@ const APP_VERSION = "1.0.0";export default function Profile() {
 }
 
 const Row: React.FC<{
-  icon: any; label: string; onPress: () => void; testID?: string; colors: any;
-}> = ({ icon, label, onPress, testID, colors }) => (
+  icon: any; label: string; sub?: string; onPress: () => void; testID?: string; colors: any;
+}> = ({ icon, label, sub, onPress, testID, colors }) => (
   <TouchableOpacity
     style={{
       flexDirection: "row", alignItems: "center",
@@ -559,7 +564,10 @@ const Row: React.FC<{
     }}
     onPress={onPress} testID={testID} activeOpacity={0.7}>
     <Ionicons name={icon} size={20} color={colors.cyan} />
-    <Text style={{ flex: 1, color: colors.text, fontWeight: "600", fontSize: 15 }}>{label}</Text>
+    <View style={{ flex: 1 }}>
+      <Text style={{ color: colors.text, fontWeight: "600", fontSize: 15 }}>{label}</Text>
+      {sub && <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{sub}</Text>}
+    </View>
     <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
   </TouchableOpacity>
 );

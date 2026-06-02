@@ -1,15 +1,18 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { api } from "../../src/api";
 import { colors, formatZAR, radius } from "../../src/theme";
 import { Button } from "../../src/ui";
 
-const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank", "African Bank", "Investec", "Other"];export default function OwnerProfile() {
+const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank", "African Bank", "Investec", "Other"];
+
+export default function OwnerProfile() {
   const { state, signOut } = useAuth();
+  const router = useRouter();
   const [bankData, setBankData] = useState<any>(null);
   const [bankModal, setBankModal] = useState(false);
   const [bankName, setBankName] = useState("");
@@ -22,15 +25,17 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
   const [payOutModal, setPayOutModal] = useState(false);
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
+  const [subscription, setSubscription] = useState<any>(null);
 
   if (state.status !== "authed") return null;
   const user = state.user;
 
   const load = useCallback(async () => {
     try {
-      const [bankRes, walletRes] = await Promise.all([
+      const [bankRes, walletRes, subRes] = await Promise.all([
         api.ownerGetBank(),
         api.ownerWallet().catch(() => null),
+        api.ownerSubscription().catch(() => null),
       ]);
       setBankData(bankRes);
       setCashupMethod(bankRes.cashup_method || "wallet");
@@ -40,6 +45,7 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
         setAccountName(bankRes.bank_account.account_name || "");
       }
       if (walletRes) setWalletBalance(walletRes.balance ?? null);
+      if (subRes) setSubscription(subRes.subscription);
     } catch (e) {}
   }, []);
 
@@ -195,6 +201,57 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
           <Text style={styles.payOutNote}>Add banking details above to enable payouts</Text>
         )}
 
+        {/* Subscription */}
+        <Text style={[styles.section, { marginTop: 24 }]}>SUBSCRIPTION</Text>
+        {subscription ? (
+          <View style={styles.subCard}>
+            <View style={styles.subRow}>
+              <View style={[styles.subIcon, subscription.status === "overdue" && { backgroundColor: colors.redDim, borderColor: colors.red }]}>
+                <Ionicons name="car-sport-outline" size={20} color={subscription.status === "overdue" ? colors.red : colors.cyan} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.subTitle}>
+                  {subscription.taxi_count} Taxi{subscription.taxi_count !== 1 ? "s" : ""} ·{" "}
+                  {subscription.billable_taxis === 0 ? "Free Tier" : formatZAR(subscription.monthly_fee) + "/month"}
+                </Text>
+                <Text style={styles.subSub}>
+                  {subscription.billable_taxis === 0
+                    ? `First ${subscription.free_taxis} taxi free — add more taxis to unlock paid plan`
+                    : `${subscription.free_taxis} free + ${subscription.billable_taxis} paid`}
+                </Text>
+              </View>
+              <View style={[styles.subStatusBadge, subscription.status === "overdue" && { backgroundColor: colors.redDim, borderColor: colors.red }]}>
+                <Text style={[styles.subStatusText, subscription.status === "overdue" && { color: colors.red }]}>
+                  {subscription.status.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+            {subscription.status === "overdue" && (
+              <View style={styles.overdueNote}>
+                <Ionicons name="warning-outline" size={14} color={colors.red} />
+                <Text style={styles.overdueText}>Payment failed — please top up your wallet to clear your subscription</Text>
+              </View>
+            )}
+            {subscription.next_billing_date && (
+              <Text style={styles.subNextBilling}>
+                Next billing: {subscription.next_billing_date}
+              </Text>
+            )}
+          </View>
+        ) : null}
+
+        {/* Statement */}
+        <TouchableOpacity style={styles.stmtBtn} onPress={() => router.push("/owner/statement")}>
+          <View style={[styles.menuIcon, { backgroundColor: "#FFD60A22" }]}>
+            <Ionicons name="document-text-outline" size={20} color="#FFD60A" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>Fleet Statement</Text>
+            <Text style={styles.menuSub}>Download monthly earnings & cashup breakdown</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         <Text style={[styles.section, { marginTop: 24 }]}>ACCOUNT</Text>
         {[
           { icon: "car-sport-outline", color: colors.cyanDim, iconColor: colors.cyan, title: "Driver Mode", sub: "Activate to receive passenger payments" },
@@ -340,6 +397,17 @@ const styles = StyleSheet.create({
   payOutNote: { color: colors.textDim, fontSize: 11, marginBottom: 8, marginTop: -4 },
   balancePill: { alignSelf: "center", backgroundColor: colors.bg, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
   balancePillText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
+  subCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 8 },
+  subRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  subIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan, alignItems: "center", justifyContent: "center" },
+  subTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  subSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  subStatusBadge: { backgroundColor: colors.cyanDim, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.cyan },
+  subStatusText: { color: colors.cyan, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  subNextBilling: { color: colors.textDim, fontSize: 11, marginTop: 8 },
+  overdueNote: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 8, backgroundColor: colors.redDim, borderRadius: radius.sm },
+  overdueText: { color: colors.red, fontSize: 11, flex: 1 },
+  stmtBtn: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 8 },
   signOutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.redDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red, padding: 16, marginTop: 24 },
   signOutText: { color: colors.red, fontWeight: "800", fontSize: 15 },
   version: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 24 },

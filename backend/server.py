@@ -355,6 +355,7 @@ async def lifespan(app: FastAPI):
         await create_new_tables()
         asyncio.create_task(transfer_escalation_loop())
         asyncio.create_task(commission_auto_cashup_loop())
+        asyncio.create_task(subscription_billing_loop())
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
@@ -1619,6 +1620,10 @@ def _fmt_payout_settings(row) -> dict:
         "pay_fuel_daily_limit": float(row["pay_fuel_daily_limit"] or 0),
         "commission_auto_cashup_time": row["commission_auto_cashup_time"],
         "default_commission_pct": float(row["default_commission_pct"] or 50),
+        "subscription_price_per_taxi": float(row["subscription_price_per_taxi"] or 10),
+        "subscription_free_taxis": int(row["subscription_free_taxis"] or 1),
+        "owner_statement_price": float(row["owner_statement_price"] or 10),
+        "passenger_statement_price": float(row["passenger_statement_price"] or 5),
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -1643,6 +1648,10 @@ class PayoutSettingsIn(BaseModel):
     pay_fuel_daily_limit: Optional[float] = Field(default=None, ge=0)
     commission_auto_cashup_time: Optional[str] = None  # "HH:MM" SAST, or "" to disable
     default_commission_pct: Optional[float] = Field(default=None, ge=1, le=99)
+    subscription_price_per_taxi: Optional[float] = Field(default=None, ge=0)
+    subscription_free_taxis: Optional[int] = Field(default=None, ge=0, le=10)
+    owner_statement_price: Optional[float] = Field(default=None, ge=0)
+    passenger_statement_price: Optional[float] = Field(default=None, ge=0)
 
     @field_validator("commission_auto_cashup_time")
     @classmethod
@@ -1668,6 +1677,10 @@ async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(r
     if body.pay_fuel_max_per_txn is not None: updates["pay_fuel_max_per_txn"] = body.pay_fuel_max_per_txn
     if body.pay_fuel_daily_limit is not None: updates["pay_fuel_daily_limit"] = body.pay_fuel_daily_limit
     if body.default_commission_pct is not None: updates["default_commission_pct"] = body.default_commission_pct
+    if body.subscription_price_per_taxi is not None: updates["subscription_price_per_taxi"] = body.subscription_price_per_taxi
+    if body.subscription_free_taxis is not None: updates["subscription_free_taxis"] = body.subscription_free_taxis
+    if body.owner_statement_price is not None: updates["owner_statement_price"] = body.owner_statement_price
+    if body.passenger_statement_price is not None: updates["passenger_statement_price"] = body.passenger_statement_price
     if "commission_auto_cashup_time" in body.model_fields_set:
         updates["commission_auto_cashup_time"] = body.commission_auto_cashup_time
     async with pool.acquire() as conn:
@@ -3571,6 +3584,69 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS default_commission_pct NUMERIC(5,2) DEFAULT 50.00")
                 await conn.execute("ALTER TABLE cashup_records ADD COLUMN IF NOT EXISTS driver_payout_id TEXT")
                 await conn.execute("ALTER TABLE cashup_records ADD COLUMN IF NOT EXISTS driver_payout_status TEXT DEFAULT 'wallet'")
+                # ── Subscription pricing columns ──
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS subscription_price_per_taxi NUMERIC(14,2) DEFAULT 10.00")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS subscription_free_taxis INTEGER DEFAULT 1")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS owner_statement_price NUMERIC(14,2) DEFAULT 10.00")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS passenger_statement_price NUMERIC(14,2) DEFAULT 5.00")
+                # ── Owner subscription tracking ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS owner_subscriptions (
+                        id TEXT PRIMARY KEY,
+                        owner_user_id TEXT UNIQUE NOT NULL REFERENCES users(id),
+                        status TEXT NOT NULL DEFAULT 'active',
+                        taxi_count INTEGER DEFAULT 0,
+                        billable_taxis INTEGER DEFAULT 0,
+                        monthly_fee NUMERIC(14,2) DEFAULT 0,
+                        billing_day INTEGER DEFAULT 1,
+                        next_billing_date DATE,
+                        last_billed_date DATE,
+                        overdue_since DATE,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        CONSTRAINT chk_status CHECK (status IN ('active','overdue','cancelled'))
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_owner_sub_user ON owner_subscriptions(owner_user_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_owner_sub_billing ON owner_subscriptions(next_billing_date) WHERE status != 'cancelled'")
+                # ── Subscription billing records ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS subscription_billing_records (
+                        id TEXT PRIMARY KEY,
+                        owner_user_id TEXT NOT NULL REFERENCES users(id),
+                        period_month INTEGER NOT NULL,
+                        period_year INTEGER NOT NULL,
+                        taxi_count INTEGER NOT NULL DEFAULT 0,
+                        billable_taxis INTEGER NOT NULL DEFAULT 0,
+                        price_per_taxi NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'paid',
+                        transaction_id TEXT,
+                        failure_reason TEXT,
+                        billed_at TIMESTAMPTZ DEFAULT NOW(),
+                        paid_at TIMESTAMPTZ,
+                        CONSTRAINT chk_billing_status CHECK (status IN ('paid','failed','waived','pending'))
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_billing_user ON subscription_billing_records(owner_user_id)")
+                # ── Paid statement requests (owners + passengers) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS statement_requests (
+                        id TEXT PRIMARY KEY,
+                        reference TEXT UNIQUE NOT NULL,
+                        user_id TEXT NOT NULL REFERENCES users(id),
+                        role TEXT NOT NULL,
+                        period_start DATE NOT NULL,
+                        period_end DATE NOT NULL,
+                        amount_paid NUMERIC(14,2) DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'paid',
+                        transaction_id TEXT,
+                        statement_data JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        CONSTRAINT chk_stmt_role CHECK (role IN ('owner','passenger','driver'))
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_stmt_req_user ON statement_requests(user_id)")
                 # withdrawal_requests extra columns
                 await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS payout_type TEXT DEFAULT 'payout'")
                 await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
@@ -9828,6 +9904,584 @@ async def _run_commission_auto_cashup():
             errors += 1
 
     log.info("[AUTO CASHUP] Done — processed=%d skipped=%d errors=%d", processed, skipped, errors)
+
+# ── Subscription helpers ──────────────────────────────────────
+async def _get_or_create_subscription(conn, owner_user_id: str) -> dict:
+    """Return owner's subscription row, creating it if missing."""
+    row = await conn.fetchrow("SELECT * FROM owner_subscriptions WHERE owner_user_id=$1", owner_user_id)
+    if row:
+        return dict(row)
+    taxi_count = await conn.fetchval(
+        """SELECT COUNT(*) FROM owner_drivers od
+           JOIN fleet_owners fo ON fo.id=od.owner_id
+           WHERE fo.user_id=$1""", owner_user_id
+    ) or 0
+    settings = await conn.fetchrow("SELECT subscription_free_taxis, subscription_price_per_taxi FROM payout_settings WHERE id='default'")
+    free_taxis = int(settings["subscription_free_taxis"] or 1) if settings else 1
+    price = float(settings["subscription_price_per_taxi"] or 10) if settings else 10.0
+    billable = max(0, taxi_count - free_taxis)
+    monthly_fee = round(billable * price, 2)
+    from datetime import date
+    today = date.today()
+    next_billing = today.replace(day=1)
+    if today.month == 12:
+        next_billing = next_billing.replace(year=today.year + 1, month=1)
+    else:
+        next_billing = next_billing.replace(month=today.month + 1)
+    sub_id = str(uuid.uuid4())
+    await conn.execute("""
+        INSERT INTO owner_subscriptions
+            (id, owner_user_id, status, taxi_count, billable_taxis, monthly_fee,
+             billing_day, next_billing_date)
+        VALUES ($1,$2,'active',$3,$4,$5,1,$6)
+        ON CONFLICT (owner_user_id) DO NOTHING
+    """, sub_id, owner_user_id, taxi_count, billable, monthly_fee, next_billing)
+    row = await conn.fetchrow("SELECT * FROM owner_subscriptions WHERE owner_user_id=$1", owner_user_id)
+    return dict(row)
+
+async def _refresh_subscription_fee(conn, owner_user_id: str):
+    """Recalculate taxi count and monthly fee after fleet changes."""
+    taxi_count = await conn.fetchval(
+        """SELECT COUNT(*) FROM owner_drivers od
+           JOIN fleet_owners fo ON fo.id=od.owner_id
+           WHERE fo.user_id=$1""", owner_user_id
+    ) or 0
+    settings = await conn.fetchrow("SELECT subscription_free_taxis, subscription_price_per_taxi FROM payout_settings WHERE id='default'")
+    free_taxis = int(settings["subscription_free_taxis"] or 1) if settings else 1
+    price = float(settings["subscription_price_per_taxi"] or 10) if settings else 10.0
+    billable = max(0, taxi_count - free_taxis)
+    monthly_fee = round(billable * price, 2)
+    await conn.execute("""
+        UPDATE owner_subscriptions
+        SET taxi_count=$1, billable_taxis=$2, monthly_fee=$3, updated_at=NOW()
+        WHERE owner_user_id=$4
+    """, taxi_count, billable, monthly_fee, owner_user_id)
+
+# ── Owner subscription endpoints ─────────────────────────────
+
+@api.get("/owner/subscription")
+async def owner_get_subscription(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        await _refresh_subscription_fee(conn, user["id"])
+        sub = await _get_or_create_subscription(conn, user["id"])
+        billing_rows = await conn.fetch(
+            """SELECT * FROM subscription_billing_records
+               WHERE owner_user_id=$1 ORDER BY billed_at DESC LIMIT 6""",
+            user["id"]
+        )
+    return {
+        "subscription": {
+            "status": sub["status"],
+            "taxi_count": sub["taxi_count"],
+            "free_taxis": 1,
+            "billable_taxis": sub["billable_taxis"],
+            "monthly_fee": float(sub["monthly_fee"] or 0),
+            "next_billing_date": sub["next_billing_date"].isoformat() if sub["next_billing_date"] else None,
+            "last_billed_date": sub["last_billed_date"].isoformat() if sub["last_billed_date"] else None,
+            "overdue_since": sub["overdue_since"].isoformat() if sub["overdue_since"] else None,
+        },
+        "billing_history": [
+            {
+                "id": r["id"],
+                "period": f"{r['period_month']:02d}/{r['period_year']}",
+                "taxi_count": r["taxi_count"],
+                "billable_taxis": r["billable_taxis"],
+                "amount": float(r["amount"]),
+                "status": r["status"],
+                "billed_at": iso(r["billed_at"]),
+            }
+            for r in billing_rows
+        ],
+    }
+
+# ── Admin subscription endpoints ─────────────────────────────
+
+@api.get("/admin/subscriptions")
+async def admin_list_subscriptions(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_users"):
+        raise HTTPException(status_code=403)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT os.*, u.full_name, u.email,
+                   fo.business_name,
+                   (SELECT COUNT(*) FROM subscription_billing_records sbr
+                    WHERE sbr.owner_user_id=os.owner_user_id AND sbr.status='paid') as paid_count,
+                   (SELECT COALESCE(SUM(amount),0) FROM subscription_billing_records sbr
+                    WHERE sbr.owner_user_id=os.owner_user_id AND sbr.status='paid') as total_paid
+            FROM owner_subscriptions os
+            JOIN users u ON u.id=os.owner_user_id
+            LEFT JOIN fleet_owners fo ON fo.user_id=os.owner_user_id
+            ORDER BY os.monthly_fee DESC, u.full_name
+        """)
+    return [
+        {
+            "owner_user_id": r["owner_user_id"],
+            "full_name": r["full_name"],
+            "email": r["email"],
+            "business_name": r["business_name"],
+            "status": r["status"],
+            "taxi_count": r["taxi_count"],
+            "billable_taxis": r["billable_taxis"],
+            "monthly_fee": float(r["monthly_fee"] or 0),
+            "next_billing_date": r["next_billing_date"].isoformat() if r["next_billing_date"] else None,
+            "last_billed_date": r["last_billed_date"].isoformat() if r["last_billed_date"] else None,
+            "overdue_since": r["overdue_since"].isoformat() if r["overdue_since"] else None,
+            "paid_count": r["paid_count"],
+            "total_paid": float(r["total_paid"] or 0),
+        }
+        for r in rows
+    ]
+
+@api.get("/admin/subscriptions/revenue")
+async def admin_subscription_revenue(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_financials"):
+        raise HTTPException(status_code=403)
+    async with pool.acquire() as conn:
+        from datetime import date
+        today = date.today()
+        mrr = await conn.fetchval(
+            "SELECT COALESCE(SUM(monthly_fee),0) FROM owner_subscriptions WHERE status='active' AND billable_taxis>0"
+        )
+        total_collected = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM subscription_billing_records WHERE status='paid'"
+        )
+        this_month = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount),0) FROM subscription_billing_records WHERE status='paid' AND period_month=$1 AND period_year=$2",
+            today.month, today.year
+        )
+        overdue_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM owner_subscriptions WHERE status='overdue'"
+        )
+        active_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM owner_subscriptions WHERE status='active'"
+        )
+        free_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM owner_subscriptions WHERE billable_taxis=0"
+        )
+        monthly_breakdown = await conn.fetch(
+            """SELECT period_year, period_month, SUM(amount) as revenue, COUNT(*) as billings
+               FROM subscription_billing_records WHERE status='paid'
+               GROUP BY period_year, period_month ORDER BY period_year DESC, period_month DESC LIMIT 12"""
+        )
+    return {
+        "mrr": float(mrr or 0),
+        "total_collected": float(total_collected or 0),
+        "this_month": float(this_month or 0),
+        "active_subscriptions": active_count,
+        "overdue_subscriptions": overdue_count,
+        "free_subscriptions": free_count,
+        "monthly_breakdown": [
+            {"year": r["period_year"], "month": r["period_month"],
+             "revenue": float(r["revenue"]), "billings": r["billings"]}
+            for r in monthly_breakdown
+        ],
+    }
+
+@api.post("/admin/subscriptions/{owner_user_id}/bill-now")
+async def admin_bill_owner_now(owner_user_id: str, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "edit_system"):
+        raise HTTPException(status_code=403)
+    await _bill_owner(owner_user_id)
+    return {"ok": True, "message": "Billing triggered for owner"}
+
+@api.post("/admin/subscriptions/{owner_user_id}/waive")
+async def admin_waive_subscription(owner_user_id: str, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "edit_system"):
+        raise HTTPException(status_code=403)
+    async with pool.acquire() as conn:
+        sub = await conn.fetchrow("SELECT * FROM owner_subscriptions WHERE owner_user_id=$1", owner_user_id)
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        from datetime import date
+        today = date.today()
+        record_id = str(uuid.uuid4())
+        await conn.execute("""
+            INSERT INTO subscription_billing_records
+                (id, owner_user_id, period_month, period_year, taxi_count,
+                 billable_taxis, price_per_taxi, amount, status, paid_at)
+            VALUES ($1,$2,$3,$4,$5,$6,0,0,'waived',NOW())
+        """, record_id, owner_user_id, today.month, today.year,
+            sub["taxi_count"], sub["billable_taxis"])
+        next_billing = _next_month(today)
+        await conn.execute("""
+            UPDATE owner_subscriptions
+            SET status='active', overdue_since=NULL,
+                last_billed_date=$1, next_billing_date=$2, updated_at=NOW()
+            WHERE owner_user_id=$3
+        """, today, next_billing, owner_user_id)
+        await notify_user(conn, "Subscription Fee Waived",
+            "Your subscription fee for this month has been waived by the Tag-n-Ride team.",
+            "subscription", owner_user_id)
+    return {"ok": True}
+
+# ── Subscription billing engine ───────────────────────────────
+
+def _next_month(d) -> "date":
+    from datetime import date
+    if d.month == 12:
+        return date(d.year + 1, 1, 1)
+    return date(d.year, d.month + 1, 1)
+
+async def _bill_owner(owner_user_id: str):
+    """Deduct subscription fee from one owner's wallet. Creates billing record."""
+    if not pool:
+        return
+    from datetime import date
+    today = date.today()
+    async with pool.acquire() as conn:
+        sub = await conn.fetchrow("SELECT * FROM owner_subscriptions WHERE owner_user_id=$1", owner_user_id)
+        if not sub:
+            return
+        settings = await conn.fetchrow("SELECT subscription_price_per_taxi, subscription_free_taxis FROM payout_settings WHERE id='default'")
+        price = float(settings["subscription_price_per_taxi"] or 10) if settings else 10.0
+        free_taxis = int(settings["subscription_free_taxis"] or 1) if settings else 1
+        taxi_count = await conn.fetchval(
+            """SELECT COUNT(*) FROM owner_drivers od
+               JOIN fleet_owners fo ON fo.id=od.owner_id WHERE fo.user_id=$1""", owner_user_id
+        ) or 0
+        billable = max(0, taxi_count - free_taxis)
+        amount = round(billable * price, 2)
+        record_id = str(uuid.uuid4())
+        if amount <= 0:
+            await conn.execute("""
+                INSERT INTO subscription_billing_records
+                    (id, owner_user_id, period_month, period_year, taxi_count,
+                     billable_taxis, price_per_taxi, amount, status, paid_at)
+                VALUES ($1,$2,$3,$4,$5,0,$6,0,'waived',NOW())
+            """, record_id, owner_user_id, today.month, today.year, taxi_count, price)
+            await conn.execute("""
+                UPDATE owner_subscriptions
+                SET taxi_count=$1, billable_taxis=0, monthly_fee=0,
+                    last_billed_date=$2, next_billing_date=$3, updated_at=NOW()
+                WHERE owner_user_id=$4
+            """, taxi_count, today, _next_month(today), owner_user_id)
+            return
+        wallet = await conn.fetchrow(
+            "SELECT balance, is_frozen FROM wallets WHERE user_id=$1", owner_user_id
+        )
+        if not wallet or wallet["is_frozen"] or float(wallet["balance"]) < amount:
+            await conn.execute("""
+                INSERT INTO subscription_billing_records
+                    (id, owner_user_id, period_month, period_year, taxi_count,
+                     billable_taxis, price_per_taxi, amount, status, failure_reason)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'failed',$9)
+            """, record_id, owner_user_id, today.month, today.year,
+                taxi_count, billable, price, amount,
+                "Insufficient wallet balance" if wallet and not wallet["is_frozen"] else "Wallet frozen or missing")
+            await conn.execute("""
+                UPDATE owner_subscriptions
+                SET status='overdue', overdue_since=COALESCE(overdue_since,$1), updated_at=NOW()
+                WHERE owner_user_id=$2
+            """, today, owner_user_id)
+            await notify_user(conn, "Subscription Payment Failed",
+                f"Your monthly subscription of R{amount:.2f} could not be deducted — insufficient wallet balance. "
+                f"Please top up your wallet to avoid service interruption.",
+                "subscription", owner_user_id)
+            return
+        async with conn.transaction():
+            await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", amount, owner_user_id)
+            txn_id = str(uuid.uuid4())
+            ref = f"SUB-{today.strftime('%Y%m')}-{txn_id[:8].upper()}"
+            await conn.execute("""
+                INSERT INTO transactions
+                    (id, reference, type, status, amount, currency, receiver_id, note)
+                VALUES ($1,$2,'subscription_fee','completed',$3,'ZAR','system',$4)
+            """, txn_id, ref, amount, f"Subscription: {billable} taxi(s) × R{price:.2f}")
+            await conn.execute("""
+                INSERT INTO subscription_billing_records
+                    (id, owner_user_id, period_month, period_year, taxi_count,
+                     billable_taxis, price_per_taxi, amount, status, transaction_id, paid_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'paid',$9,NOW())
+            """, record_id, owner_user_id, today.month, today.year,
+                taxi_count, billable, price, amount, txn_id)
+            await conn.execute("""
+                UPDATE owner_subscriptions
+                SET status='active', overdue_since=NULL, taxi_count=$1, billable_taxis=$2,
+                    monthly_fee=$3, last_billed_date=$4, next_billing_date=$5, updated_at=NOW()
+                WHERE owner_user_id=$6
+            """, taxi_count, billable, amount, today, _next_month(today), owner_user_id)
+        await notify_user(conn, "Subscription Fee Deducted",
+            f"R{amount:.2f} deducted for your {taxi_count} taxi fleet subscription "
+            f"({free_taxis} free + {billable} paid @ R{price:.2f}/month). "
+            f"Next billing: {_next_month(today).strftime('%d %b %Y')}.",
+            "subscription", owner_user_id)
+    log.info("[SUBSCRIPTION] billed owner=%s amount=%.2f taxis=%d", owner_user_id, amount, taxi_count)
+
+# ── Statement endpoints (paid) ────────────────────────────────
+
+class StatementRequestIn(BaseModel):
+    period_start: str  # "YYYY-MM-DD"
+    period_end: str
+
+@api.post("/owner/statement/request")
+async def owner_request_statement(body: StatementRequestIn, user: dict = Depends(require_owner)):
+    """Owner pays for and immediately receives a fleet breakdown statement."""
+    import re
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", body.period_start) or not re.match(r"^\d{4}-\d{2}-\d{2}$", body.period_end):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow("SELECT owner_statement_price FROM payout_settings WHERE id='default'")
+        price = float(settings["owner_statement_price"] or 10) if settings else 10.0
+        wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"])
+        if not wallet or float(wallet["balance"]) < price:
+            raise HTTPException(status_code=400, detail=f"Insufficient balance. Statement costs R{price:.2f}")
+        owner = await conn.fetchrow("SELECT id, business_name FROM fleet_owners WHERE user_id=$1", user["id"])
+        if not owner:
+            raise HTTPException(status_code=404, detail="Fleet owner profile not found")
+        # Build statement data
+        cashups = await conn.fetch("""
+            SELECT cr.*, u.full_name as driver_name
+            FROM cashup_records cr
+            JOIN users u ON u.id=cr.driver_user_id
+            WHERE cr.owner_user_id=$1
+              AND DATE(cr.created_at) BETWEEN $2 AND $3
+            ORDER BY cr.created_at DESC
+        """, user["id"], body.period_start, body.period_end)
+        drivers = await conn.fetch("""
+            SELECT u.full_name, u.id as driver_id, d.vehicle_plate, d.total_earnings,
+                   od.driver_commission_pct, od.payment_mode
+            FROM owner_drivers od
+            JOIN users u ON u.id=od.driver_user_id
+            LEFT JOIN drivers d ON d.user_id=od.driver_user_id
+            JOIN fleet_owners fo ON fo.id=od.owner_id
+            WHERE fo.user_id=$1
+            ORDER BY u.full_name
+        """, user["id"])
+        sub_fees = await conn.fetch("""
+            SELECT * FROM subscription_billing_records
+            WHERE owner_user_id=$1
+              AND DATE(billed_at) BETWEEN $2 AND $3
+              AND status='paid'
+        """, user["id"], body.period_start, body.period_end)
+        payout_rows = await conn.fetch("""
+            SELECT wr.amount, wr.status, wr.created_at, wr.bank_name
+            FROM withdrawal_requests wr
+            WHERE wr.user_id=$1
+              AND DATE(wr.created_at) BETWEEN $2 AND $3
+            ORDER BY wr.created_at DESC
+        """, user["id"], body.period_start, body.period_end)
+        owner_txns = await conn.fetch("""
+            SELECT t.amount, t.type, t.reference, t.note, t.created_at
+            FROM transactions t
+            WHERE (t.sender_id=$1 OR t.receiver_id=$1)
+              AND DATE(t.created_at) BETWEEN $2 AND $3
+              AND t.status='completed'
+            ORDER BY t.created_at DESC LIMIT 200
+        """, user["id"], body.period_start, body.period_end)
+
+        total_cashup_received = sum(float(r["cashup_amount"]) for r in cashups)
+        total_fuel_deducted   = sum(float(r["fuel_deducted"] or 0) for r in cashups)
+        total_driver_profit   = sum(float(r["driver_profit"] or 0) for r in cashups)
+        total_sub_fees        = sum(float(r["amount"]) for r in sub_fees)
+        total_payouts         = sum(float(r["amount"]) for r in payout_rows if r["status"] in ("completed","paid","approved"))
+
+        stmt_data = {
+            "type": "owner_fleet_statement",
+            "owner_name": user["full_name"],
+            "business_name": owner["business_name"] or "",
+            "period_start": body.period_start,
+            "period_end": body.period_end,
+            "generated_at": iso(None) or "",
+            "summary": {
+                "total_cashup_received": total_cashup_received,
+                "total_fuel_deducted": total_fuel_deducted,
+                "total_driver_profit": total_driver_profit,
+                "subscription_fees_paid": total_sub_fees,
+                "total_payouts": total_payouts,
+                "net_earnings": round(total_cashup_received - total_sub_fees - total_payouts, 2),
+            },
+            "drivers": [
+                {
+                    "name": d["full_name"],
+                    "vehicle_plate": d["vehicle_plate"] or "",
+                    "payment_mode": d["payment_mode"] or "daily_target",
+                    "commission_pct": float(d["driver_commission_pct"] or 0),
+                    "total_earnings": float(d["total_earnings"] or 0),
+                }
+                for d in drivers
+            ],
+            "cashup_records": [
+                {
+                    "driver": r["driver_name"],
+                    "date": iso(r["created_at"]),
+                    "earned": float(r["earned_amount"]),
+                    "fuel_deducted": float(r["fuel_deducted"] or 0),
+                    "owner_received": float(r["cashup_amount"]),
+                    "driver_profit": float(r["driver_profit"]),
+                    "mode": r["payment_mode"] or "daily_target",
+                }
+                for r in cashups
+            ],
+            "subscription_fees": [
+                {
+                    "period": f"{r['period_month']:02d}/{r['period_year']}",
+                    "taxis": r["taxi_count"],
+                    "amount": float(r["amount"]),
+                }
+                for r in sub_fees
+            ],
+            "payouts": [
+                {
+                    "amount": float(r["amount"]),
+                    "bank": r["bank_name"],
+                    "status": r["status"],
+                    "date": iso(r["created_at"]),
+                }
+                for r in payout_rows
+            ],
+            "transactions": [
+                {
+                    "reference": r["reference"],
+                    "type": r["type"],
+                    "amount": float(r["amount"]),
+                    "note": r["note"] or "",
+                    "date": iso(r["created_at"]),
+                }
+                for r in owner_txns
+            ],
+        }
+        # Charge wallet and save
+        stmt_id = str(uuid.uuid4())
+        ref = f"STMT-{stmt_id[:8].upper()}"
+        txn_id = str(uuid.uuid4())
+        async with conn.transaction():
+            await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", price, user["id"])
+            await conn.execute("""
+                INSERT INTO transactions (id, reference, type, status, amount, currency, sender_id, note)
+                VALUES ($1,$2,'statement_fee','completed',$3,'ZAR',$4,'Owner fleet statement download')
+            """, txn_id, f"STMTFEE-{ref}", price, user["id"])
+            import json as _json
+            await conn.execute("""
+                INSERT INTO statement_requests
+                    (id, reference, user_id, role, period_start, period_end,
+                     amount_paid, status, transaction_id, statement_data)
+                VALUES ($1,$2,$3,'owner',$4,$5,$6,'paid',$7,$8)
+            """, stmt_id, ref, user["id"], body.period_start, body.period_end,
+                price, txn_id, _json.dumps(stmt_data))
+    return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
+
+@api.get("/owner/statement/{statement_id}")
+async def owner_get_statement(statement_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM statement_requests WHERE id=$1 AND user_id=$2 AND role='owner'",
+            statement_id, user["id"]
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    return {"statement_id": row["id"], "reference": row["reference"],
+            "data": row["statement_data"], "created_at": iso(row["created_at"])}
+
+@api.post("/passenger/statement/request")
+async def passenger_request_statement(body: StatementRequestIn, user: dict = Depends(require_auth)):
+    if user["role"] not in ("passenger", "driver"):
+        raise HTTPException(status_code=403, detail="Not a passenger account")
+    import re
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", body.period_start) or not re.match(r"^\d{4}-\d{2}-\d{2}$", body.period_end):
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow("SELECT passenger_statement_price FROM payout_settings WHERE id='default'")
+        price = float(settings["passenger_statement_price"] or 5) if settings else 5.0
+        wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"])
+        if not wallet or float(wallet["balance"]) < price:
+            raise HTTPException(status_code=400, detail=f"Insufficient balance. Statement costs R{price:.2f}")
+        # Build passenger statement
+        trips = await conn.fetch("""
+            SELECT t.reference, t.amount, t.driver_net, t.platform_fee,
+                   t.created_at, u.full_name as driver_name
+            FROM transactions t
+            LEFT JOIN users u ON u.id=t.receiver_id
+            WHERE t.sender_id=$1 AND t.type='payment' AND t.status='completed'
+              AND DATE(t.created_at) BETWEEN $2 AND $3
+            ORDER BY t.created_at DESC
+        """, user["id"], body.period_start, body.period_end)
+        topups = await conn.fetch("""
+            SELECT t.reference, t.amount, t.created_at
+            FROM transactions t
+            WHERE t.receiver_id=$1 AND t.type='topup' AND t.status='completed'
+              AND DATE(t.created_at) BETWEEN $2 AND $3
+            ORDER BY t.created_at DESC
+        """, user["id"], body.period_start, body.period_end)
+        total_spent  = sum(float(r["amount"]) for r in trips)
+        total_topped = sum(float(r["amount"]) for r in topups)
+        stmt_data = {
+            "type": "passenger_expense_statement",
+            "passenger_name": user["full_name"],
+            "period_start": body.period_start,
+            "period_end": body.period_end,
+            "summary": {
+                "total_trips": len(trips),
+                "total_spent": total_spent,
+                "total_topups": total_topped,
+                "average_trip": round(total_spent / len(trips), 2) if trips else 0,
+            },
+            "trips": [
+                {
+                    "reference": r["reference"],
+                    "amount": float(r["amount"]),
+                    "driver": r["driver_name"] or "Unknown",
+                    "date": iso(r["created_at"]),
+                }
+                for r in trips
+            ],
+            "topups": [
+                {"reference": r["reference"], "amount": float(r["amount"]), "date": iso(r["created_at"])}
+                for r in topups
+            ],
+        }
+        stmt_id = str(uuid.uuid4())
+        ref = f"PSTMT-{stmt_id[:8].upper()}"
+        txn_id = str(uuid.uuid4())
+        import json as _json
+        async with conn.transaction():
+            await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", price, user["id"])
+            await conn.execute("""
+                INSERT INTO transactions (id, reference, type, status, amount, currency, sender_id, note)
+                VALUES ($1,$2,'statement_fee','completed',$3,'ZAR',$4,'Passenger expense statement')
+            """, txn_id, f"STMTFEE-{ref}", price, user["id"])
+            await conn.execute("""
+                INSERT INTO statement_requests
+                    (id, reference, user_id, role, period_start, period_end,
+                     amount_paid, status, transaction_id, statement_data)
+                VALUES ($1,$2,$3,'passenger',$4,$5,$6,'paid',$7,$8)
+            """, stmt_id, ref, user["id"], body.period_start, body.period_end,
+                price, txn_id, _json.dumps(stmt_data))
+    return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
+
+@api.get("/passenger/statement/{statement_id}")
+async def passenger_get_statement(statement_id: str, user: dict = Depends(require_auth)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM statement_requests WHERE id=$1 AND user_id=$2 AND role='passenger'",
+            statement_id, user["id"]
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    return {"statement_id": row["id"], "reference": row["reference"],
+            "data": row["statement_data"], "created_at": iso(row["created_at"])}
+
+async def subscription_billing_loop():
+    await asyncio.sleep(45)
+    while True:
+        try:
+            if pool:
+                from datetime import date
+                today = date.today()
+                async with pool.acquire() as conn:
+                    due = await conn.fetch(
+                        """SELECT owner_user_id FROM owner_subscriptions
+                           WHERE status != 'cancelled'
+                             AND (next_billing_date IS NULL OR next_billing_date <= $1)""",
+                        today
+                    )
+                for row in due:
+                    try:
+                        await _bill_owner(row["owner_user_id"])
+                    except Exception as e:
+                        log.error("[SUBSCRIPTION LOOP] owner=%s err=%s", row["owner_user_id"], e)
+        except Exception as e:
+            log.error("[SUBSCRIPTION LOOP] %s", e)
+        await asyncio.sleep(3600)  # check every hour
 
 async def commission_auto_cashup_loop():
     await asyncio.sleep(30)  # brief startup delay

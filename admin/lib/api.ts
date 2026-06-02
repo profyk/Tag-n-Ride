@@ -572,12 +572,25 @@ export const api = {
       pay_fuel_daily_limit: number;
       commission_auto_cashup_time: string | null;
       default_commission_pct: number;
+      subscription_price_per_taxi: number;
+      subscription_free_taxis: number;
+      owner_statement_price: number;
+      passenger_statement_price: number;
       updated_at: string | null;
     }>("/api/admin/payout-settings"),
   updatePayoutSettings: (body: Record<string, unknown>) =>
     client.patch("/api/admin/payout-settings", body),
   triggerCommissionCashup: () =>
     client.post<{ ok: boolean; message: string }>("/api/admin/commission-cashup/run-now"),
+
+  subscriptions: () =>
+    client.get<any[]>("/api/admin/subscriptions"),
+  subscriptionRevenue: () =>
+    client.get<any>("/api/admin/subscriptions/revenue"),
+  billOwnerNow: (ownerUserId: string) =>
+    client.post(`/api/admin/subscriptions/${ownerUserId}/bill-now`),
+  waiveSubscription: (ownerUserId: string) =>
+    client.post(`/api/admin/subscriptions/${ownerUserId}/waive`),
 
   transactions: (params?: {
     type?: string;

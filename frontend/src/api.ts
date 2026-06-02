@@ -467,6 +467,41 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  // ── Subscriptions ──
+  ownerSubscription: () =>
+    request<{
+      subscription: {
+        status: string; taxi_count: number; free_taxis: number;
+        billable_taxis: number; monthly_fee: number;
+        next_billing_date: string | null; last_billed_date: string | null;
+        overdue_since: string | null;
+      };
+      billing_history: {
+        id: string; period: string; taxi_count: number;
+        billable_taxis: number; amount: number; status: string; billed_at: string;
+      }[];
+    }>("/api/owner/subscription"),
+
+  // ── Statements ──
+  requestOwnerStatement: (period_start: string, period_end: string) =>
+    request<{ statement_id: string; reference: string; amount_charged: number; data: any }>(
+      "/api/owner/statement/request",
+      { method: "POST", body: JSON.stringify({ period_start, period_end }) }
+    ),
+  getOwnerStatement: (id: string) =>
+    request<{ statement_id: string; reference: string; data: any; created_at: string }>(
+      `/api/owner/statement/${id}`
+    ),
+  requestPassengerStatement: (period_start: string, period_end: string) =>
+    request<{ statement_id: string; reference: string; amount_charged: number; data: any }>(
+      "/api/passenger/statement/request",
+      { method: "POST", body: JSON.stringify({ period_start, period_end }) }
+    ),
+  getPassengerStatement: (id: string) =>
+    request<{ statement_id: string; reference: string; data: any; created_at: string }>(
+      `/api/passenger/statement/${id}`
+    ),
+
   // ── Admin: Payout settings ──
   getPayoutSettings: () =>
     request<PayoutSettings>("/api/admin/payout-settings"),
@@ -486,6 +521,10 @@ export type PayoutSettings = {
   pay_fuel_max_per_txn: number;
   pay_fuel_daily_limit: number;
   commission_auto_cashup_time: string | null;
+  subscription_price_per_taxi: number;
+  subscription_free_taxis: number;
+  owner_statement_price: number;
+  passenger_statement_price: number;
   updated_at: string | null;
 };
 
