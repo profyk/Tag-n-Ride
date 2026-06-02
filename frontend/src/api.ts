@@ -479,6 +479,7 @@ export type PayoutSettings = {
   pay_fuel_enabled: boolean;
   pay_fuel_max_per_txn: number;
   pay_fuel_daily_limit: number;
+  commission_auto_cashup_time: string | null;
   updated_at: string | null;
 };
 

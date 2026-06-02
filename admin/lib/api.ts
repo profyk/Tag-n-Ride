@@ -558,6 +558,21 @@ export const api = {
   reviewCommission: (ownerDriverId: string, action: "approve" | "reject", notes?: string) =>
     client.patch(`/api/admin/commission-requests/${ownerDriverId}`, { action, notes }),
 
+  getPayoutSettings: () =>
+    client.get<{
+      require_approval: boolean;
+      auto_approve_limit: number;
+      pay_fuel_enabled: boolean;
+      pay_fuel_max_per_txn: number;
+      pay_fuel_daily_limit: number;
+      commission_auto_cashup_time: string | null;
+      updated_at: string | null;
+    }>("/api/admin/payout-settings"),
+  updatePayoutSettings: (body: Record<string, unknown>) =>
+    client.patch("/api/admin/payout-settings", body),
+  triggerCommissionCashup: () =>
+    client.post<{ ok: boolean; message: string }>("/api/admin/commission-cashup/run-now"),
+
   transactions: (params?: {
     type?: string;
     from_date?: string;

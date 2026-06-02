@@ -354,6 +354,7 @@ async def lifespan(app: FastAPI):
         print("DB pool created, tables ready")
         await create_new_tables()
         asyncio.create_task(transfer_escalation_loop())
+        asyncio.create_task(commission_auto_cashup_loop())
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
@@ -1617,7 +1618,8 @@ async def get_payout_settings(admin: dict = Depends(require_admin)):
         return {
             "require_approval": True, "auto_approve_limit": 0.0,
             "pay_fuel_enabled": True, "pay_fuel_max_per_txn": 500.0,
-            "pay_fuel_daily_limit": 1000.0, "updated_at": None,
+            "pay_fuel_daily_limit": 1000.0,
+            "commission_auto_cashup_time": None, "updated_at": None,
         }
     return {
         "require_approval": row["require_approval"],
@@ -1625,6 +1627,7 @@ async def get_payout_settings(admin: dict = Depends(require_admin)):
         "pay_fuel_enabled": row["pay_fuel_enabled"],
         "pay_fuel_max_per_txn": float(row["pay_fuel_max_per_txn"] or 0),
         "pay_fuel_daily_limit": float(row["pay_fuel_daily_limit"] or 0),
+        "commission_auto_cashup_time": row["commission_auto_cashup_time"],
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -1634,6 +1637,20 @@ class PayoutSettingsIn(BaseModel):
     pay_fuel_enabled: Optional[bool] = None
     pay_fuel_max_per_txn: Optional[float] = Field(default=None, ge=0)
     pay_fuel_daily_limit: Optional[float] = Field(default=None, ge=0)
+    commission_auto_cashup_time: Optional[str] = None  # "HH:MM" SAST, or "" to disable
+
+    @field_validator("commission_auto_cashup_time")
+    @classmethod
+    def validate_cashup_time(cls, v):
+        if v is None or v == "":
+            return None
+        import re
+        if not re.match(r"^\d{2}:\d{2}$", v):
+            raise ValueError("Time must be HH:MM format (24h, SAST)")
+        h, m = int(v[:2]), int(v[3:])
+        if h > 23 or m > 59:
+            raise ValueError("Invalid time")
+        return v
 
 @api.patch("/admin/payout-settings")
 async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(require_admin)):
@@ -1645,6 +1662,8 @@ async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(r
     if body.pay_fuel_enabled is not None: updates["pay_fuel_enabled"] = body.pay_fuel_enabled
     if body.pay_fuel_max_per_txn is not None: updates["pay_fuel_max_per_txn"] = body.pay_fuel_max_per_txn
     if body.pay_fuel_daily_limit is not None: updates["pay_fuel_daily_limit"] = body.pay_fuel_daily_limit
+    if "commission_auto_cashup_time" in body.model_fields_set:
+        updates["commission_auto_cashup_time"] = body.commission_auto_cashup_time
     async with pool.acquire() as conn:
         for col, val in updates.items():
             await conn.execute(
@@ -1658,6 +1677,7 @@ async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(r
         "pay_fuel_enabled": row["pay_fuel_enabled"],
         "pay_fuel_max_per_txn": float(row["pay_fuel_max_per_txn"] or 0),
         "pay_fuel_daily_limit": float(row["pay_fuel_daily_limit"] or 0),
+        "commission_auto_cashup_time": row["commission_auto_cashup_time"],
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -2443,6 +2463,15 @@ async def admin_list_commission_requests(
         """, *params)
     return [dict(r) for r in rows]
 
+@api.post("/admin/commission-cashup/run-now")
+async def admin_trigger_commission_cashup(admin: dict = Depends(require_admin)):
+    """Manually trigger commission auto-cashup for all approved drivers right now."""
+    if not has_permission(admin, "edit_system"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    asyncio.create_task(_run_commission_auto_cashup())
+    log.info("[MANUAL TRIGGER] admin=%s triggered commission auto-cashup", admin["id"])
+    return {"ok": True, "message": "Commission auto-cashup triggered — results will appear in cashup history"}
+
 @api.patch("/admin/commission-requests/{owner_driver_id}")
 async def admin_review_commission(
     owner_driver_id: str,
@@ -2712,6 +2741,8 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
                 raise HTTPException(status_code=400, detail="Commission split is not yet approved by admin")
             if commission_pct <= 0:
                 raise HTTPException(status_code=400, detail="Commission percentage not configured")
+            # Commission mode is wallet-only — override any supplied method
+            body = DriverCashupV2In(owner_user_id=body.owner_user_id, method="wallet", amount=body.amount)
             # Deduct fuel paid today before splitting
             fuel_deducted = float(await conn.fetchval(
                 "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE user_id=$1 AND payout_type='pay_fuel' AND DATE(created_at)=CURRENT_DATE AND status IN ('approved','completed','auto_approved')",
@@ -3498,6 +3529,8 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS pay_fuel_enabled BOOLEAN DEFAULT TRUE")
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS pay_fuel_max_per_txn NUMERIC(14,2) DEFAULT 500")
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS pay_fuel_daily_limit NUMERIC(14,2) DEFAULT 1000")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS commission_auto_cashup_time TEXT")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS commission_auto_cashup_last_run DATE")
                 # withdrawal_requests extra columns
                 await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS payout_type TEXT DEFAULT 'payout'")
                 await conn.execute("ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
@@ -9461,6 +9494,113 @@ async def admin_transfer_reject(transfer_id: str, body: AdminTransferOverrideIn,
                     {"note": body.note}, "", True)
     return {"ok": True}
 
+
+# ── Commission auto-cashup loop ───────────────────────────────
+SAST = timezone(timedelta(hours=2))
+
+async def _run_commission_auto_cashup():
+    """Execute wallet→wallet cashup for all drivers in approved commission_split mode."""
+    if not pool:
+        return
+    log.info("[AUTO CASHUP] Starting commission auto-cashup run")
+    async with pool.acquire() as conn:
+        links = await conn.fetch("""
+            SELECT od.id as link_id,
+                   od.driver_user_id, od.driver_commission_pct,
+                   fo.user_id as owner_user_id
+            FROM owner_drivers od
+            JOIN fleet_owners fo ON fo.id = od.owner_id
+            WHERE od.payment_mode = 'commission_split'
+              AND od.commission_status = 'approved'
+              AND od.driver_commission_pct > 0
+        """)
+
+    processed = skipped = errors = 0
+    for link in links:
+        driver_id = link["driver_user_id"]
+        owner_id = link["owner_user_id"]
+        commission_pct = float(link["driver_commission_pct"])
+        try:
+            async with pool.acquire() as conn:
+                today_earned = float(await conn.fetchval(
+                    "SELECT COALESCE(SUM(driver_net),0) FROM transactions WHERE receiver_id=$1 AND type='payment' AND status='completed' AND DATE(created_at AT TIME ZONE 'Africa/Johannesburg')=CURRENT_DATE AT TIME ZONE 'Africa/Johannesburg'",
+                    driver_id
+                ) or 0)
+                if today_earned <= 0:
+                    skipped += 1
+                    continue
+
+                fuel_deducted = float(await conn.fetchval(
+                    "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE user_id=$1 AND payout_type='pay_fuel' AND DATE(created_at AT TIME ZONE 'Africa/Johannesburg')=CURRENT_DATE AT TIME ZONE 'Africa/Johannesburg' AND status IN ('approved','completed','auto_approved')",
+                    driver_id
+                ) or 0)
+
+                net_after_fuel = max(0, today_earned - fuel_deducted)
+                if net_after_fuel <= 0:
+                    skipped += 1
+                    continue
+
+                driver_share = round(net_after_fuel * (commission_pct / 100), 2)
+                owner_share = round(net_after_fuel - driver_share, 2)
+
+                if owner_share <= 0:
+                    skipped += 1
+                    continue
+
+                async with conn.transaction():
+                    wallet = await conn.fetchrow(
+                        "SELECT balance, is_frozen FROM wallets WHERE user_id=$1 FOR UPDATE", driver_id
+                    )
+                    if not wallet or wallet["is_frozen"] or float(wallet["balance"]) < owner_share:
+                        skipped += 1
+                        continue
+
+                    await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", owner_share, driver_id)
+                    await conn.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2", owner_share, owner_id)
+
+                    record_id = str(uuid.uuid4())
+                    await conn.execute("""
+                        INSERT INTO cashup_records
+                            (id, owner_user_id, driver_user_id, target_amount, earned_amount,
+                             cashup_amount, shortfall, driver_profit, cashup_method, payout_fee, status,
+                             payment_mode, commission_pct, fuel_deducted)
+                        VALUES ($1,$2,$3,0,$4,$5,0,$6,'wallet',0,'completed','commission_split',$7,$8)
+                    """, record_id, owner_id, driver_id, today_earned,
+                        owner_share, driver_share, commission_pct, fuel_deducted)
+
+                processed += 1
+                log.info("[AUTO CASHUP] driver=%s owner=%s net=%.2f driver_share=%.2f owner_share=%.2f", driver_id, owner_id, net_after_fuel, driver_share, owner_share)
+
+        except Exception as e:
+            log.error("[AUTO CASHUP] Error for driver=%s: %s", driver_id, e)
+            errors += 1
+
+    log.info("[AUTO CASHUP] Done — processed=%d skipped=%d errors=%d", processed, skipped, errors)
+
+async def commission_auto_cashup_loop():
+    await asyncio.sleep(30)  # brief startup delay
+    while True:
+        try:
+            if pool:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow("SELECT commission_auto_cashup_time, commission_auto_cashup_last_run FROM payout_settings WHERE id='default'")
+                if row and row["commission_auto_cashup_time"]:
+                    target_time = row["commission_auto_cashup_time"]  # "HH:MM"
+                    last_run = row["commission_auto_cashup_last_run"]
+                    now_sast = datetime.now(SAST)
+                    today_sast = now_sast.date()
+                    current_hhmm = now_sast.strftime("%H:%M")
+                    # Fire if current time matches and not already run today
+                    if current_hhmm == target_time and (last_run is None or last_run < today_sast):
+                        async with pool.acquire() as conn:
+                            await conn.execute(
+                                "UPDATE payout_settings SET commission_auto_cashup_last_run=$1 WHERE id='default'",
+                                today_sast
+                            )
+                        await _run_commission_auto_cashup()
+        except Exception as e:
+            log.error("[COMMISSION CASHUP LOOP] %s", e)
+        await asyncio.sleep(60)  # check every minute
 
 # ── Background escalation ─────────────────────────────────────
 async def transfer_escalation_loop():
