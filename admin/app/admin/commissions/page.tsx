@@ -8,7 +8,7 @@ import toast from "react-hot-toast";
 import { formatDate } from "@/lib/utils";
 import { CheckCircle, XCircle, Clock, Play, Save } from "lucide-react";
 
-const STATUS_COLORS: Record<string, "green" | "red" | "yellow" | "gray"> = {
+const STATUS_TONES: Record<string, "green" | "red" | "yellow" | "muted"> = {
   approved: "green",
   rejected: "red",
   pending: "yellow",
@@ -216,9 +216,7 @@ export default function CommissionsPage() {
                     <div className="text-xs text-gray-400">owner receives</div>
                   </Td>
                   <Td>
-                    <Badge color={STATUS_COLORS[r.commission_status] || "gray"}>
-                      {r.commission_status}
-                    </Badge>
+                    <Badge label={r.commission_status} tone={STATUS_TONES[r.commission_status] || "muted"} />
                   </Td>
                   <Td>{r.commission_approved_at ? formatDate(r.commission_approved_at) : "—"}</Td>
                   <Td>
