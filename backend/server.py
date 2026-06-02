@@ -3601,6 +3601,94 @@ async def create_new_tables():
                         UNIQUE(folder_id, file_name)
                     )
                 """)
+
+                # ── Allow owners to register without a phone number ──
+                await conn.execute("ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL")
+
+                # ── Track owner's "do you also drive?" choice at signup ──
+                await conn.execute("ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS registered_as_driver BOOLEAN DEFAULT FALSE")
+
+                # ── T&C acceptance records (legal compliance) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tc_acceptances (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        tc_version TEXT NOT NULL DEFAULT '1.0',
+                        privacy_version TEXT NOT NULL DEFAULT '1.0',
+                        accepted_at TIMESTAMPTZ DEFAULT NOW(),
+                        platform TEXT,
+                        app_version TEXT,
+                        ip_address TEXT,
+                        device_info TEXT
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_tc_acceptances_user ON tc_acceptances(user_id)")
+
+                # ── User login sessions (app users, mirrors admin_sessions) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_sessions (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        token_hash TEXT NOT NULL,
+                        platform TEXT,
+                        device_name TEXT,
+                        device_id TEXT,
+                        ip_address TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        last_used_at TIMESTAMPTZ DEFAULT NOW(),
+                        expires_at TIMESTAMPTZ,
+                        revoked BOOLEAN DEFAULT FALSE,
+                        revoked_at TIMESTAMPTZ,
+                        revoke_reason TEXT
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash)")
+
+                # ── Registered devices (for lost-device suspend feature) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_devices (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        device_id TEXT NOT NULL,
+                        device_name TEXT,
+                        platform TEXT,
+                        push_token TEXT,
+                        registered_at TIMESTAMPTZ DEFAULT NOW(),
+                        last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+                        is_active BOOLEAN DEFAULT TRUE,
+                        deactivated_at TIMESTAMPTZ,
+                        deactivated_reason TEXT,
+                        UNIQUE(user_id, device_id)
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices(user_id)")
+
+                # ── Support tickets (WhatsApp / email / call / in-app) ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS support_tickets (
+                        id TEXT PRIMARY KEY,
+                        ticket_number TEXT UNIQUE NOT NULL,
+                        user_id TEXT REFERENCES users(id),
+                        channel TEXT NOT NULL DEFAULT 'app',
+                        subject TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'open',
+                        priority TEXT NOT NULL DEFAULT 'normal',
+                        assigned_to TEXT REFERENCES users(id),
+                        resolved_by TEXT REFERENCES users(id),
+                        resolution_note TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW(),
+                        resolved_at TIMESTAMPTZ,
+                        CONSTRAINT chk_channel CHECK (channel IN ('whatsapp','email','call','app')),
+                        CONSTRAINT chk_status CHECK (status IN ('open','in_progress','waiting_user','resolved','closed')),
+                        CONSTRAINT chk_priority CHECK (priority IN ('low','normal','high','urgent'))
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status)")
+
         except Exception as e:
             print("New tables error:", e)
 
