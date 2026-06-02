@@ -10449,7 +10449,7 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
     return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
 
 @api.get("/passenger/statement/{statement_id}")
-async def passenger_get_statement(statement_id: str, user: dict = Depends(require_auth)):
+async def passenger_get_statement(statement_id: str, user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM statement_requests WHERE id=$1 AND user_id=$2 AND role='passenger'",
