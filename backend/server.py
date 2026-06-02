@@ -10373,7 +10373,7 @@ async def owner_get_statement(statement_id: str, user: dict = Depends(require_ow
             "data": row["statement_data"], "created_at": iso(row["created_at"])}
 
 @api.post("/passenger/statement/request")
-async def passenger_request_statement(body: StatementRequestIn, user: dict = Depends(require_auth)):
+async def passenger_request_statement(body: StatementRequestIn, user: dict = Depends(get_current_user)):
     if user["role"] not in ("passenger", "driver"):
         raise HTTPException(status_code=403, detail="Not a passenger account")
     import re
