@@ -23,6 +23,7 @@ function RootLayoutInner() {
             <Stack.Screen name="index" />
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(app)" />
+            <Stack.Screen name="owner" />
             <Stack.Screen name="topup" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
             <Stack.Screen name="withdraw" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
             <Stack.Screen name="pay" options={{ presentation: "modal", animation: "slide_from_bottom" }} />

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity, Image } from "react-native";
 import { Link, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
@@ -88,6 +89,15 @@ export default function Login() {
             </Link>
           </View>
 
+          <TouchableOpacity
+            onPress={() => router.push("/(auth)/owner-login")}
+            style={styles.ownerBtn}
+            testID="login-owner-btn">
+            <Ionicons name="business-outline" size={16} color={colors.cyan} />
+            <Text style={styles.ownerBtnText}>Fleet Owner Login</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.cyan} />
+          </TouchableOpacity>
+
           <PoweredBy testID="login-powered" />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -106,4 +116,11 @@ const makeStyles = (colors: any) => StyleSheet.create({
   footer: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
   footerText: { color: colors.textMuted },
   link: { color: colors.cyan, fontWeight: "700" },
+  ownerBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, marginTop: 12, paddingVertical: 12,
+    borderWidth: 1, borderColor: colors.cyan,
+    borderRadius: 10, backgroundColor: colors.cyanDim,
+  },
+  ownerBtnText: { color: colors.cyan, fontWeight: "700", fontSize: 14 },
 });

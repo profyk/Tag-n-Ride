@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, StyleSheet, KeyboardAvoidingView, Platform,
   ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator,
+  Modal,
 } from "react-native";
 import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -199,6 +200,136 @@ function WebCamera({
   );
 }
 
+// ── T&C / Privacy Modal ──────────────────────────────────────
+const TC_CONTENT = {
+  terms: {
+    title: "Terms of Service",
+    sections: [
+      {
+        heading: "1. Acceptance of Terms",
+        body: "By creating a Tag-n-Ride account you agree to these Terms of Service and our Privacy Policy. If you do not agree, do not use the platform.",
+      },
+      {
+        heading: "2. The Service",
+        body: "Tag-n-Ride is a QR-code-based digital payment platform for South African taxi and ride-share trips. It enables passengers to pay drivers electronically and allows drivers and fleet owners to receive and manage payments.",
+      },
+      {
+        heading: "3. Account Registration",
+        body: "• You must provide accurate, complete, and current personal information.\n• You must be at least 18 years old to register.\n• You are solely responsible for the security and confidentiality of your 4-digit PIN. Do not share it with anyone under any circumstances.\n• Tag-n-Ride staff, agents, and support personnel will NEVER ask for your PIN. Any person claiming to be from Tag-n-Ride who requests your PIN should be reported immediately.\n• Only one account per person is permitted.",
+      },
+      {
+        heading: "4. Payments & Fees",
+        body: "• All transactions are processed in South African Rand (ZAR).\n• A platform service fee applies to driver earnings, disclosed at the time of use.\n• Withdrawals are subject to processing fees.\n• All completed transactions are final. Disputes must be reported within 24 hours to support@tagnride.com.",
+      },
+      {
+        heading: "5. Driver & Fleet Owner Obligations",
+        body: "• Drivers must complete identity verification (KYC) before receiving payments.\n• Fleet owners are responsible for ensuring their registered drivers comply with all applicable South African laws and transport regulations.\n• Vehicle registration plate numbers must be accurate and kept up to date.",
+      },
+      {
+        heading: "6. Prohibited Conduct",
+        body: "You may not use Tag-n-Ride to:\n• Process fraudulent or unauthorized transactions.\n• Impersonate another person or create false accounts.\n• Violate any law or regulation of the Republic of South Africa.\n• Attempt to tamper with, reverse-engineer, or disrupt the platform.\n• Harass or harm other users.",
+      },
+      {
+        heading: "7. Account Security & Your Responsibilities",
+        body: "Every user is personally responsible for the security of their Tag-n-Ride account. You agree to the following:\n\nPIN Protection\n• Your PIN must be kept strictly confidential at all times. Never write it down, share it verbally, or enter it where others can observe you.\n• If you believe your PIN has been compromised, change it immediately from the Profile section of the app, or call us on 083 278 9333.\n\nLost or Stolen Device\n• If your device is lost or stolen, you must contact Tag-n-Ride support immediately to suspend your account and prevent unauthorised access.\n• You can reach us through any of the following:\n  — WhatsApp: 083 278 9333\n  — Email: support@tagnride.com\n  — Call Centre: 083 278 9333\n• Failure to report a lost or stolen device promptly may result in financial loss for which Tag-n-Ride cannot be held responsible.\n\nGeneral\n• Do not leave the app open on a shared or unattended device.\n• Regularly review your transaction history and report any suspicious activity immediately.\n• Use a device with a screen lock enabled to add an additional layer of protection.",
+      },
+      {
+        heading: "8. Account Suspension",
+        body: "We reserve the right to suspend or permanently close accounts found to be in violation of these Terms or involved in fraudulent activity, without prior notice.",
+      },
+      {
+        heading: "9. Limitation of Liability & Disclaimer of Negligence",
+        body: "Tag-n-Ride shall not be held liable or accountable for any losses — financial or otherwise — arising from:\n\n• User negligence, including but not limited to: sharing your PIN with another person, writing your PIN down, failing to secure your device, or allowing another person access to your account.\n• Failure to report a lost or stolen device promptly.\n• Unauthorised transactions resulting from the user's failure to protect their login credentials.\n• Actions of third parties, including fraud, social engineering, or scams targeting the user.\n• Service interruptions, technical failures, or circumstances beyond our reasonable control.\n\nEach user accepts full responsibility for all activity that occurs under their account. Tag-n-Ride provides a secure platform, but cannot protect users from the consequences of their own negligence. If you believe a transaction was made without your authorisation, report it immediately through our support channels. Our total liability is limited to the rand value of the disputed transaction.",
+      },
+      {
+        heading: "10. Governing Law",
+        body: "These Terms are governed by the laws of the Republic of South Africa.",
+      },
+      {
+        heading: "11. Changes to Terms",
+        body: "We may update these Terms from time to time. We will notify you of material changes via the app. Continued use after changes are posted constitutes acceptance.",
+      },
+      {
+        heading: "Contact & Support",
+        body: "For any account queries, disputes, or emergencies:\n\n• WhatsApp: 083 278 9333\n• Email: support@tagnride.com\n• Call Centre: 083 278 9333\n\nSupport hours and response times are available on our website.",
+      },
+    ],
+  },
+  privacy: {
+    title: "Privacy Policy",
+    sections: [
+      {
+        heading: "1. Information We Collect",
+        body: "• Personal details: name, surname, email address, and ID/passport number.\n• Identity documents: selfie photo and driver's licence (for KYC verification only).\n• Transaction data: payment history, wallet balance, and trip records.\n• Device information: app version and device type (for support and troubleshooting).",
+      },
+      {
+        heading: "2. How We Use Your Information",
+        body: "• To create and manage your account.\n• To process payments and withdrawals.\n• To verify your identity as required by law (FICA).\n• To detect and prevent fraud.\n• To send important account notifications (no marketing without consent).\n• To improve our service.",
+      },
+      {
+        heading: "3. Sharing of Information",
+        body: "We do not sell your personal information. We only share data with:\n• Payment processors (e.g., Stitch) strictly to facilitate transactions.\n• South African regulatory and law enforcement authorities when legally required.\n• Service providers who operate the platform under strict confidentiality obligations.",
+      },
+      {
+        heading: "4. Data Security",
+        body: "Your data is encrypted in transit (TLS) and at rest. Identity documents are stored securely and accessed only by authorised personnel for verification purposes.",
+      },
+      {
+        heading: "5. Your Rights under POPIA",
+        body: "Under the Protection of Personal Information Act (POPIA) you have the right to:\n• Access your personal information we hold.\n• Request correction of inaccurate information.\n• Request deletion of your personal data.\n• Object to processing of your data.\n\nTo exercise these rights, contact: privacy@tagnride.com",
+      },
+      {
+        heading: "6. Data Retention",
+        body: "We retain personal data for as long as your account is active and for up to 5 years after account closure, as required by South African financial regulations.",
+      },
+      {
+        heading: "7. Analytics",
+        body: "We collect anonymised, aggregated usage data to improve the service. No advertising trackers are used.",
+      },
+      {
+        heading: "Contact",
+        body: "Tag-n-Ride, South Africa\n\n• WhatsApp: 083 278 9333\n• Email: privacy@tagnride.com\n• Call Centre: 083 278 9333",
+      },
+    ],
+  },
+};
+
+function TcModal({
+  visible, type, onClose,
+}: {
+  visible: boolean;
+  type: "terms" | "privacy";
+  onClose: () => void;
+}) {
+  const content = TC_CONTENT[type];
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={tcStyles.root}>
+        <View style={tcStyles.header}>
+          <Text style={tcStyles.title}>{content.title}</Text>
+          <TouchableOpacity onPress={onClose} style={tcStyles.closeBtn}>
+            <Ionicons name="close" size={22} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+        <Text style={tcStyles.lastUpdated}>Last updated: June 2026</Text>
+        <ScrollView style={tcStyles.scroll} contentContainerStyle={{ paddingBottom: 40 }}>
+          {content.sections.map((s, i) => (
+            <View key={i} style={tcStyles.section}>
+              <Text style={tcStyles.heading}>{s.heading}</Text>
+              <Text style={tcStyles.body}>{s.body}</Text>
+            </View>
+          ))}
+        </ScrollView>
+        <View style={tcStyles.footer}>
+          <TouchableOpacity onPress={onClose} style={tcStyles.doneBtn}>
+            <Text style={tcStyles.doneBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
 // ── Main Register Screen ─────────────────────────────────────
 export default function Register() {
   const router = useRouter();
@@ -221,6 +352,7 @@ export default function Register() {
 
   // T&C acceptance
   const [tcAccepted, setTcAccepted] = useState(false);
+  const [tcModal, setTcModal] = useState<"terms" | "privacy" | null>(null);
 
   // KYC
   const [selfie, setSelfie] = useState<{ uri: string; base64: string } | null>(null);
@@ -676,23 +808,38 @@ export default function Register() {
 
               {/* Terms & Conditions */}
               <View style={{ height: 12 }} />
-              <TouchableOpacity
-                testID="register-tc-checkbox"
-                activeOpacity={0.8}
-                onPress={() => setTcAccepted(v => !v)}
-                style={styles.tcRow}>
-                <View style={[styles.checkbox, tcAccepted && styles.checkboxChecked]}>
+              <View style={styles.tcRow}>
+                <TouchableOpacity
+                  testID="register-tc-checkbox"
+                  activeOpacity={0.8}
+                  onPress={() => setTcAccepted(v => !v)}
+                  style={[styles.checkbox, tcAccepted && styles.checkboxChecked]}>
                   {tcAccepted && (
                     <Ionicons name="checkmark" size={13} color="#001218" />
                   )}
-                </View>
+                </TouchableOpacity>
                 <Text style={styles.tcText}>
                   I have read and agree to the{" "}
-                  <Text style={styles.tcLink}>Terms of Service</Text>
+                  <Text
+                    style={styles.tcLink}
+                    onPress={() => setTcModal("terms")}>
+                    Terms of Service
+                  </Text>
                   {" "}and{" "}
-                  <Text style={styles.tcLink}>Privacy Policy</Text>
+                  <Text
+                    style={styles.tcLink}
+                    onPress={() => setTcModal("privacy")}>
+                    Privacy Policy
+                  </Text>
                 </Text>
-              </TouchableOpacity>
+              </View>
+              {tcModal !== null && (
+                <TcModal
+                  visible
+                  type={tcModal}
+                  onClose={() => setTcModal(null)}
+                />
+              )}
               <View style={{ height: 12 }} />
 
               <Button
@@ -865,7 +1012,41 @@ const styles = StyleSheet.create({
   loadingText: { color: colors.textMuted, fontSize: 13 },
 });
 
-// ── Web Camera Styles ────────────────────────────────────────
+// ── T&C Modal Styles ─────────────────────────────────────────
+const tcStyles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  title: { color: colors.text, fontSize: 20, fontWeight: "800" },
+  closeBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", justifyContent: "center",
+  },
+  lastUpdated: {
+    color: colors.textMuted, fontSize: 12,
+    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4,
+  },
+  scroll: { flex: 1, paddingHorizontal: 20 },
+  section: { marginTop: 20 },
+  heading: { color: colors.cyan, fontSize: 13, fontWeight: "700", marginBottom: 6 },
+  body: { color: colors.textMuted, fontSize: 14, lineHeight: 22 },
+  footer: {
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  doneBtn: {
+    backgroundColor: colors.cyan, borderRadius: radius.md,
+    paddingVertical: 14, alignItems: "center",
+  },
+  doneBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
+});
+
+// ── Web Camera Styles ─────────────────────────────────────────
 const camStyles = StyleSheet.create({
   overlay: {
     position: "absolute" as any,

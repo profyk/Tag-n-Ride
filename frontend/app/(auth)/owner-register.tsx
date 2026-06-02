@@ -8,7 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "../../src/api";
+import { api, tokenStore } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { colors, radius } from "../../src/theme";
 
@@ -102,13 +102,12 @@ const TOTAL_STEPS = 5;
 
 export default function OwnerRegister() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { refresh } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [surname, setSurname] = useState("");
-  const [phone, setPhone] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [email, setEmail] = useState("");
   const [businessName, setBusinessName] = useState("");
@@ -128,7 +127,7 @@ export default function OwnerRegister() {
   const submitStep1 = () => {
     if (!fullName.trim()) { Alert.alert("Required", "Please enter your first name."); return; }
     if (!surname.trim()) { Alert.alert("Required", "Please enter your surname."); return; }
-    if (!phone.trim() || phone.length < 10) { Alert.alert("Required", "Please enter a valid phone number."); return; }
+    if (!email.trim() || !/\S+@\S+\.\S+/.test(email.trim())) { Alert.alert("Required", "Please enter a valid email address. You will use it to sign in."); return; }
     next();
   };
 
@@ -158,22 +157,22 @@ export default function OwnerRegister() {
   const submitRegister = async () => {
     setLoading(true);
     try {
-      await api.register({
+      const r = await api.register({
         full_name: fullName.trim(),
         surname: surname.trim(),
-        phone_number: phone.trim(),
         pin, role: "owner",
         business_name: businessName.trim() || undefined,
         id_number: idNumber.trim() || undefined,
-        email: email.trim() || undefined,
+        email: email.trim(),
       });
-      await signIn(phone.trim(), pin);
+      await tokenStore.set(r.token);
       if (driverMode && selfie && licenceFront) {
         await api.kycSubmit(selfie, licenceFront);
       }
       if (firstDriverCode.trim()) {
         try { await api.ownerLinkDriver(firstDriverCode.trim().toUpperCase()); } catch {}
       }
+      await refresh();
       router.replace("/owner");
     } catch (e: any) {
       Alert.alert("Registration Failed", e?.message || "Please try again.");
@@ -212,10 +211,7 @@ export default function OwnerRegister() {
               <Text style={styles.label}>ID / PASSPORT NUMBER</Text>
               <TextInput style={styles.input} value={idNumber} onChangeText={setIdNumber}
                 placeholder="8001015009087" placeholderTextColor={colors.textDim} autoCapitalize="characters" />
-              <Text style={styles.label}>PHONE NUMBER</Text>
-              <TextInput style={styles.input} value={phone} onChangeText={setPhone}
-                placeholder="+27 XX XXX XXXX" placeholderTextColor={colors.textDim} keyboardType="phone-pad" />
-              <Text style={styles.label}>EMAIL (OPTIONAL)</Text>
+              <Text style={styles.label}>EMAIL ADDRESS <Text style={{ color: colors.cyan }}>— used to sign in</Text></Text>
               <TextInput style={styles.input} value={email} onChangeText={setEmail}
                 placeholder="jane@example.com" placeholderTextColor={colors.textDim} keyboardType="email-address" autoCapitalize="none" />
               <Text style={styles.label}>BUSINESS NAME (OPTIONAL)</Text>

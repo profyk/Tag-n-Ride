@@ -34,7 +34,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 export const api = {
   // ── Auth ──
   register: (body: {
-    phone_number: string;
+    phone_number?: string;
     full_name: string;
     surname: string;
     pin: string;
@@ -50,6 +50,12 @@ export const api = {
     }),
 
   login: (body: { phone_number: string; pin: string }) =>
+    request<{ token: string; user: User }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  ownerLogin: (body: { email: string; pin: string }) =>
     request<{ token: string; user: User }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify(body),
