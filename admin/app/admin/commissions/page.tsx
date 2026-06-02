@@ -30,7 +30,7 @@ export default function CommissionsPage() {
   const load = (status?: string) => {
     setLoading(true);
     api.commissionRequests(status || undefined)
-      .then(setRows)
+      .then(r => setRows(r.data))
       .catch(() => toast.error("Failed to load commission requests"))
       .finally(() => setLoading(false));
   };
@@ -38,8 +38,8 @@ export default function CommissionsPage() {
   useEffect(() => {
     load(filter);
     api.getPayoutSettings()
-      .then(s => {
-        const t = s.commission_auto_cashup_time || "";
+      .then(r => {
+        const t = r.data.commission_auto_cashup_time || "";
         setCashupTime(t);
         setSavedTime(t || null);
       })
@@ -76,7 +76,7 @@ export default function CommissionsPage() {
     setTriggering(true);
     try {
       const r = await api.triggerCommissionCashup();
-      toast.success(r.message || "Auto-cashup triggered");
+      toast.success(r.data.message || "Auto-cashup triggered");
     } catch {
       toast.error("Failed to trigger cashup");
     } finally {
