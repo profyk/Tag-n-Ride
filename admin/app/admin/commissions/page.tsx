@@ -132,7 +132,7 @@ export default function CommissionsPage() {
                 <Button
                   onClick={runNow}
                   disabled={triggering}
-                  variant="outline"
+                  variant="secondary"
                   className="border-green-500 text-green-700 hover:bg-green-50"
                 >
                   <Play className="w-4 h-4 mr-1.5" />
@@ -235,7 +235,7 @@ export default function CommissionsPage() {
                         </Button>
                         <Button
                           size="sm"
-                          variant="outline"
+                          variant="secondary"
                           onClick={() => act(r.id, "reject")}
                           disabled={acting === r.id}
                           className="border-red-400 text-red-600 hover:bg-red-50"
