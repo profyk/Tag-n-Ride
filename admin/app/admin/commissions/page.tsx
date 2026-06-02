@@ -223,7 +223,7 @@ export default function CommissionsPage() {
                     {r.commission_status === "pending" && (
                       <div className="flex gap-2">
                         <Button
-                          size="sm"
+
                           onClick={() => act(r.id, "approve")}
                           disabled={acting === r.id}
                           className="bg-green-600 hover:bg-green-700 text-white"
@@ -232,7 +232,7 @@ export default function CommissionsPage() {
                           Approve
                         </Button>
                         <Button
-                          size="sm"
+
                           variant="secondary"
                           onClick={() => act(r.id, "reject")}
                           disabled={acting === r.id}
