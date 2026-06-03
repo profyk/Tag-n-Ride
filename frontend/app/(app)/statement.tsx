@@ -7,14 +7,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../src/api";
-import { colors, formatZAR, radius } from "../../src/theme";
+import { formatZAR, radius } from "../../src/theme";
+import { useTheme } from "../../src/ThemeContext";
 
 const MONTHS = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",
 ];
 
-function Row({ label, value, bold, green }: any) {
+function Row({ label, value, bold, green, colors, s }: any) {
   return (
     <View style={s.row}>
       <Text style={s.rowLabel}>{label}</Text>
@@ -27,6 +28,7 @@ function Row({ label, value, bold, green }: any) {
 
 export default function PassengerStatementScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() === 0 ? 11 : now.getMonth() - 1);
@@ -65,6 +67,7 @@ export default function PassengerStatementScreen() {
     );
   };
 
+  const s = makeStyles(colors);
   const d = data;
 
   return (
@@ -127,10 +130,10 @@ export default function PassengerStatementScreen() {
             {/* Summary */}
             <View style={s.section}>
               <Text style={s.sectionTitle}>SUMMARY</Text>
-              <Row label="Total rides" value={String(d.summary.total_trips)} />
-              <Row label="Total spent on rides" value={formatZAR(d.summary.total_spent)} bold />
-              <Row label="Total wallet top-ups" value={formatZAR(d.summary.total_topups)} green />
-              <Row label="Average trip cost" value={formatZAR(d.summary.average_trip)} />
+              <Row label="Total rides" value={String(d.summary.total_trips)} colors={colors} s={s} />
+              <Row label="Total spent on rides" value={formatZAR(d.summary.total_spent)} bold colors={colors} s={s} />
+              <Row label="Total wallet top-ups" value={formatZAR(d.summary.total_topups)} green colors={colors} s={s} />
+              <Row label="Average trip cost" value={formatZAR(d.summary.average_trip)} colors={colors} s={s} />
             </View>
 
             {/* Trips */}
@@ -182,7 +185,7 @@ export default function PassengerStatementScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   back: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 16 },
   backText: { color: colors.text, fontSize: 16 },

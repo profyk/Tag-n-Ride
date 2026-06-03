@@ -375,7 +375,7 @@ export default function Home() {
             <View style={s.qaRow}>
               <QA icon="qr-code" label="My QR" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-myqr" />
               <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
-              <QA icon="person-outline" label="Profile" tone="muted" colors={colors} onPress={() => router.push("/(app)/profile")} testID="qa-profile" />
+              <QA icon="document-text-outline" label="Statement" tone="muted" colors={colors} onPress={() => router.push("/(app)/statement")} testID="qa-statement" />
             </View>
             <View style={[s.qaRow, { marginTop: 12 }]}>
               <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />
