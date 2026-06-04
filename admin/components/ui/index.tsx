@@ -143,8 +143,8 @@ export function Tr({ children, className, onClick }: { children: React.ReactNode
   return <tr className={cn("hover:bg-bg3 transition-colors", onClick && "cursor-pointer", className)} onClick={onClick}>{children}</tr>;
 }
 
-export function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn("px-4 py-3 text-text", className)}>{children}</td>;
+export function Td({ children, className, colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
+  return <td className={cn("px-4 py-3 text-text", className)} colSpan={colSpan}>{children}</td>;
 }
 
 export function Modal({
