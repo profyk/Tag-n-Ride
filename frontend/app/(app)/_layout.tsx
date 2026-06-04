@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { NotificationProvider, useNotifications } from "../../src/NotificationContext";
+import { DocumentProvider } from "../../src/DocumentContext";
 
 function NotifTabIcon({ color, size }: { color: string; size: number }) {
   const { unreadCount } = useNotifications();
@@ -126,6 +127,7 @@ function AppTabs() {
       <Tabs.Screen name="transfer" options={{ href: null }} />
       <Tabs.Screen name="statement" options={{ href: null }} />
       <Tabs.Screen name="payslip" options={{ href: null }} />
+      <Tabs.Screen name="documents" options={{ href: null }} />
     </Tabs>
   );
 }
@@ -133,7 +135,9 @@ function AppTabs() {
 export default function AppLayout() {
   return (
     <NotificationProvider>
-      <AppTabs />
+      <DocumentProvider>
+        <AppTabs />
+      </DocumentProvider>
     </NotificationProvider>
   );
 }

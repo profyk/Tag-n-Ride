@@ -394,6 +394,8 @@ const APP_VERSION = "1.0.0";export default function Profile() {
 
         {/* Account */}
         <Text style={s.section}>ACCOUNT</Text>
+        <Row icon="folder-outline" label="My Documents"
+          onPress={() => router.push("/(app)/documents")} testID="row-documents" colors={colors} />
         {isPassenger && (
           <Row icon="add-circle-outline" label="Top up wallet"
             onPress={() => router.push("/topup")} testID="row-topup" colors={colors} />

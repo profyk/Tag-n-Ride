@@ -549,6 +549,17 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+
+  // ── User Documents ──
+  documents: () => request<UserDocument[]>("/api/documents"),
+  documentsUnreadCount: () => request<{ count: number }>("/api/documents/unread-count"),
+  documentRead: (id: string) =>
+    request<{ ok: boolean }>(`/api/documents/${id}/read`, { method: "PATCH" }),
+  documentReadAll: () =>
+    request<{ ok: boolean }>("/api/documents/read-all", { method: "PATCH" }),
+  documentDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/documents/${id}`, { method: "DELETE" }),
+  documentGet: (id: string) => request<UserDocument>(`/api/documents/${id}`),
 };
 
 // ── Types ──
@@ -664,4 +675,18 @@ export type Notification = {
   target: string;
   sent_at: string;
   read?: boolean;
+};
+
+export type UserDocument = {
+  id: string;
+  document_type: "statement" | "payslip" | "receipt" | "kyc" | "withdrawal" | "topup" | "notice" | "contract";
+  title: string;
+  description?: string;
+  period_label?: string;
+  amount: number;
+  reference_number?: string;
+  is_read: boolean;
+  status: string;
+  metadata?: Record<string, any>;
+  created_at: string;
 };

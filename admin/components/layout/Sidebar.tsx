@@ -13,7 +13,7 @@ import {
   DollarSign, Lock, RotateCcw, PieChart, Banknote,
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
   Zap, Globe, Star, ToggleRight, Key, MessageCircle,
-  ChevronDown, ChevronRight, Search, X,
+  ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
@@ -128,6 +128,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Referrals",      href: "/admin/referrals",     icon: Users2,        permission: "view_analytics" },
       { label: "User Feedback",  href: "/admin/feedback",      icon: Star,          permission: "view_analytics" },
       { label: "Marketing",      href: "/admin/marketing",     icon: Target,        permission: "manage_promotions" },
+      { label: "Send Notice",    href: "/admin/notices",       icon: Mail,          permission: "manage_users" },
     ],
   },
   {

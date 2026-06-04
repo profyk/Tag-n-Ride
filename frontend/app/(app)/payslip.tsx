@@ -42,7 +42,7 @@ function monthStr(year: number, month: number) {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
 
-function buildStatementPDF(p: any): string {
+export function buildStatementPDF(p: any): string {
   const showOwner = (p.owner_payouts ?? 0) > 0;
   return `<!DOCTYPE html>
 <html>
@@ -116,7 +116,7 @@ function buildStatementPDF(p: any): string {
 </html>`;
 }
 
-function buildFormalPayslipPDF(p: any): string {
+export function buildFormalPayslipPDF(p: any): string {
   const refUrl = `https://tagnride.com/verify?ref=${encodeURIComponent(p.reference_number)}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(refUrl)}`;
   const showOwner = (p.owner_payouts ?? 0) > 0;
@@ -359,7 +359,10 @@ export default function PayslipScreen() {
         month: monthStr(stmtYear, stmtMonth),
       });
       await loadAll();
-      Alert.alert("Ready ✓", "Your earnings statement is ready in My Documents below.");
+      Alert.alert("Ready ✓", "Your document is ready. View it in My Documents.", [
+        { text: "View Documents", onPress: () => router.push("/(app)/documents") },
+        { text: "OK", style: "cancel" },
+      ]);
       const idToFetch = newEntry?.id ?? newEntry?.payslip_id;
       if (idToFetch) {
         const data = await api.payslipGet(idToFetch);
@@ -403,7 +406,10 @@ export default function PayslipScreen() {
         month: monthStr(frmYear, frmMonth),
       });
       await loadAll();
-      Alert.alert("Ready ✓", "Your formal payslip is ready in My Documents below.");
+      Alert.alert("Ready ✓", "Your document is ready. View it in My Documents.", [
+        { text: "View Documents", onPress: () => router.push("/(app)/documents") },
+        { text: "OK", style: "cancel" },
+      ]);
       const idToFetch = newEntry?.id ?? newEntry?.payslip_id;
       if (idToFetch) {
         const data = await api.payslipGet(idToFetch);

@@ -2893,6 +2893,14 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
                     VALUES ($1,$2,$3,$4,'Daily target shortfall','outstanding')
                 """, str(uuid.uuid4()), body.owner_user_id, user["id"], shortfall)
 
+    async with pool.acquire() as conn:
+        dest_label = "owner's wallet" if method == "wallet" else "owner's bank account"
+        await conn.execute(
+            """INSERT INTO user_documents (id,user_id,document_type,title,description,amount,source,is_read)
+               VALUES (gen_random_uuid()::text,$1,'withdrawal','CashUp Confirmation',$2,$3,'app',false)""",
+            user["id"], f"R{net_cashup:.2f} has been sent to {dest_label}.", net_cashup
+        )
+
     return {"ok": True, "cashup_amount": net_cashup, "driver_profit": driver_profit,
             "shortfall": shortfall, "method": method, "payout_fee": payout_fee,
             "payment_mode": payment_mode, "fuel_deducted": fuel_deducted}
@@ -3864,6 +3872,28 @@ async def create_new_tables():
                         "INSERT INTO system_config (key,value,description) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
                         _k, _v, _d
                     )
+
+                # ── User documents ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_documents (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        period_label TEXT,
+                        amount NUMERIC DEFAULT 0,
+                        reference_number TEXT,
+                        source TEXT DEFAULT 'app',
+                        is_read BOOLEAN DEFAULT false,
+                        status TEXT DEFAULT 'active',
+                        metadata JSONB DEFAULT '{}',
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_documents_user ON user_documents(user_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_documents_type ON user_documents(document_type)")
 
         except Exception as e:
             print("New tables error:", e)
@@ -4974,7 +5004,13 @@ async def _complete_topup(payment_id: str, user_id: str, phone_number: str,
 
         await send_sms(phone_number,
             f"Tag n Ride: Wallet topped up R{wallet_amount:.2f}. Balance: R{float(new_balance):.2f}")
-        await notify_user(conn, f"Wallet Topped Up", "R{wallet_amount:.2f} added to your wallet. New balance: R{float(new_balance):.2f}", "success", user_id)
+        await notify_user(conn, f"Wallet Topped Up", f"R{wallet_amount:.2f} added to your wallet. New balance: R{float(new_balance):.2f}", "success", user_id)
+        await conn.execute(
+            """INSERT INTO user_documents (id,user_id,document_type,title,description,amount,source,is_read)
+               VALUES (gen_random_uuid()::text,$1,'topup','Wallet Top-Up Confirmed',
+               $2,$3,'app',false)""",
+            user_id, f"R{wallet_amount:.2f} has been added to your wallet.", wallet_amount
+        )
 
 @api.get("/wallet/topup/verify/{payment_id}")
 async def verify_topup(payment_id: str, user: dict = Depends(get_current_user)):
@@ -5410,9 +5446,21 @@ async def admin_kyc_review_v2(user_id: str, body: KYCReviewIn, request: Request,
             await conn.execute("UPDATE drivers SET is_verified=TRUE WHERE user_id=$1", user_id)
             await send_sms(user_row["phone_number"], "Tag n Ride: Your KYC has been approved! You can now receive payments.")
             await notify_user(conn, "KYC Approved", "Your identity has been verified. You can now receive payments!", "kyc", user_id)
+            await conn.execute(
+                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
+                   VALUES (gen_random_uuid()::text,$1,'kyc','Identity Verified',
+                   'Your KYC verification has been approved. You can now receive payments.','app',false)""",
+                user_id
+            )
         else:
             await send_sms(user_row["phone_number"], f"Tag n Ride: Your KYC was not approved. Reason: {body.rejection_reason}. Please resubmit.")
             await notify_user(conn, f"KYC Rejected", "KYC not approved: {body.rejection_reason}. Tap to resubmit.", "error", user_id)
+            await conn.execute(
+                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
+                   VALUES (gen_random_uuid()::text,$1,'kyc','KYC Verification Failed',
+                   'Your identity verification was not approved. Please resubmit your documents.','app',false)""",
+                user_id
+            )
         await audit(conn, admin["id"], f"KYC_{body.action.upper()}", user_id, "kyc", {"reason": body.rejection_reason}, request.client.host)
     return {"ok": True}
 
@@ -11020,6 +11068,19 @@ async def _build_payslip(conn, user: dict, body: PayslipRequestIn, document_type
         fee, user["id"], None, f"{document_type.capitalize()} fee – {period_label}"
     )
 
+    # Insert into user_documents
+    doc_title = f"Earnings Statement – {period_label}" if document_type == "statement" else f"Formal Payslip – {period_label}"
+    doc_desc = f"Your {period_label} earnings document is ready to download."
+    import json as _json
+    doc_meta = _json.dumps({"payslip_id": payslip_id, "document_type": document_type})
+    await conn.execute(
+        """INSERT INTO user_documents
+           (id,user_id,document_type,title,description,period_label,amount,reference_number,source,is_read,metadata)
+           VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,$6,$7,'app',false,$8::jsonb)""",
+        user["id"], document_type, doc_title, doc_desc,
+        period_label, driver_net_earnings, reference_number, doc_meta
+    )
+
     id_row = await conn.fetchrow("SELECT id_number FROM users WHERE id=$1", user["id"])
     id_number = id_row["id_number"] if id_row else None
 
@@ -11229,6 +11290,125 @@ async def admin_driver_payslips(user_id: str, admin: dict = Depends(require_admi
             user_id
         )
     return [dict(r) for r in rows]
+
+
+# ════════════════════════════════════════════════════════════════
+# USER DOCUMENTS
+# ════════════════════════════════════════════════════════════════
+
+class SendNoticeIn(BaseModel):
+    target: str  # phone number, "ALL", "ALL_DRIVERS", "ALL_PASSENGERS"
+    document_type: str = Field(default="notice")
+    title: str = Field(min_length=2, max_length=200)
+    description: str = Field(min_length=2, max_length=1000)
+
+@api.get("/documents")
+async def get_user_documents(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id,document_type,title,description,period_label,amount,
+                      reference_number,is_read,status,metadata,created_at
+               FROM user_documents
+               WHERE user_id=$1 AND status != 'deleted'
+               ORDER BY created_at DESC""",
+            user["id"]
+        )
+    return [
+        {**dict(r), "amount": float(r["amount"] or 0), "created_at": iso(r["created_at"])}
+        for r in rows
+    ]
+
+@api.get("/documents/unread-count")
+async def get_documents_unread_count(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM user_documents WHERE user_id=$1 AND is_read=false AND status != 'deleted'",
+            user["id"]
+        )
+    return {"count": int(count)}
+
+@api.get("/documents/{doc_id}")
+async def get_document(doc_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id,document_type,title,description,period_label,amount,
+                      reference_number,is_read,status,metadata,created_at
+               FROM user_documents WHERE id=$1 AND user_id=$2""",
+            doc_id, user["id"]
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {**dict(row), "amount": float(row["amount"] or 0), "created_at": iso(row["created_at"])}
+
+@api.patch("/documents/{doc_id}/read")
+async def mark_document_read(doc_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM user_documents WHERE id=$1 AND user_id=$2", doc_id, user["id"]
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        await conn.execute(
+            "UPDATE user_documents SET is_read=true, updated_at=NOW() WHERE id=$1", doc_id
+        )
+    return {"ok": True}
+
+@api.patch("/documents/read-all")
+async def mark_all_documents_read(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE user_documents SET is_read=true, updated_at=NOW() WHERE user_id=$1 AND status != 'deleted'",
+            user["id"]
+        )
+    return {"ok": True}
+
+@api.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM user_documents WHERE id=$1 AND user_id=$2", doc_id, user["id"]
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        await conn.execute(
+            "UPDATE user_documents SET status='deleted', updated_at=NOW() WHERE id=$1", doc_id
+        )
+    return {"ok": True}
+
+@api.post("/admin/documents/send-notice")
+async def admin_send_notice(body: SendNoticeIn, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_users"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        target = body.target.strip().upper()
+        if target == "ALL":
+            user_ids = [r["id"] for r in await conn.fetch(
+                "SELECT id FROM users WHERE is_active=true AND role NOT IN ('superadmin','admin','finance','support','cfo','cto','ceo')"
+            )]
+        elif target == "ALL_DRIVERS":
+            user_ids = [r["id"] for r in await conn.fetch(
+                "SELECT id FROM users WHERE is_active=true AND role='driver'"
+            )]
+        elif target == "ALL_PASSENGERS":
+            user_ids = [r["id"] for r in await conn.fetch(
+                "SELECT id FROM users WHERE is_active=true AND role='passenger'"
+            )]
+        else:
+            # treat as phone number
+            row = await conn.fetchrow("SELECT id FROM users WHERE phone_number=$1", body.target.strip())
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found with that phone number")
+            user_ids = [row["id"]]
+
+        for uid in user_ids:
+            await conn.execute(
+                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
+                   VALUES (gen_random_uuid()::text,$1,$2,$3,$4,'admin',false)""",
+                uid, body.document_type, body.title, body.description
+            )
+        await audit(conn, admin["id"], "SEND_NOTICE", None, "user_documents",
+                    {"target": body.target, "count": len(user_ids), "title": body.title}, request.client.host)
+    return {"ok": True, "sent_to": len(user_ids)}
 
 
 # ════════════════════════════════════════════════════════════════
