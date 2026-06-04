@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
   RefreshControl, ActivityIndicator, Alert, TextInput, Modal, StyleSheet,
 } from "react-native";
+import * as Location from "expo-location";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -78,6 +79,15 @@ export default function Home() {
   const [panicHolding, setPanicHolding] = useState(false);
   const [panicTimer, setPanicTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [sendingPanic, setSendingPanic] = useState(false);
+
+  // SOS modal state
+  const [sosModal, setSosModal] = useState(false);
+  const [sosType, setSosType] = useState("accident");
+  const [sosNote, setSosNote] = useState("");
+  const [sosLocation, setSosLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [sosLocationLoading, setSosLocationLoading] = useState(false);
+  const [sosCountdown, setSosCountdown] = useState(10);
+  const sosCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [fuelModal, setFuelModal] = useState(false);
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
@@ -108,21 +118,75 @@ export default function Home() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // Auto-send SOS when countdown hits 0
+  useEffect(() => {
+    if (sosCountdown === 0 && sosModal) triggerSOS();
+  }, [sosCountdown]);
+
   if (state.status !== "authed") return null;
   const isDriver = state.user.role === "driver";
 
+  const SOS_TYPES = [
+    { key: "accident",   label: "Accident",     icon: "car-outline" as const },
+    { key: "medical",    label: "Medical",       icon: "medkit-outline" as const },
+    { key: "crime",      label: "Crime/Threat",  icon: "warning-outline" as const },
+    { key: "breakdown",  label: "Breakdown",     icon: "construct-outline" as const },
+    { key: "other",      label: "Other",         icon: "help-circle-outline" as const },
+  ];
+
+  const openSosModal = async () => {
+    setSosModal(true);
+    setSosType("accident");
+    setSosNote("");
+    setSosLocation(null);
+    setSosCountdown(10);
+    setSosLocationLoading(true);
+    // Start 10-second auto-send countdown
+    sosCountdownRef.current = setInterval(() => {
+      setSosCountdown(prev => {
+        if (prev <= 1) { clearInterval(sosCountdownRef.current!); sosCountdownRef.current = null; return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    // Acquire GPS in parallel
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setSosLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+      }
+    } catch {} finally { setSosLocationLoading(false); }
+  };
+
+  const closeSosModal = () => {
+    if (sosCountdownRef.current) { clearInterval(sosCountdownRef.current); sosCountdownRef.current = null; }
+    setSosModal(false);
+    setSosCountdown(10);
+    setSosLocation(null);
+    setSosNote("");
+  };
+
+  const triggerSOS = async () => {
+    if (sosCountdownRef.current) { clearInterval(sosCountdownRef.current); sosCountdownRef.current = null; }
+    setSosModal(false);
+    setSendingPanic(true);
+    try {
+      const res = await api.safetyPanic({
+        latitude: sosLocation?.latitude,
+        longitude: sosLocation?.longitude,
+        incident_type: sosType,
+        message: sosNote || undefined,
+        vehicle_plate: state.status === "authed" ? state.user.vehicle_plate : undefined,
+      } as any);
+      Alert.alert("SOS Sent", res.message || "Your emergency contacts have been notified. Stay on the line.");
+    } catch (e: any) {
+      Alert.alert("SOS Failed", e?.message || "Could not send alert — call 112 immediately.");
+    } finally { setSendingPanic(false); }
+  };
+
   const handlePanicPressIn = () => {
     setPanicHolding(true);
-    const t = setTimeout(async () => {
-      setPanicHolding(false);
-      setSendingPanic(true);
-      try {
-        const res = await api.safetyPanic({});
-        Alert.alert("SOS Sent", res.message || "Your emergency contacts have been notified.");
-      } catch (e: any) {
-        Alert.alert("SOS Failed", e?.message || "Could not send emergency alert");
-      } finally { setSendingPanic(false); }
-    }, 3000);
+    const t = setTimeout(() => { setPanicHolding(false); openSosModal(); }, 2000);
     setPanicTimer(t);
   };
 
@@ -459,6 +523,90 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
+
+      {/* SOS Modal */}
+      <Modal visible={sosModal} transparent animationType="slide" onRequestClose={closeSosModal}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { borderTopColor: colors.red + "80" }]}>
+            <View style={s.modalHandle} />
+
+            {/* Header */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.red + "20", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="warning" size={22} color={colors.red} />
+                </View>
+                <View>
+                  <Text style={{ color: colors.red, fontSize: 18, fontWeight: "900", letterSpacing: 0.5 }}>EMERGENCY SOS</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 11 }}>Hold-to-confirm · Your contacts will be alerted</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Countdown bar */}
+            <View style={{ backgroundColor: colors.bg, borderRadius: 8, overflow: "hidden", height: 36, marginVertical: 12, borderWidth: 1, borderColor: colors.red + "30" }}>
+              <View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${(sosCountdown / 10) * 100}%` as any, backgroundColor: colors.red + "25" }} />
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ color: colors.red, fontWeight: "800", fontSize: 13 }}>
+                  {sosCountdown > 0 ? `Auto-sending in ${sosCountdown}s…` : "Sending…"}
+                </Text>
+              </View>
+            </View>
+
+            {/* Incident type */}
+            <Text style={s.inputLabel}>WHAT IS HAPPENING?</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+              {SOS_TYPES.map(t => (
+                <TouchableOpacity key={t.key} onPress={() => setSosType(t.key)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8,
+                    borderRadius: 999, borderWidth: 1.5,
+                    borderColor: sosType === t.key ? colors.red : colors.border,
+                    backgroundColor: sosType === t.key ? colors.red + "15" : colors.bg }}>
+                  <Ionicons name={t.icon} size={14} color={sosType === t.key ? colors.red : colors.textMuted} />
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: sosType === t.key ? colors.red : colors.textMuted }}>{t.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Location */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: colors.border, marginBottom: 12 }}>
+              <Ionicons name="location-outline" size={16} color={sosLocation ? colors.green : colors.textMuted} />
+              {sosLocationLoading ? (
+                <ActivityIndicator size="small" color={colors.cyan} />
+              ) : sosLocation ? (
+                <Text style={{ color: colors.green, fontSize: 12, fontWeight: "600" }}>
+                  Location acquired · {sosLocation.latitude.toFixed(5)}, {sosLocation.longitude.toFixed(5)}
+                </Text>
+              ) : (
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>Location unavailable — enable GPS for better response</Text>
+              )}
+            </View>
+
+            {/* Note */}
+            <Text style={s.inputLabel}>ADDITIONAL DETAILS (optional)</Text>
+            <TextInput
+              style={[s.input, { fontSize: 14, fontWeight: "400", textAlign: "left", height: 72, textAlignVertical: "top", paddingTop: 12, marginBottom: 16 }]}
+              value={sosNote}
+              onChangeText={setSosNote}
+              placeholder="e.g. Driver is acting strangely, injured passenger, vehicle colour..."
+              placeholderTextColor={colors.textDim}
+              multiline
+            />
+
+            {/* Actions */}
+            <View style={s.modalActions}>
+              <View style={{ flex: 1 }}>
+                <Button label="Cancel" variant="secondary" onPress={closeSosModal} />
+              </View>
+              <TouchableOpacity onPress={triggerSOS}
+                style={{ flex: 1, backgroundColor: colors.red, borderRadius: 10, paddingVertical: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+                <Ionicons name="flash" size={16} color="#fff" />
+                <Text style={{ color: "#fff", fontWeight: "900", fontSize: 14, letterSpacing: 0.5 }}>SEND NOW</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Pay Fuel modal */}
       <Modal visible={fuelModal} transparent animationType="slide" onRequestClose={() => setFuelModal(false)}>
