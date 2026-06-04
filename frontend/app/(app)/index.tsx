@@ -74,6 +74,10 @@ export default function Home() {
   const [allTxns, setAllTxns] = useState<Txn[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [safetyProfileComplete, setSafetyProfileComplete] = useState<boolean | null>(null);
+  const [panicHolding, setPanicHolding] = useState(false);
+  const [panicTimer, setPanicTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [sendingPanic, setSendingPanic] = useState(false);
   const [fuelModal, setFuelModal] = useState(false);
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
@@ -90,12 +94,14 @@ export default function Home() {
 
   const load = useCallback(async () => {
     try {
-      const [w, t, hidden] = await Promise.all([
+      const [w, t, hidden, sp] = await Promise.all([
         api.wallet(), api.transactions(), getHidden(),
+        api.safetyProfile().catch(() => null),
       ]);
       setWallet(w);
       setAllTxns(t);
       setTxns(t.filter((tx: Txn) => !hidden.includes(tx.id)).slice(0, 5));
+      if (sp !== null) setSafetyProfileComplete(!!sp?.profile_complete);
     } catch {}
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -104,6 +110,26 @@ export default function Home() {
 
   if (state.status !== "authed") return null;
   const isDriver = state.user.role === "driver";
+
+  const handlePanicPressIn = () => {
+    setPanicHolding(true);
+    const t = setTimeout(async () => {
+      setPanicHolding(false);
+      setSendingPanic(true);
+      try {
+        const res = await api.safetyPanic({});
+        Alert.alert("SOS Sent", res.message || "Your emergency contacts have been notified.");
+      } catch (e: any) {
+        Alert.alert("SOS Failed", e?.message || "Could not send emergency alert");
+      } finally { setSendingPanic(false); }
+    }, 3000);
+    setPanicTimer(t);
+  };
+
+  const handlePanicPressOut = () => {
+    if (panicTimer) { clearTimeout(panicTimer); setPanicTimer(null); }
+    setPanicHolding(false);
+  };
 
   const handleHideTxn = async (id: string) => {
     await addHidden([id]);
@@ -376,6 +402,18 @@ export default function Home() {
           </View>
         )}
 
+        {/* SafeRide profile incomplete banner */}
+        {safetyProfileComplete === false && (
+          <TouchableOpacity style={s.safetyBanner} onPress={() => router.push("/(app)/safety")} testID="safety-banner">
+            <Ionicons name="warning-outline" size={18} color="#FFD60A" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.safetyBannerTitle}>Complete your SafeRide profile</Text>
+              <Text style={s.safetyBannerSub}>Your emergency contacts are not set up · Tap to complete</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#FFD60A" />
+          </TouchableOpacity>
+        )}
+
         {/* Quick actions */}
         <Text style={s.section}>QUICK ACTIONS</Text>
         {isDriver ? (
@@ -383,6 +421,7 @@ export default function Home() {
             <View style={s.qaRow}>
               <QA icon="qr-code" label="My QR" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-myqr" />
               <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+              <QA icon="shield-outline" label="SafeRide" tone="green" colors={colors} onPress={() => router.push("/(app)/saferide-trip")} testID="qa-saferide" />
             </View>
             <View style={[s.qaRow, { marginTop: 12 }]}>
               <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />
@@ -418,6 +457,20 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
+
+      {/* SOS Panic button */}
+      <TouchableOpacity
+        style={[s.panicBtn, panicHolding && { transform: [{ scale: 0.92 }] }]}
+        onPressIn={handlePanicPressIn}
+        onPressOut={handlePanicPressOut}
+        disabled={sendingPanic}
+        testID="panic-btn">
+        {sendingPanic ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Text style={s.panicBtnText}>{panicHolding ? "..." : "SOS"}</Text>
+        )}
+      </TouchableOpacity>
 
       {/* Pay Fuel modal */}
       <Modal visible={fuelModal} transparent animationType="slide" onRequestClose={() => setFuelModal(false)}>
@@ -774,4 +827,9 @@ const makeStyles = (colors: any) => StyleSheet.create({
   cashupAmountLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4 },
   cashupAmountVal: { color: colors.text, fontSize: 28, fontWeight: "900", marginTop: 4 },
   cashupAmountFee: { color: colors.red, fontSize: 11, marginTop: 4 },
+  safetyBanner: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFD60A15", borderRadius: 10, borderWidth: 1, borderColor: "#FFD60A40", padding: 12, marginBottom: 16 },
+  safetyBannerTitle: { color: "#FFD60A", fontWeight: "700", fontSize: 13 },
+  safetyBannerSub: { color: "#FFD60Aaa", fontSize: 11, marginTop: 1 },
+  panicBtn: { position: "absolute", bottom: 32, right: 20, width: 60, height: 60, borderRadius: 30, backgroundColor: colors.red, alignItems: "center", justifyContent: "center", elevation: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, borderWidth: 3, borderColor: colors.red + "60" },
+  panicBtnText: { color: "#fff", fontWeight: "900", fontSize: 13, letterSpacing: 1 },
 });

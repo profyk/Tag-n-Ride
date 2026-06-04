@@ -58,6 +58,7 @@ const APP_VERSION = "1.0.0";export default function Profile() {
     "not_submitted" | "pending" | "approved" | "rejected" | null
   >(null);
   const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
+  const [safetyProfileComplete, setSafetyProfileComplete] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (state.status === "authed") {
@@ -68,6 +69,7 @@ const APP_VERSION = "1.0.0";export default function Profile() {
       if (state.user.role === "driver" || state.user.role === "owner") {
         loadKycStatus();
       }
+      api.safetyProfile().then(p => setSafetyProfileComplete(!!p?.profile_complete)).catch(() => {});
     }
   }, [state]);
 
@@ -394,6 +396,33 @@ const APP_VERSION = "1.0.0";export default function Profile() {
 
         {/* Account */}
         <Text style={s.section}>ACCOUNT</Text>
+
+        {/* SafeRide Profile row */}
+        <TouchableOpacity
+          style={{
+            flexDirection: "row", alignItems: "center",
+            backgroundColor: colors.bg2, borderRadius: 10,
+            borderWidth: 1.5,
+            borderColor: safetyProfileComplete === false ? "#FFD60A60" : safetyProfileComplete ? colors.green + "40" : colors.border,
+            padding: 16, gap: 12, marginBottom: 10,
+          }}
+          onPress={() => router.push("/(app)/safety")}
+          testID="row-saferide"
+          activeOpacity={0.7}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={safetyProfileComplete ? colors.green : "#FFD60A"} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: "600", fontSize: 15 }}>SafeRide Profile</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>Emergency contacts and safety info</Text>
+          </View>
+          {safetyProfileComplete === false && (
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#FFD60A", marginRight: 4 }} />
+          )}
+          {safetyProfileComplete === true && (
+            <Ionicons name="checkmark-circle" size={18} color={colors.green} />
+          )}
+          <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+        </TouchableOpacity>
+
         <Row icon="folder-outline" label="My Documents"
           onPress={() => router.push("/(app)/documents")} testID="row-documents" colors={colors} />
         {isPassenger && (

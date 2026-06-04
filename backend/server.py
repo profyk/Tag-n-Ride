@@ -1054,6 +1054,56 @@ async def transfer(body: TransferIn, user: dict = Depends(get_current_user)):
                 txn_id, ref, body.amount, fee, driver_net, user["id"], body.driver_user_id, body.note or "Ride payment", is_test_txn
             )
             txn_row = await conn.fetchrow("SELECT * FROM transactions WHERE id=$1", txn_id)
+    # SafeRide: link passenger to driver trip (best-effort, non-blocking)
+    try:
+        async with pool.acquire() as tc:
+            drv_data = await tc.fetchrow(
+                "SELECT u.full_name, u.phone_number, d.vehicle_plate "
+                "FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.id=$1",
+                body.driver_user_id
+            )
+            vplate = (drv_data["vehicle_plate"] or "") if drv_data else ""
+            active_trip = await tc.fetchrow(
+                "SELECT id FROM trips WHERE driver_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1",
+                body.driver_user_id
+            )
+            trip_id = None
+            if not active_trip:
+                trip_id = str(uuid.uuid4())
+                trip_date = datetime.now(timezone.utc).strftime('%Y%m%d')
+                trip_ref = f"TNR-TRIP-{trip_date}-{body.driver_user_id[:6].upper()}"
+                existing_ref = await tc.fetchrow("SELECT id FROM trips WHERE trip_reference=$1", trip_ref)
+                if existing_ref:
+                    trip_ref = f"{trip_ref}-{secrets.token_hex(2).upper()}"
+                dn = drv_data["full_name"] if drv_data else ""
+                dp = drv_data["phone_number"] if drv_data else ""
+                await tc.execute(
+                    "INSERT INTO trips (id,trip_reference,driver_id,driver_name,driver_phone,vehicle_plate,status,total_passengers,total_revenue) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,'active',0,0)",
+                    trip_id, trip_ref, body.driver_user_id, dn, dp, vplate
+                )
+            else:
+                trip_id = active_trip["id"]
+            pass_row = await tc.fetchrow("SELECT full_name, phone_number FROM users WHERE id=$1", user["id"])
+            p_name = pass_row["full_name"] if pass_row else ""
+            p_phone = (pass_row["phone_number"] or "") if pass_row else ""
+            sp = await tc.fetchrow("SELECT profile_complete FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+            sp_complete = bool(sp["profile_complete"]) if sp else False
+            await tc.execute(
+                "INSERT INTO trip_passengers (id,trip_id,passenger_id,passenger_name,passenger_phone,payment_amount,payment_id,safety_profile_complete) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                str(uuid.uuid4()), trip_id, user["id"], p_name, p_phone, body.amount, txn_id, sp_complete
+            )
+            await tc.execute(
+                "UPDATE trips SET total_passengers=total_passengers+1, total_revenue=total_revenue+$1 WHERE id=$2",
+                body.amount, trip_id
+            )
+            await tc.execute(
+                "UPDATE transactions SET trip_id=$1, passenger_user_id=$2, driver_user_id=$3, vehicle_plate=$4 WHERE id=$5",
+                trip_id, user["id"], body.driver_user_id, vplate, txn_id
+            )
+    except Exception as _saferide_err:
+        print(f"[SAFERIDE LINK] {_saferide_err}")
     txn = dict(txn_row); txn["amount"] = float(txn["amount"])
     txn["platform_fee"] = float(txn["platform_fee"] or 0)
     txn["driver_net"] = float(txn["driver_net"] or driver_net)
@@ -3894,6 +3944,128 @@ async def create_new_tables():
                 """)
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_documents_user ON user_documents(user_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_documents_type ON user_documents(document_type)")
+
+                # ── SafeRide Safety System ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS passenger_safety_profiles (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id TEXT UNIQUE NOT NULL,
+                        full_name TEXT,
+                        id_number TEXT,
+                        date_of_birth TEXT,
+                        blood_type TEXT,
+                        home_address TEXT,
+                        medical_conditions TEXT,
+                        allergies TEXT,
+                        emergency_contact_1_name TEXT,
+                        emergency_contact_1_phone TEXT,
+                        emergency_contact_1_relationship TEXT,
+                        emergency_contact_2_name TEXT,
+                        emergency_contact_2_phone TEXT,
+                        emergency_contact_2_relationship TEXT,
+                        next_of_kin_name TEXT,
+                        next_of_kin_phone TEXT,
+                        next_of_kin_relationship TEXT,
+                        profile_complete BOOLEAN DEFAULT false,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS trips (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        trip_reference TEXT UNIQUE NOT NULL,
+                        driver_id TEXT NOT NULL,
+                        driver_name TEXT,
+                        driver_phone TEXT,
+                        vehicle_plate TEXT,
+                        status TEXT DEFAULT 'active',
+                        started_at TIMESTAMPTZ DEFAULT NOW(),
+                        ended_at TIMESTAMPTZ,
+                        start_latitude NUMERIC,
+                        start_longitude NUMERIC,
+                        end_latitude NUMERIC,
+                        end_longitude NUMERIC,
+                        total_passengers INTEGER DEFAULT 0,
+                        total_revenue NUMERIC DEFAULT 0,
+                        incident_flag BOOLEAN DEFAULT false,
+                        incident_notes TEXT,
+                        incident_flagged_at TIMESTAMPTZ,
+                        incident_flagged_by TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS trip_passengers (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        trip_id TEXT NOT NULL,
+                        passenger_id TEXT NOT NULL,
+                        passenger_name TEXT,
+                        passenger_phone TEXT,
+                        payment_amount NUMERIC DEFAULT 0,
+                        payment_id TEXT,
+                        boarded_at TIMESTAMPTZ DEFAULT NOW(),
+                        alighted BOOLEAN DEFAULT false,
+                        alighted_at TIMESTAMPTZ,
+                        safety_profile_complete BOOLEAN DEFAULT false
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS gps_locations (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id TEXT NOT NULL,
+                        trip_id TEXT,
+                        latitude NUMERIC NOT NULL,
+                        longitude NUMERIC NOT NULL,
+                        speed NUMERIC DEFAULT 0,
+                        heading NUMERIC DEFAULT 0,
+                        accuracy NUMERIC,
+                        recorded_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS incidents (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        incident_reference TEXT UNIQUE NOT NULL,
+                        trip_id TEXT,
+                        vehicle_plate TEXT,
+                        driver_id TEXT,
+                        incident_type TEXT DEFAULT 'accident',
+                        description TEXT,
+                        latitude NUMERIC,
+                        longitude NUMERIC,
+                        flagged_by TEXT,
+                        flagged_at TIMESTAMPTZ DEFAULT NOW(),
+                        notifications_sent BOOLEAN DEFAULT false,
+                        notifications_sent_at TIMESTAMPTZ,
+                        status TEXT DEFAULT 'active',
+                        resolved_at TIMESTAMPTZ,
+                        resolved_by TEXT,
+                        resolution_notes TEXT
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS emergency_notifications (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        incident_id TEXT NOT NULL,
+                        passenger_id TEXT,
+                        contact_name TEXT,
+                        contact_phone TEXT,
+                        contact_relationship TEXT,
+                        message_sent TEXT,
+                        sms_status TEXT DEFAULT 'pending',
+                        sent_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS trip_id TEXT")
+                await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS passenger_user_id TEXT")
+                await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS driver_user_id TEXT")
+                await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS vehicle_plate TEXT")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_gps_user_time ON gps_locations(user_id, recorded_at DESC)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id, status)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_trips_plate ON trips(vehicle_plate)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_plate ON incidents(vehicle_plate)")
 
         except Exception as e:
             print("New tables error:", e)
@@ -11410,6 +11582,638 @@ async def admin_send_notice(body: SendNoticeIn, request: Request, admin: dict = 
                     {"target": body.target, "count": len(user_ids), "title": body.title}, request.client.host)
     return {"ok": True, "sent_to": len(user_ids)}
 
+
+# ════════════════════════════════════════════════════════════════
+# SafeRide Safety System
+# ════════════════════════════════════════════════════════════════
+
+SAFETY_FIELDS = [
+    "full_name", "id_number", "date_of_birth", "blood_type", "home_address",
+    "medical_conditions", "allergies",
+    "emergency_contact_1_name", "emergency_contact_1_phone", "emergency_contact_1_relationship",
+    "emergency_contact_2_name", "emergency_contact_2_phone", "emergency_contact_2_relationship",
+    "next_of_kin_name", "next_of_kin_phone", "next_of_kin_relationship",
+]
+
+class SafetyProfileIn(BaseModel):
+    full_name: Optional[str] = None
+    id_number: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    blood_type: Optional[str] = None
+    home_address: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    allergies: Optional[str] = None
+    emergency_contact_1_name: Optional[str] = None
+    emergency_contact_1_phone: Optional[str] = None
+    emergency_contact_1_relationship: Optional[str] = None
+    emergency_contact_2_name: Optional[str] = None
+    emergency_contact_2_phone: Optional[str] = None
+    emergency_contact_2_relationship: Optional[str] = None
+    next_of_kin_name: Optional[str] = None
+    next_of_kin_phone: Optional[str] = None
+    next_of_kin_relationship: Optional[str] = None
+
+class TripStartIn(BaseModel):
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class TripEndIn(BaseModel):
+    trip_id: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class TripLocationIn(BaseModel):
+    trip_id: str
+    latitude: float
+    longitude: float
+    speed: Optional[float] = 0.0
+    heading: Optional[float] = 0.0
+
+class IncidentCreateIn(BaseModel):
+    vehicle_plate: str
+    trip_id: Optional[str] = None
+    incident_type: str = "accident"
+    description: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class IncidentResolveIn(BaseModel):
+    resolution_notes: str = ""
+
+class PanicIn(BaseModel):
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+_gps_last: dict = {}
+
+# ── GET /api/safety/profile ──
+@api.get("/safety/profile")
+async def get_safety_profile(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+    if not row:
+        return {"profile_complete": False, "user_id": user["id"]}
+    p = dict(row)
+    p["profile_complete"] = bool(p.get("profile_complete"))
+    if p.get("created_at"): p["created_at"] = iso(p["created_at"])
+    if p.get("updated_at"): p["updated_at"] = iso(p["updated_at"])
+    return p
+
+# ── POST /api/safety/profile ──
+@api.post("/safety/profile")
+async def save_safety_profile(body: SafetyProfileIn, user: dict = Depends(get_current_user)):
+    data = body.dict()
+    now = datetime.now(timezone.utc)
+    profile_complete = bool(
+        data.get("emergency_contact_1_name") and
+        data.get("emergency_contact_1_phone") and
+        data.get("id_number")
+    )
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT id FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if existing:
+            set_parts = [f"{f}=${i+2}" for i, f in enumerate(SAFETY_FIELDS)]
+            set_parts += [f"profile_complete=${len(SAFETY_FIELDS)+2}", f"updated_at=${len(SAFETY_FIELDS)+3}"]
+            vals = [user["id"]] + [data.get(f) for f in SAFETY_FIELDS] + [profile_complete, now]
+            await conn.execute(
+                f"UPDATE passenger_safety_profiles SET {', '.join(set_parts)} WHERE user_id=$1",
+                *vals
+            )
+        else:
+            pid = str(uuid.uuid4())
+            col_list = ["id", "user_id"] + SAFETY_FIELDS + ["profile_complete", "created_at", "updated_at"]
+            placeholders = ", ".join([f"${i+1}" for i in range(len(col_list))])
+            vals = [pid, user["id"]] + [data.get(f) for f in SAFETY_FIELDS] + [profile_complete, now, now]
+            await conn.execute(
+                f"INSERT INTO passenger_safety_profiles ({', '.join(col_list)}) VALUES ({placeholders})",
+                *vals
+            )
+        row = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+    p = dict(row)
+    p["profile_complete"] = bool(p.get("profile_complete"))
+    if p.get("created_at"): p["created_at"] = iso(p["created_at"])
+    if p.get("updated_at"): p["updated_at"] = iso(p["updated_at"])
+    return p
+
+# ── PATCH /api/safety/profile ──
+@api.patch("/safety/profile")
+async def patch_safety_profile(body: SafetyProfileIn, user: dict = Depends(get_current_user)):
+    data = {k: v for k, v in body.dict().items() if v is not None}
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if not data:
+            if not existing:
+                return {"profile_complete": False, "user_id": user["id"]}
+            p = dict(existing)
+            p["profile_complete"] = bool(p.get("profile_complete"))
+            if p.get("created_at"): p["created_at"] = iso(p["created_at"])
+            if p.get("updated_at"): p["updated_at"] = iso(p["updated_at"])
+            return p
+        if existing:
+            set_parts = [f"{k}=${i+2}" for i, k in enumerate(data.keys())]
+            set_parts.append(f"updated_at=${len(data)+2}")
+            vals = [user["id"]] + list(data.values()) + [now]
+            await conn.execute(
+                f"UPDATE passenger_safety_profiles SET {', '.join(set_parts)} WHERE user_id=$1",
+                *vals
+            )
+        else:
+            pid = str(uuid.uuid4())
+            cols = ["id", "user_id"] + list(data.keys()) + ["created_at", "updated_at"]
+            placeholders = ", ".join([f"${i+1}" for i in range(len(cols))])
+            vals = [pid, user["id"]] + list(data.values()) + [now, now]
+            await conn.execute(
+                f"INSERT INTO passenger_safety_profiles ({', '.join(cols)}) VALUES ({placeholders})",
+                *vals
+            )
+        row = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        cur = dict(row)
+        pc = bool(cur.get("emergency_contact_1_name") and cur.get("emergency_contact_1_phone") and cur.get("id_number"))
+        await conn.execute(
+            "UPDATE passenger_safety_profiles SET profile_complete=$1, updated_at=$2 WHERE user_id=$3",
+            pc, now, user["id"]
+        )
+        row = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+    p = dict(row)
+    p["profile_complete"] = bool(p.get("profile_complete"))
+    if p.get("created_at"): p["created_at"] = iso(p["created_at"])
+    if p.get("updated_at"): p["updated_at"] = iso(p["updated_at"])
+    return p
+
+# ── POST /api/trips/start ──
+@api.post("/trips/start")
+async def trip_start(body: TripStartIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE trips SET status='completed', ended_at=NOW() WHERE driver_id=$1 AND status='active'",
+            user["id"]
+        )
+        drv = await conn.fetchrow("SELECT vehicle_plate FROM drivers WHERE user_id=$1", user["id"])
+        u_row = await conn.fetchrow("SELECT full_name, phone_number FROM users WHERE id=$1", user["id"])
+        trip_date = datetime.now(timezone.utc).strftime('%Y%m%d')
+        trip_ref = f"TNR-TRIP-{trip_date}-{user['id'][:6].upper()}"
+        existing_ref = await conn.fetchrow("SELECT id FROM trips WHERE trip_reference=$1", trip_ref)
+        if existing_ref:
+            trip_ref = f"{trip_ref}-{secrets.token_hex(2).upper()}"
+        trip_id = str(uuid.uuid4())
+        await conn.execute(
+            "INSERT INTO trips (id,trip_reference,driver_id,driver_name,driver_phone,vehicle_plate,"
+            "status,start_latitude,start_longitude,total_passengers,total_revenue) "
+            "VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,0,0)",
+            trip_id, trip_ref, user["id"],
+            u_row["full_name"] if u_row else "",
+            (u_row["phone_number"] or "") if u_row else "",
+            (drv["vehicle_plate"] or "") if drv else "",
+            body.latitude, body.longitude
+        )
+        row = await conn.fetchrow("SELECT * FROM trips WHERE id=$1", trip_id)
+    t = dict(row)
+    t["started_at"] = iso(t.get("started_at"))
+    if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+    return t
+
+# ── GET /api/trips/active ──
+@api.get("/trips/active")
+async def trip_active(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow(
+            "SELECT * FROM trips WHERE driver_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1",
+            user["id"]
+        )
+        if not trip:
+            return {"trip": None, "passengers": []}
+        passengers = await conn.fetch(
+            "SELECT tp.id, tp.passenger_id, tp.passenger_name, tp.passenger_phone, tp.payment_amount, "
+            "tp.boarded_at, tp.safety_profile_complete, psp.blood_type, psp.medical_conditions "
+            "FROM trip_passengers tp "
+            "LEFT JOIN passenger_safety_profiles psp ON psp.user_id=tp.passenger_id "
+            "WHERE tp.trip_id=$1 ORDER BY tp.boarded_at ASC",
+            trip["id"]
+        )
+        plist = []
+        for p in passengers:
+            pd = dict(p)
+            pd["boarded_at"] = iso(pd.get("boarded_at"))
+            if pd.get("payment_amount") is not None: pd["payment_amount"] = float(pd["payment_amount"])
+            plist.append(pd)
+        t = dict(trip)
+        t["started_at"] = iso(t.get("started_at"))
+        if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+    return {"trip": t, "passengers": plist}
+
+# ── POST /api/trips/end ──
+@api.post("/trips/end")
+async def trip_end(body: TripEndIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow("SELECT * FROM trips WHERE id=$1 AND driver_id=$2", body.trip_id, user["id"])
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        await conn.execute(
+            "UPDATE trips SET status='completed', ended_at=NOW(), end_latitude=$1, end_longitude=$2 WHERE id=$3",
+            body.latitude, body.longitude, body.trip_id
+        )
+        row = await conn.fetchrow("SELECT * FROM trips WHERE id=$1", body.trip_id)
+    t = dict(row)
+    t["started_at"] = iso(t.get("started_at"))
+    t["ended_at"] = iso(t.get("ended_at"))
+    if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+    return {"trip": t}
+
+# ── POST /api/trips/location ──
+@api.post("/trips/location")
+async def trip_location(body: TripLocationIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    now_ts = time.time()
+    if now_ts - _gps_last.get(user["id"], 0) < 30:
+        return {"ok": True, "skipped": True}
+    _gps_last[user["id"]] = now_ts
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO gps_locations (id,user_id,trip_id,latitude,longitude,speed,heading) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            str(uuid.uuid4()), user["id"], body.trip_id,
+            body.latitude, body.longitude, body.speed or 0, body.heading or 0
+        )
+    return {"ok": True}
+
+# ── GET /api/trips/history ──
+@api.get("/trips/history")
+async def trips_history(user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT t.id, t.trip_reference, t.status, t.started_at, t.ended_at, t.vehicle_plate, "
+            "t.total_passengers, t.total_revenue, "
+            "(SELECT COUNT(*) FROM trip_passengers tp WHERE tp.trip_id=t.id) as passenger_count "
+            "FROM trips t WHERE t.driver_id=$1 ORDER BY t.started_at DESC LIMIT 50",
+            user["id"]
+        )
+    result = []
+    for row in rows:
+        t = dict(row)
+        t["started_at"] = iso(t.get("started_at"))
+        t["ended_at"] = iso(t.get("ended_at"))
+        if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+        result.append(t)
+    return result
+
+# ── GET /api/trips/driver-locations (admin) ──
+@api.get("/trips/driver-locations")
+async def driver_locations_map(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        active_trips = await conn.fetch("SELECT * FROM trips WHERE status='active'")
+        result = []
+        for trip in active_trips:
+            loc = await conn.fetchrow(
+                "SELECT latitude,longitude,speed,recorded_at FROM gps_locations "
+                "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1",
+                trip["driver_id"]
+            )
+            pcount = await conn.fetchval("SELECT COUNT(*) FROM trip_passengers WHERE trip_id=$1", trip["id"])
+            result.append({
+                "driver_id": trip["driver_id"],
+                "driver_name": trip["driver_name"],
+                "vehicle_plate": trip["vehicle_plate"],
+                "latitude": float(loc["latitude"]) if loc and loc.get("latitude") is not None else None,
+                "longitude": float(loc["longitude"]) if loc and loc.get("longitude") is not None else None,
+                "speed": float(loc["speed"]) if loc and loc.get("speed") is not None else 0,
+                "trip_id": trip["id"],
+                "passenger_count": int(pcount or 0),
+                "last_update": iso(loc["recorded_at"]) if loc else None,
+            })
+    return result
+
+# ── GET /api/trips/{trip_id} ──
+@api.get("/trips/{trip_id}")
+async def trip_get(trip_id: str, user: dict = Depends(get_current_user)):
+    is_admin_user = user.get("role") in ADMIN_ROLES
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow("SELECT * FROM trips WHERE id=$1", trip_id)
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        if not is_admin_user and trip["driver_id"] != user["id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        passengers = await conn.fetch(
+            "SELECT tp.id, tp.passenger_id, tp.passenger_name, tp.passenger_phone, tp.payment_amount, "
+            "tp.boarded_at, tp.safety_profile_complete, "
+            "psp.blood_type, psp.medical_conditions, psp.allergies, psp.profile_complete, "
+            "psp.emergency_contact_1_name, psp.emergency_contact_1_phone, psp.emergency_contact_1_relationship, "
+            "psp.emergency_contact_2_name, psp.emergency_contact_2_phone, psp.emergency_contact_2_relationship, "
+            "psp.next_of_kin_name, psp.next_of_kin_phone, psp.next_of_kin_relationship "
+            "FROM trip_passengers tp "
+            "LEFT JOIN passenger_safety_profiles psp ON psp.user_id=tp.passenger_id "
+            "WHERE tp.trip_id=$1",
+            trip_id
+        )
+        plist = []
+        for p in passengers:
+            pd = dict(p)
+            pd["boarded_at"] = iso(pd.get("boarded_at"))
+            if not is_admin_user:
+                for f in ("emergency_contact_1_phone", "emergency_contact_2_phone", "next_of_kin_phone"):
+                    pd.pop(f, None)
+            plist.append(pd)
+    t = dict(trip)
+    t["started_at"] = iso(t.get("started_at"))
+    t["ended_at"] = iso(t.get("ended_at"))
+    if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+    return {"trip": t, "passengers": plist}
+
+# ── POST /api/admin/incidents ──
+@api.post("/admin/incidents")
+async def create_incident(body: IncidentCreateIn, request: Request, admin: dict = Depends(require_admin)):
+    inc_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    inc_ref = f"TNR-INC-{now.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
+    plate_upper = body.vehicle_plate.upper().strip()
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow(
+            "SELECT * FROM trips WHERE UPPER(REPLACE(vehicle_plate,' ',''))=UPPER(REPLACE($1,' ','')) "
+            "AND status='active' ORDER BY started_at DESC LIMIT 1", plate_upper
+        )
+        if not trip and body.trip_id:
+            trip = await conn.fetchrow("SELECT * FROM trips WHERE id=$1", body.trip_id)
+        if not trip:
+            trip = await conn.fetchrow(
+                "SELECT * FROM trips WHERE UPPER(REPLACE(vehicle_plate,' ',''))=UPPER(REPLACE($1,' ','')) "
+                "ORDER BY started_at DESC LIMIT 1", plate_upper
+            )
+        trip_id = trip["id"] if trip else body.trip_id
+        driver_id = trip["driver_id"] if trip else None
+        await conn.execute(
+            "INSERT INTO incidents (id,incident_reference,trip_id,vehicle_plate,driver_id,"
+            "incident_type,description,latitude,longitude,flagged_by,flagged_at,status) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active')",
+            inc_id, inc_ref, trip_id, plate_upper, driver_id,
+            body.incident_type, body.description, body.latitude, body.longitude, admin["id"], now
+        )
+        if trip_id:
+            await conn.execute(
+                "UPDATE trips SET incident_flag=true, incident_notes=$1, incident_flagged_at=$2, incident_flagged_by=$3 WHERE id=$4",
+                body.description, now, admin["id"], trip_id
+            )
+        passengers = []
+        if trip_id:
+            passengers = await conn.fetch(
+                "SELECT tp.passenger_id, tp.passenger_name, tp.passenger_phone, "
+                "psp.emergency_contact_1_name, psp.emergency_contact_1_phone, psp.emergency_contact_1_relationship, "
+                "psp.emergency_contact_2_name, psp.emergency_contact_2_phone, psp.emergency_contact_2_relationship, "
+                "psp.next_of_kin_name, psp.next_of_kin_phone, psp.next_of_kin_relationship "
+                "FROM trip_passengers tp "
+                "LEFT JOIN passenger_safety_profiles psp ON psp.user_id=tp.passenger_id "
+                "WHERE tp.trip_id=$1", trip_id
+            )
+        notifications_sent = 0
+        for p in passengers:
+            for cname, cphone, crel in [
+                (p["emergency_contact_1_name"], p["emergency_contact_1_phone"], p["emergency_contact_1_relationship"]),
+                (p["emergency_contact_2_name"], p["emergency_contact_2_phone"], p["emergency_contact_2_relationship"]),
+                (p["next_of_kin_name"], p["next_of_kin_phone"], p["next_of_kin_relationship"]),
+            ]:
+                if not cphone:
+                    continue
+                msg = (f"URGENT TAG N RIDE SAFETY ALERT\n"
+                       f"A vehicle you have an emergency contact in\n"
+                       f"Plate: {plate_upper}\n"
+                       f"has been involved in an incident.\n"
+                       f"Please contact Tag n Ride Support immediately.\n"
+                       f"Reference: {inc_ref}\n"
+                       f"Helpline: 0800 000 000")
+                await conn.execute(
+                    "INSERT INTO emergency_notifications (id,incident_id,passenger_id,contact_name,contact_phone,"
+                    "contact_relationship,message_sent,sms_status,sent_at,created_at) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,'sent',NOW(),NOW())",
+                    str(uuid.uuid4()), inc_id, p["passenger_id"], cname, cphone, crel, msg
+                )
+                await send_sms(cphone, msg)
+                notifications_sent += 1
+        await conn.execute("UPDATE incidents SET notifications_sent=true, notifications_sent_at=NOW() WHERE id=$1", inc_id)
+        await audit(conn, admin["id"], "CREATE_INCIDENT", inc_id, "incident",
+                    {"plate": plate_upper, "type": body.incident_type, "sms_count": notifications_sent},
+                    request.client.host if request.client else None)
+        row = await conn.fetchrow("SELECT * FROM incidents WHERE id=$1", inc_id)
+    inc = dict(row)
+    inc["flagged_at"] = iso(inc.get("flagged_at"))
+    inc["notifications_sent_at"] = iso(inc.get("notifications_sent_at"))
+    inc["passenger_count"] = len(passengers)
+    inc["notifications_sent_count"] = notifications_sent
+    return inc
+
+# ── GET /api/admin/incidents ──
+@api.get("/admin/incidents")
+async def list_incidents(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT i.id, i.incident_reference, i.vehicle_plate, i.driver_id, i.incident_type, "
+            "i.description, i.flagged_at, i.notifications_sent, i.status, i.resolved_at, i.trip_id, "
+            "(SELECT COUNT(*) FROM emergency_notifications en WHERE en.incident_id=i.id) as notif_count, "
+            "(SELECT COUNT(*) FROM trip_passengers tp WHERE tp.trip_id=i.trip_id) as passenger_count "
+            "FROM incidents i ORDER BY i.flagged_at DESC LIMIT 100"
+        )
+    result = []
+    for row in rows:
+        inc = dict(row)
+        inc["flagged_at"] = iso(inc.get("flagged_at"))
+        inc["resolved_at"] = iso(inc.get("resolved_at"))
+        result.append(inc)
+    return result
+
+# ── GET /api/admin/incidents/{incident_id} ──
+@api.get("/admin/incidents/{incident_id}")
+async def get_incident(incident_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        inc = await conn.fetchrow("SELECT * FROM incidents WHERE id=$1", incident_id)
+        if not inc:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        passengers = []
+        if inc["trip_id"]:
+            passengers = await conn.fetch(
+                "SELECT tp.passenger_id, tp.passenger_name, tp.passenger_phone, tp.payment_amount, "
+                "psp.blood_type, psp.medical_conditions, psp.allergies, psp.profile_complete, "
+                "psp.emergency_contact_1_name, psp.emergency_contact_1_phone, psp.emergency_contact_1_relationship, "
+                "psp.emergency_contact_2_name, psp.emergency_contact_2_phone, psp.emergency_contact_2_relationship, "
+                "psp.next_of_kin_name, psp.next_of_kin_phone, psp.next_of_kin_relationship "
+                "FROM trip_passengers tp "
+                "LEFT JOIN passenger_safety_profiles psp ON psp.user_id=tp.passenger_id "
+                "WHERE tp.trip_id=$1", inc["trip_id"]
+            )
+        notifs = await conn.fetch(
+            "SELECT id, contact_name, contact_phone, contact_relationship, sms_status, sent_at, passenger_id "
+            "FROM emergency_notifications WHERE incident_id=$1 ORDER BY created_at ASC", incident_id
+        )
+        gps = []
+        if inc["trip_id"]:
+            gps = await conn.fetch(
+                "SELECT latitude, longitude, speed, recorded_at FROM gps_locations "
+                "WHERE trip_id=$1 ORDER BY recorded_at ASC LIMIT 200", inc["trip_id"]
+            )
+    result = dict(inc)
+    result["flagged_at"] = iso(result.get("flagged_at"))
+    result["resolved_at"] = iso(result.get("resolved_at"))
+    result["notifications_sent_at"] = iso(result.get("notifications_sent_at"))
+    result["passengers"] = []
+    for p in passengers:
+        pd = dict(p)
+        if pd.get("payment_amount") is not None: pd["payment_amount"] = float(pd["payment_amount"])
+        result["passengers"].append(pd)
+    result["notifications"] = [dict(n) | {"sent_at": iso(n.get("sent_at"))} for n in notifs]
+    result["gps_route"] = [
+        {"latitude": float(g["latitude"]) if g.get("latitude") is not None else None,
+         "longitude": float(g["longitude"]) if g.get("longitude") is not None else None,
+         "speed": float(g["speed"]) if g.get("speed") is not None else 0,
+         "recorded_at": iso(g["recorded_at"])}
+        for g in gps
+    ]
+    return result
+
+# ── PATCH /api/admin/incidents/{incident_id}/resolve ──
+@api.patch("/admin/incidents/{incident_id}/resolve")
+async def resolve_incident(incident_id: str, body: IncidentResolveIn, request: Request, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        if not await conn.fetchrow("SELECT id FROM incidents WHERE id=$1", incident_id):
+            raise HTTPException(status_code=404, detail="Incident not found")
+        await conn.execute(
+            "UPDATE incidents SET status='resolved', resolved_at=NOW(), resolved_by=$1, resolution_notes=$2 WHERE id=$3",
+            admin["id"], body.resolution_notes, incident_id
+        )
+        await audit(conn, admin["id"], "RESOLVE_INCIDENT", incident_id, "incident",
+                    {"notes": body.resolution_notes}, request.client.host if request.client else None)
+        row = await conn.fetchrow("SELECT * FROM incidents WHERE id=$1", incident_id)
+    result = dict(row)
+    result["flagged_at"] = iso(result.get("flagged_at"))
+    result["resolved_at"] = iso(result.get("resolved_at"))
+    return result
+
+# ── GET /api/admin/saferide/search ──
+@api.get("/admin/saferide/search")
+async def saferide_search(plate: str, admin: dict = Depends(require_admin)):
+    plate_clean = plate.upper().strip()
+    async with pool.acquire() as conn:
+        drivers = await conn.fetch(
+            "SELECT u.id, u.full_name, u.phone_number, u.is_active, d.vehicle_plate, d.is_verified, d.rating_avg "
+            "FROM users u JOIN drivers d ON d.user_id=u.id "
+            "WHERE UPPER(REPLACE(d.vehicle_plate,' ',''))=UPPER(REPLACE($1,' ',''))", plate_clean
+        )
+        trips = await conn.fetch(
+            "SELECT * FROM trips WHERE UPPER(REPLACE(vehicle_plate,' ',''))=UPPER(REPLACE($1,' ','')) "
+            "AND DATE(started_at AT TIME ZONE 'UTC')=CURRENT_DATE ORDER BY started_at DESC", plate_clean
+        )
+        last_gps = None
+        if drivers:
+            last_gps = await conn.fetchrow(
+                "SELECT latitude,longitude,speed,recorded_at FROM gps_locations "
+                "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1", drivers[0]["id"]
+            )
+        all_passengers = []
+        for trip in trips:
+            passengers = await conn.fetch(
+                "SELECT tp.passenger_id, tp.passenger_name, tp.passenger_phone, tp.payment_amount, tp.boarded_at, "
+                "psp.blood_type, psp.medical_conditions, psp.allergies, psp.profile_complete, "
+                "psp.emergency_contact_1_name, psp.emergency_contact_1_phone, psp.emergency_contact_1_relationship, "
+                "psp.emergency_contact_2_name, psp.emergency_contact_2_phone, psp.emergency_contact_2_relationship, "
+                "psp.next_of_kin_name, psp.next_of_kin_phone, psp.next_of_kin_relationship "
+                "FROM trip_passengers tp "
+                "LEFT JOIN passenger_safety_profiles psp ON psp.user_id=tp.passenger_id "
+                "WHERE tp.trip_id=$1", trip["id"]
+            )
+            for p in passengers:
+                pd = dict(p)
+                pd.update({"trip_id": trip["id"], "trip_reference": trip["trip_reference"]})
+                pd["boarded_at"] = iso(pd.get("boarded_at"))
+                if pd.get("payment_amount") is not None: pd["payment_amount"] = float(pd["payment_amount"])
+                all_passengers.append(pd)
+    return {
+        "plate": plate_clean,
+        "drivers": [{"user_id": d["id"], "full_name": d["full_name"], "phone_number": d["phone_number"],
+                     "vehicle_plate": d["vehicle_plate"], "is_verified": d["is_verified"],
+                     "rating_avg": float(d["rating_avg"] or 0)} for d in drivers],
+        "trips_today": [dict(t) | {"started_at": iso(t.get("started_at")), "ended_at": iso(t.get("ended_at")),
+                                    "total_revenue": float(t["total_revenue"]) if t.get("total_revenue") is not None else 0}
+                        for t in trips],
+        "passengers": all_passengers,
+        "last_gps": {
+            "latitude": float(last_gps["latitude"]) if last_gps and last_gps.get("latitude") is not None else None,
+            "longitude": float(last_gps["longitude"]) if last_gps and last_gps.get("longitude") is not None else None,
+            "speed": float(last_gps["speed"]) if last_gps and last_gps.get("speed") is not None else 0,
+            "recorded_at": iso(last_gps["recorded_at"]) if last_gps else None,
+        } if last_gps else None,
+    }
+
+# ── POST /api/safety/panic ──
+@api.post("/safety/panic")
+async def panic_button(body: PanicIn, user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    inc_id = str(uuid.uuid4())
+    inc_ref = f"TNR-INC-{now.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
+    user_name = user.get("full_name") or user.get("id")
+    maps_url = (f"https://maps.google.com/?q={body.latitude},{body.longitude}" if body.latitude else "Location unavailable")
+    time_str = now.strftime('%Y-%m-%d %H:%M UTC')
+    async with pool.acquire() as conn:
+        active_trip = await conn.fetchrow(
+            "SELECT t.id, t.vehicle_plate, t.driver_id FROM trips t "
+            "JOIN trip_passengers tp ON tp.trip_id=t.id "
+            "WHERE tp.passenger_id=$1 AND t.status='active' LIMIT 1", user["id"]
+        )
+        if not active_trip:
+            active_trip = await conn.fetchrow(
+                "SELECT id, vehicle_plate, driver_id FROM trips WHERE driver_id=$1 AND status='active' LIMIT 1",
+                user["id"]
+            )
+        await conn.execute(
+            "INSERT INTO incidents (id,incident_reference,trip_id,vehicle_plate,driver_id,"
+            "incident_type,description,latitude,longitude,flagged_by,flagged_at,status) "
+            "VALUES ($1,$2,$3,$4,$5,'panic','SOS Panic button triggered',$6,$7,$8,$9,'active')",
+            inc_id, inc_ref,
+            active_trip["id"] if active_trip else None,
+            active_trip["vehicle_plate"] if active_trip else None,
+            active_trip["driver_id"] if active_trip else None,
+            body.latitude, body.longitude, user["id"], now
+        )
+        profile = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        notifications_sent = 0
+        if profile:
+            for cname, cphone, crel in [
+                (profile["emergency_contact_1_name"], profile["emergency_contact_1_phone"], profile["emergency_contact_1_relationship"]),
+                (profile["emergency_contact_2_name"], profile["emergency_contact_2_phone"], profile["emergency_contact_2_relationship"]),
+                (profile["next_of_kin_name"], profile["next_of_kin_phone"], profile["next_of_kin_relationship"]),
+            ]:
+                if not cphone:
+                    continue
+                msg = (f"SOS ALERT from Tag n Ride\n"
+                       f"{user_name} has triggered an emergency alert\n"
+                       f"Last known location: {maps_url}\n"
+                       f"Time: {time_str}\n"
+                       f"Please contact them immediately or call emergency services 10111")
+                await conn.execute(
+                    "INSERT INTO emergency_notifications (id,incident_id,passenger_id,contact_name,contact_phone,"
+                    "contact_relationship,message_sent,sms_status,sent_at,created_at) "
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,'sent',NOW(),NOW())",
+                    str(uuid.uuid4()), inc_id, user["id"], cname, cphone, crel, msg
+                )
+                await send_sms(cphone, msg)
+                notifications_sent += 1
+        await conn.execute("UPDATE incidents SET notifications_sent=true, notifications_sent_at=NOW() WHERE id=$1", inc_id)
+        admin_users = await conn.fetch(
+            "SELECT id FROM users WHERE role IN ('superadmin','admin','ceo') AND is_active=true LIMIT 20"
+        )
+        for au in admin_users:
+            await notify_user(conn, f"SOS PANIC: {user_name}",
+                f"{user_name} triggered SOS panic. Location: {maps_url}", "panic_alert", au["id"])
+    return {
+        "ok": True,
+        "incident_reference": inc_ref,
+        "notifications_sent": notifications_sent,
+        "message": f"SOS sent to {notifications_sent} emergency contact(s)",
+    }
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line

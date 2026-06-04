@@ -550,6 +550,60 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // ── SafeRide ──
+  safetyProfile: () => request<any>("/api/safety/profile"),
+
+  saveSafetyProfile: (body: {
+    full_name?: string; id_number?: string; date_of_birth?: string; blood_type?: string;
+    home_address?: string; medical_conditions?: string; allergies?: string;
+    emergency_contact_1_name?: string; emergency_contact_1_phone?: string; emergency_contact_1_relationship?: string;
+    emergency_contact_2_name?: string; emergency_contact_2_phone?: string; emergency_contact_2_relationship?: string;
+    next_of_kin_name?: string; next_of_kin_phone?: string; next_of_kin_relationship?: string;
+  }) => request<any>("/api/safety/profile", { method: "POST", body: JSON.stringify(body) }),
+
+  updateSafetyProfile: (body: {
+    id_number?: string; blood_type?: string; home_address?: string;
+    medical_conditions?: string; allergies?: string;
+    emergency_contact_1_name?: string; emergency_contact_1_phone?: string; emergency_contact_1_relationship?: string;
+    emergency_contact_2_name?: string; emergency_contact_2_phone?: string; emergency_contact_2_relationship?: string;
+    next_of_kin_name?: string; next_of_kin_phone?: string; next_of_kin_relationship?: string;
+  }) => request<any>("/api/safety/profile", { method: "PATCH", body: JSON.stringify(body) }),
+
+  tripsStart: (body: { latitude?: number; longitude?: number }) =>
+    request<any>("/api/trips/start", { method: "POST", body: JSON.stringify(body) }),
+
+  tripsActive: () => request<{ trip: any; passengers: any[] }>("/api/trips/active"),
+
+  tripsEnd: (body: { trip_id: string; latitude?: number; longitude?: number }) =>
+    request<any>("/api/trips/end", { method: "POST", body: JSON.stringify(body) }),
+
+  tripsLocation: (body: { trip_id: string; latitude: number; longitude: number; speed?: number; heading?: number }) =>
+    request<any>("/api/trips/location", { method: "POST", body: JSON.stringify(body) }),
+
+  tripsHistory: () => request<any[]>("/api/trips/history"),
+
+  tripsGet: (id: string) => request<any>(`/api/trips/${id}`),
+
+  adminDriverLocations: () => request<any[]>("/api/trips/driver-locations"),
+
+  adminIncidents: () => request<any[]>("/api/admin/incidents"),
+
+  adminCreateIncident: (body: {
+    vehicle_plate: string; trip_id?: string; incident_type?: string;
+    description?: string; latitude?: number; longitude?: number;
+  }) => request<any>("/api/admin/incidents", { method: "POST", body: JSON.stringify(body) }),
+
+  adminIncidentGet: (id: string) => request<any>(`/api/admin/incidents/${id}`),
+
+  adminIncidentResolve: (id: string, body: { resolution_notes: string }) =>
+    request<any>(`/api/admin/incidents/${id}/resolve`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  adminSafeRideSearch: (plate: string) =>
+    request<any>(`/api/admin/saferide/search?plate=${encodeURIComponent(plate)}`),
+
+  safetyPanic: (body: { latitude?: number; longitude?: number }) =>
+    request<any>("/api/safety/panic", { method: "POST", body: JSON.stringify(body) }),
+
   // ── User Documents ──
   documents: () => request<UserDocument[]>("/api/documents"),
   documentsUnreadCount: () => request<{ count: number }>("/api/documents/unread-count"),
