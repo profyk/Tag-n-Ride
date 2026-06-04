@@ -24,7 +24,7 @@ async function fetchDriver(driverId: string): Promise<any> {
   return res.data;
 }
 
-const STATUS_TONE: Record<string, string> = {
+const STATUS_TONE: Record<string, "green" | "red" | "yellow" | "cyan" | "purple" | "muted" | "orange"> = {
   generated: "green",
   deleted: "red",
 };
