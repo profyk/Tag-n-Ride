@@ -27,6 +27,7 @@ export default function SafetyProfileScreen() {
   const [profileComplete, setProfileComplete] = useState(false);
 
   const [idNumber, setIdNumber] = useState("");
+  const [passportNumber, setPassportNumber] = useState("");
   const [dob, setDob] = useState("");
   const [bloodType, setBloodType] = useState("");
   const [medical, setMedical] = useState("");
@@ -51,6 +52,7 @@ export default function SafetyProfileScreen() {
       const p = await api.safetyProfile();
       if (p) {
         setIdNumber(p.id_number || "");
+        setPassportNumber(p.passport_number || "");
         setDob(p.date_of_birth || "");
         setBloodType(p.blood_type || "");
         setMedical(p.medical_conditions || "");
@@ -73,7 +75,7 @@ export default function SafetyProfileScreen() {
 
   useEffect(() => { loadProfile(); }, []);
 
-  const filledFields = [idNumber, dob, bloodType, medical, allergies, homeAddress,
+  const filledFields = [idNumber || passportNumber, dob, bloodType, medical, allergies, homeAddress,
     ec1Name, ec1Phone, ec1Rel, ec2Name, ec2Phone, ec2Rel, nokName, nokPhone, nokRel];
   const pct = Math.round((filledFields.filter(Boolean).length / filledFields.length) * 100);
 
@@ -82,6 +84,7 @@ export default function SafetyProfileScreen() {
     try {
       await api.saveSafetyProfile({
         id_number: idNumber || undefined,
+        passport_number: passportNumber || undefined,
         date_of_birth: dob || undefined,
         blood_type: bloodType || undefined,
         medical_conditions: medical || undefined,
@@ -98,7 +101,7 @@ export default function SafetyProfileScreen() {
         next_of_kin_relationship: nokRel || undefined,
       });
       setSaved(true);
-      setProfileComplete(!!(ec1Name && ec1Phone && idNumber));
+      setProfileComplete(!!(ec1Name && ec1Phone && (idNumber || passportNumber)));
       setTimeout(() => setSaved(false), 3000);
     } catch (e: any) {
       Alert.alert("Save failed", e?.message || "Could not save profile");
@@ -168,6 +171,11 @@ export default function SafetyProfileScreen() {
             <TextInput style={s.input} value={idNumber} onChangeText={setIdNumber}
               placeholder="South African ID number" placeholderTextColor={colors.textDim}
               keyboardType="number-pad" />
+
+            <Text style={s.label}>PASSPORT NUMBER <Text style={{ color: colors.textDim, fontWeight: "400" }}>(for non-SA ID holders)</Text></Text>
+            <TextInput style={s.input} value={passportNumber} onChangeText={setPassportNumber}
+              placeholder="Passport number" placeholderTextColor={colors.textDim}
+              autoCapitalize="characters" />
 
             <Text style={s.label}>DATE OF BIRTH</Text>
             <TextInput style={s.input} value={dob} onChangeText={setDob}
