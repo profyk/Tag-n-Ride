@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Badge, Spinner } from "@/components/ui";
 import client from "@/lib/api";
-import { Shield, AlertTriangle, Search, Phone, MapPin, RefreshCw, Users, Car } from "lucide-react";
+import { Shield, AlertTriangle, Search, Phone, MapPin, RefreshCw, Users, Car, Radio } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function SafeRidePage() {
@@ -20,6 +20,37 @@ export default function SafeRidePage() {
   const [stats, setStats] = useState({ active_trips: 0, total_passengers: 0, incidents_month: 0, contacts_reached: 0 });
   const driverRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [sosList, setSosList] = useState<any[]>([]);
+  const [sosLoading, setSosLoading] = useState(true);
+  const [sosChargeId, setSosChargeId] = useState<string | null>(null);
+  const [sosChargePrice, setSosChargePrice] = useState("");
+  const [sosActionLoading, setSosActionLoading] = useState<string | null>(null);
+  const sosRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const knownSosIdsRef = useRef<Set<string> | null>(null);
+
+  const playSosSiren = () => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sawtooth";
+      gain.gain.value = 0.18;
+      const t = ctx.currentTime;
+      // Three sweeps: 600Hz → 1200Hz → 600Hz each 0.5s
+      for (let i = 0; i < 3; i++) {
+        osc.frequency.setValueAtTime(600, t + i * 0.5);
+        osc.frequency.linearRampToValueAtTime(1200, t + i * 0.5 + 0.25);
+        osc.frequency.linearRampToValueAtTime(600, t + i * 0.5 + 0.5);
+      }
+      gain.gain.setValueAtTime(0.18, t + 1.3);
+      gain.gain.linearRampToValueAtTime(0, t + 1.5);
+      osc.start(t);
+      osc.stop(t + 1.5);
+    } catch {}
+  };
+
   const fetchDriverLocations = useCallback(async () => {
     try {
       const res = await client.get("/api/trips/driver-locations");
@@ -27,6 +58,38 @@ export default function SafeRidePage() {
     } catch {}
     finally { setLoadingDrivers(false); }
   }, []);
+
+  const fetchSos = useCallback(async () => {
+    try {
+      const res = await client.get("/api/admin/saferide/sos");
+      setSosList(res.data || []);
+    } catch {}
+    finally { setSosLoading(false); }
+  }, []);
+
+  const handleSosAction = async (sosId: string, status: "dispatched" | "resolved", notes?: string) => {
+    setSosActionLoading(sosId + status);
+    try {
+      await client.patch(`/api/admin/saferide/sos/${sosId}`, { status, notes });
+      toast.success(status === "dispatched" ? "Marked as dispatched" : "SOS resolved");
+      fetchSos();
+    } catch (e: any) { toast.error(e.message || "Failed"); }
+    finally { setSosActionLoading(null); }
+  };
+
+  const handleSosCharge = async (sosId: string) => {
+    const price = parseFloat(sosChargePrice);
+    if (!price || price <= 0) { toast.error("Enter a valid price"); return; }
+    setSosActionLoading(sosId + "charge");
+    try {
+      const res = await client.post(`/api/admin/saferide/sos/${sosId}/charge`, { price });
+      toast.success(res.data.deducted_from_wallet ? `R${price.toFixed(2)} deducted from wallet` : `R${price.toFixed(2)} recorded — wallet insufficient, follow up manually`);
+      setSosChargeId(null);
+      setSosChargePrice("");
+      fetchSos();
+    } catch (e: any) { toast.error(e.message || "Failed"); }
+    finally { setSosActionLoading(null); }
+  };
 
   const fetchIncidents = useCallback(async () => {
     try {
@@ -47,13 +110,32 @@ export default function SafeRidePage() {
   useEffect(() => {
     fetchDriverLocations();
     fetchIncidents();
+    fetchSos();
     driverRefTimer.current = setInterval(fetchDriverLocations, 30000);
-    return () => { if (driverRefTimer.current) clearInterval(driverRefTimer.current); };
+    sosRefTimer.current = setInterval(fetchSos, 10000);
+    return () => {
+      if (driverRefTimer.current) clearInterval(driverRefTimer.current);
+      if (sosRefTimer.current) clearInterval(sosRefTimer.current);
+    };
   }, []);
 
   useEffect(() => {
     setStats(prev => ({ ...prev, active_trips: driverLocations.length, total_passengers: driverLocations.reduce((s, d) => s + (d.passenger_count || 0), 0) }));
   }, [driverLocations]);
+
+  useEffect(() => {
+    const activeIds = new Set(
+      sosList.filter(s => s.status === "active" || s.status === "dispatched").map((s: any) => s.id as string)
+    );
+    if (knownSosIdsRef.current === null) {
+      // First load — record without alarming
+      knownSosIdsRef.current = activeIds;
+      return;
+    }
+    const hasNew = [...activeIds].some(id => !knownSosIdsRef.current!.has(id));
+    if (hasNew) playSosSiren();
+    knownSosIdsRef.current = activeIds;
+  }, [sosList]);
 
   const handleSearch = async () => {
     if (!searchPlate.trim()) return;
@@ -88,6 +170,8 @@ export default function SafeRidePage() {
     return new Date(iso).toLocaleString("en-ZA", { dateStyle: "short", timeStyle: "short" });
   };
 
+  const activeSos = sosList.filter(s => s.status === "active" || s.status === "dispatched");
+
   return (
     <AdminShell title="SafeRide Command Centre">
       <div className="p-6 space-y-6">
@@ -106,12 +190,146 @@ export default function SafeRidePage() {
           </Link>
         </div>
 
+        {/* SOS ALERTS */}
+        <div className={`rounded-xl border p-5 ${activeSos.length > 0 ? "bg-red-950/30 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.15)]" : "bg-bg2 border-border"}`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Radio size={16} className={activeSos.length > 0 ? "text-red-400 animate-pulse" : "text-textMuted"} />
+              <h2 className="font-extrabold text-text text-sm uppercase tracking-wider">SOS Distress Signals</h2>
+              {activeSos.length > 0 && (
+                <span className="animate-pulse bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                  {activeSos.length} ACTIVE
+                </span>
+              )}
+              <span className="text-[10px] text-textDim">(refreshes every 10s)</span>
+            </div>
+            <button onClick={fetchSos} className="text-textMuted hover:text-red-400 transition-colors">
+              <RefreshCw size={14} />
+            </button>
+          </div>
+
+          {sosLoading ? (
+            <div className="flex items-center justify-center py-8"><Spinner size={20} /></div>
+          ) : sosList.length === 0 ? (
+            <p className="text-textMuted text-sm text-center py-6">No SOS requests</p>
+          ) : (
+            <div className="space-y-3">
+              {sosList.map(sos => {
+                const isActive = sos.status === "active" || sos.status === "dispatched";
+                const typePolice = sos.emergency_type === "police";
+                const mapsUrl = sos.latest_lat
+                  ? `https://maps.google.com/?q=${sos.latest_lat},${sos.latest_lng}`
+                  : sos.latitude ? `https://maps.google.com/?q=${sos.latitude},${sos.longitude}` : null;
+                const elapsed = sos.created_at
+                  ? Math.floor((Date.now() - new Date(sos.created_at).getTime()) / 60000)
+                  : 0;
+                return (
+                  <div key={sos.id} className={`rounded-xl border p-4 ${isActive ? "border-red-500/50 bg-red-950/20" : "border-border bg-bg"}`}>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${typePolice ? "bg-blue-500/10 border border-blue-500/20" : "bg-red-500/10 border border-red-500/20"}`}>
+                          <Radio size={18} className={typePolice ? "text-blue-400" : "text-red-400"} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-extrabold text-text text-sm">{sos.user_name || "Unknown"}</p>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${typePolice ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}>
+                              {sos.emergency_type?.toUpperCase()}
+                            </span>
+                            <Badge tone={sos.status === "resolved" ? "green" : sos.status === "dispatched" ? "yellow" : "red"}>
+                              {sos.status}
+                            </Badge>
+                          </div>
+                          <a href={`tel:${sos.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                            <Phone size={10} /> {sos.user_phone || "No phone"}
+                          </a>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-[10px] text-textDim">{formatTime(sos.created_at)}</p>
+                        {isActive && <p className="text-[10px] text-red-400 font-bold">{elapsed}m ago</p>}
+                        {sos.charged && <p className="text-[10px] text-green font-bold">R{sos.price?.toFixed(2)} charged</p>}
+                      </div>
+                    </div>
+
+                    {/* Location */}
+                    {mapsUrl && (
+                      <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-xs text-cyan hover:underline bg-bg border border-border rounded-lg px-3 py-2 mb-3">
+                        <MapPin size={12} />
+                        {sos.latest_lat ? "Live location — view on map" : "Last known location — view on map"}
+                      </a>
+                    )}
+
+                    {/* Admin notes */}
+                    {sos.admin_notes && (
+                      <p className="text-xs text-textMuted bg-bg2 rounded px-3 py-2 mb-3 border border-border">
+                        Notes: {sos.admin_notes}
+                      </p>
+                    )}
+
+                    {/* Actions */}
+                    {isActive && (
+                      <div className="flex flex-wrap gap-2">
+                        {sos.status === "active" && (
+                          <button
+                            disabled={!!sosActionLoading}
+                            onClick={() => handleSosAction(sos.id, "dispatched", "Services contacted")}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold rounded-lg hover:bg-yellow-500/20 transition-colors disabled:opacity-50">
+                            {sosActionLoading === sos.id + "dispatched" ? <Spinner size={10} /> : <Phone size={11} />}
+                            Mark Dispatched
+                          </button>
+                        )}
+                        <button
+                          disabled={!!sosActionLoading}
+                          onClick={() => handleSosAction(sos.id, "resolved")}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
+                          {sosActionLoading === sos.id + "resolved" ? <Spinner size={10} /> : null}
+                          Mark Resolved
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Charge section */}
+                    {sos.status === "resolved" && !sos.charged && (
+                      sosChargeId === sos.id ? (
+                        <div className="flex items-center gap-2 mt-2">
+                          <input
+                            type="number"
+                            value={sosChargePrice}
+                            onChange={e => setSosChargePrice(e.target.value)}
+                            placeholder="Amount (R)"
+                            className="w-32 bg-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-cyan"
+                          />
+                          <button
+                            disabled={sosActionLoading === sos.id + "charge"}
+                            onClick={() => handleSosCharge(sos.id)}
+                            className="px-3 py-1.5 bg-cyan/10 border border-cyan/30 text-cyan text-xs font-bold rounded-lg hover:bg-cyan/20 disabled:opacity-50">
+                            {sosActionLoading === sos.id + "charge" ? <Spinner size={10} /> : "Charge User"}
+                          </button>
+                          <button onClick={() => setSosChargeId(null)} className="text-textMuted hover:text-text text-xs">Cancel</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setSosChargeId(sos.id); setSosChargePrice(""); }}
+                          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-cyan/10 border border-cyan/30 text-cyan text-xs font-bold rounded-lg hover:bg-cyan/20 transition-colors">
+                          Set Service Fee
+                        </button>
+                      )
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "Active Trips", value: stats.active_trips, icon: Car, color: "text-cyan" },
             { label: "Passengers Today", value: stats.total_passengers, icon: Users, color: "text-green" },
-            { label: "Incidents This Month", value: stats.incidents_month, icon: AlertTriangle, color: "text-red-400" },
+            { label: "Active SOS", value: activeSos.length, icon: Radio, color: activeSos.length > 0 ? "text-red-400" : "text-textMuted" },
             { label: "Contacts Reached", value: stats.contacts_reached, icon: Phone, color: "text-purple" },
           ].map(stat => (
             <div key={stat.label} className="bg-bg2 border border-border rounded-xl p-4">

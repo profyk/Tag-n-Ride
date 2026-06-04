@@ -624,6 +624,12 @@ export const api = {
   safetyPanic: (body: { latitude?: number; longitude?: number }) =>
     request<any>("/api/safety/panic", { method: "POST", body: JSON.stringify(body) }),
 
+  sosRequest: (body: { emergency_type: "police" | "ambulance"; latitude?: number; longitude?: number }) =>
+    request<{ ok: boolean; sos_id: string }>("/api/saferide/sos", { method: "POST", body: JSON.stringify(body) }),
+
+  sosLocationPing: (sosId: string, body: { latitude: number; longitude: number }) =>
+    request<{ ok: boolean; resolved: boolean }>(`/api/saferide/sos/${sosId}/location`, { method: "POST", body: JSON.stringify(body) }),
+
   // ── User Documents ──
   documents: () => request<UserDocument[]>("/api/documents"),
   documentsUnreadCount: () => request<{ count: number }>("/api/documents/unread-count"),

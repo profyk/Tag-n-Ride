@@ -4058,6 +4058,34 @@ async def create_new_tables():
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS sos_requests (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id TEXT NOT NULL,
+                        user_name TEXT,
+                        user_phone TEXT,
+                        emergency_type TEXT NOT NULL,
+                        latitude NUMERIC,
+                        longitude NUMERIC,
+                        status TEXT DEFAULT 'active',
+                        admin_id TEXT,
+                        admin_notes TEXT,
+                        price NUMERIC,
+                        charged BOOLEAN DEFAULT false,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        dispatched_at TIMESTAMPTZ,
+                        resolved_at TIMESTAMPTZ
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS sos_locations (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        sos_id TEXT NOT NULL,
+                        latitude NUMERIC NOT NULL,
+                        longitude NUMERIC NOT NULL,
+                        recorded_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
                 await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS trip_id TEXT")
                 await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS passenger_user_id TEXT")
                 await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS driver_user_id TEXT")
@@ -11644,6 +11672,22 @@ class PanicIn(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+class SosRequestIn(BaseModel):
+    emergency_type: str  # 'police' or 'ambulance'
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class SosLocationIn(BaseModel):
+    latitude: float
+    longitude: float
+
+class SosUpdateIn(BaseModel):
+    status: str  # 'dispatched' or 'resolved'
+    notes: Optional[str] = None
+
+class SosChargeIn(BaseModel):
+    price: float
+
 _gps_last: dict = {}
 
 # ── GET /api/safety/profile ──
@@ -12214,6 +12258,165 @@ async def panic_button(body: PanicIn, user: dict = Depends(get_current_user)):
         "notifications_sent": notifications_sent,
         "message": f"SOS sent to {notifications_sent} emergency contact(s)",
     }
+
+# ── POST /api/saferide/sos ── user triggers SOS distress signal
+@api.post("/saferide/sos")
+async def create_sos_request(body: SosRequestIn, user: dict = Depends(get_current_user)):
+    if body.emergency_type not in ("police", "ambulance"):
+        raise HTTPException(400, "emergency_type must be 'police' or 'ambulance'")
+    now = datetime.now(timezone.utc)
+    sos_id = str(uuid.uuid4())
+    user_name = user.get("full_name") or user.get("id")
+    user_phone = user.get("phone_number") or ""
+    maps_url = (f"https://maps.google.com/?q={body.latitude},{body.longitude}"
+                if body.latitude and body.longitude else "Location unavailable")
+    time_str = now.strftime("%Y-%m-%d %H:%M UTC")
+    etype_label = "POLICE" if body.emergency_type == "police" else "AMBULANCE"
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO sos_requests (id,user_id,user_name,user_phone,emergency_type,latitude,longitude,status,created_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8)",
+            sos_id, user["id"], user_name, user_phone, body.emergency_type,
+            body.latitude, body.longitude, now
+        )
+        if body.latitude and body.longitude:
+            await conn.execute(
+                "INSERT INTO sos_locations (id,sos_id,latitude,longitude) VALUES ($1,$2,$3,$4)",
+                str(uuid.uuid4()), sos_id, body.latitude, body.longitude
+            )
+        # SMS to all emergency contacts
+        profile = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if profile:
+            for cname, cphone in [
+                (profile["emergency_contact_1_name"], profile["emergency_contact_1_phone"]),
+                (profile["emergency_contact_2_name"], profile["emergency_contact_2_phone"]),
+                (profile["next_of_kin_name"], profile["next_of_kin_phone"]),
+            ]:
+                if not cphone:
+                    continue
+                msg = (f"SOS ALERT — {etype_label} NEEDED\n"
+                       f"{user_name} has triggered an emergency via Tag n Ride\n"
+                       f"Location: {maps_url}\n"
+                       f"Time: {time_str}\n"
+                       f"Our team is contacting {etype_label} on their behalf.")
+                await send_sms(cphone, msg)
+        # Notify all admin/superadmin/ceo users
+        admin_users = await conn.fetch(
+            "SELECT id FROM users WHERE role IN ('superadmin','admin','ceo') AND is_active=true LIMIT 20"
+        )
+        blood = profile["blood_type"] if profile and profile.get("blood_type") else "Unknown"
+        for au in admin_users:
+            await notify_user(
+                conn,
+                f"SOS — {etype_label} NEEDED",
+                f"{user_name} | {user_phone} | Blood: {blood} | {maps_url}",
+                "sos_alert", au["id"]
+            )
+    return {"ok": True, "sos_id": sos_id}
+
+
+# ── POST /api/saferide/sos/{sos_id}/location ── live location ping
+@api.post("/saferide/sos/{sos_id}/location")
+async def sos_location_ping(sos_id: str, body: SosLocationIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow("SELECT id,user_id,status FROM sos_requests WHERE id=$1", sos_id)
+        if not req or req["user_id"] != user["id"]:
+            raise HTTPException(404, "SOS request not found")
+        if req["status"] == "resolved":
+            return {"ok": True, "resolved": True}
+        await conn.execute(
+            "INSERT INTO sos_locations (id,sos_id,latitude,longitude) VALUES ($1,$2,$3,$4)",
+            str(uuid.uuid4()), sos_id, body.latitude, body.longitude
+        )
+        await conn.execute(
+            "UPDATE sos_requests SET latitude=$1,longitude=$2 WHERE id=$3",
+            body.latitude, body.longitude, sos_id
+        )
+    return {"ok": True, "resolved": False}
+
+
+# ── GET /api/admin/saferide/sos ── list all SOS requests
+@api.get("/admin/saferide/sos")
+async def admin_list_sos(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT s.*, "
+            "(SELECT latitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lat, "
+            "(SELECT longitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lng "
+            "FROM sos_requests s ORDER BY s.created_at DESC LIMIT 100"
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        for k in ("created_at", "dispatched_at", "resolved_at"):
+            if d.get(k):
+                d[k] = iso(d[k])
+        for k in ("latitude", "longitude", "latest_lat", "latest_lng", "price"):
+            if d.get(k) is not None:
+                d[k] = float(d[k])
+        result.append(d)
+    return result
+
+
+# ── PATCH /api/admin/saferide/sos/{sos_id} ── update status
+@api.patch("/admin/saferide/sos/{sos_id}")
+async def admin_update_sos(sos_id: str, body: SosUpdateIn, admin: dict = Depends(require_admin)):
+    now = datetime.now(timezone.utc)
+    if body.status not in ("dispatched", "resolved"):
+        raise HTTPException(400, "status must be 'dispatched' or 'resolved'")
+    async with pool.acquire() as conn:
+        if body.status == "dispatched":
+            await conn.execute(
+                "UPDATE sos_requests SET status='dispatched',admin_id=$1,admin_notes=$2,dispatched_at=$3 WHERE id=$4",
+                admin["id"], body.notes, now, sos_id
+            )
+        else:
+            await conn.execute(
+                "UPDATE sos_requests SET status='resolved',admin_id=$1,admin_notes=$2,resolved_at=$3 WHERE id=$4",
+                admin["id"], body.notes, now, sos_id
+            )
+    return {"ok": True}
+
+
+# ── POST /api/admin/saferide/sos/{sos_id}/charge ── debit user for SOS service
+@api.post("/admin/saferide/sos/{sos_id}/charge")
+async def admin_charge_sos(sos_id: str, body: SosChargeIn, admin: dict = Depends(require_admin)):
+    if body.price <= 0:
+        raise HTTPException(400, "Price must be greater than 0")
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow("SELECT * FROM sos_requests WHERE id=$1", sos_id)
+        if not req:
+            raise HTTPException(404, "SOS request not found")
+        if req["charged"]:
+            raise HTTPException(400, "Already charged for this SOS")
+        etype = (req["emergency_type"] or "").upper()
+        ref = f"SOS-{sos_id[:8].upper()}"
+        # Attempt wallet deduction; if insufficient funds the balance stays and admin follows up
+        deducted = await conn.fetchval(
+            "UPDATE wallets SET balance=balance-$1 WHERE user_id=$2 AND balance>=$1 RETURNING balance",
+            body.price, req["user_id"]
+        )
+        txn_note = f"SOS Emergency Service Fee ({etype})"
+        await conn.execute(
+            "INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note) "
+            "VALUES ($1,$2,'sos_fee','completed',$3,$4,NULL,$5)",
+            str(uuid.uuid4()), ref, body.price, req["user_id"], txn_note
+        )
+        await conn.execute(
+            "UPDATE sos_requests SET price=$1,charged=true WHERE id=$2",
+            body.price, sos_id
+        )
+        # Notify user
+        if deducted is not None:
+            await notify_user(conn, "SOS Service Fee Charged",
+                f"R{body.price:.2f} has been deducted from your wallet for emergency services ({etype}).",
+                "sos_fee", req["user_id"])
+        else:
+            await notify_user(conn, "SOS Service Fee — Payment Due",
+                f"R{body.price:.2f} is owed for your recent emergency services ({etype}). Please top up your wallet.",
+                "sos_fee", req["user_id"])
+    return {"ok": True, "deducted_from_wallet": deducted is not None}
+
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line
