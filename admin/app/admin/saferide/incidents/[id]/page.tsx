@@ -181,22 +181,32 @@ export default function IncidentDetailPage() {
             <div className="divide-y divide-border">
               {incident.passengers.map((p: any, i: number) => (
                 <div key={i} className="p-5">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <p className="font-bold text-text">{p.passenger_name || "Unknown Passenger"}</p>
-                      <a href={`tel:${p.passenger_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
-                        <Phone size={10} /> {p.passenger_phone}
-                      </a>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {p.blood_type && (
-                        <span className="bg-red-500/10 text-red-400 text-[10px] font-extrabold px-2 py-0.5 rounded border border-red-500/20">
-                          {p.blood_type}
-                        </span>
-                      )}
-                      <Badge tone={p.profile_complete ? "green" : "yellow"}>
-                        {p.profile_complete ? "SafeRide ✓" : "No Profile"}
-                      </Badge>
+                  <div className="flex items-start gap-3 mb-3">
+                    {/* Selfie photo */}
+                    {p.selfie_url ? (
+                      <img src={p.selfie_url} alt={p.passenger_name} className="w-14 h-14 rounded-full object-cover border-2 border-green/40 flex-shrink-0" />
+                    ) : (
+                      <div className="w-14 h-14 rounded-full bg-bg border-2 border-border flex items-center justify-center flex-shrink-0 text-textDim text-xl font-bold">
+                        {(p.passenger_name || "?")[0].toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 flex items-start justify-between">
+                      <div>
+                        <p className="font-bold text-text">{p.passenger_name || "Unknown Passenger"}</p>
+                        <a href={`tel:${p.passenger_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                          <Phone size={10} /> {p.passenger_phone}
+                        </a>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {p.blood_type && (
+                          <span className="bg-red-500/10 text-red-400 text-[10px] font-extrabold px-2 py-0.5 rounded border border-red-500/20">
+                            {p.blood_type}
+                          </span>
+                        )}
+                        <Badge tone={p.profile_complete ? "green" : "yellow"}>
+                          {p.profile_complete ? "SafeRide ✓" : "No Profile"}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
                   {p.medical_conditions && (
@@ -346,8 +356,13 @@ function buildManifestHTML(incident: any): string {
 </div>
 ${(incident.passengers || []).map((p: any, i: number) => `
 <div class="passenger">
-  <div class="p-name">${i + 1}. ${p.passenger_name || "Unknown"} ${p.blood_type ? `<span class="blood">${p.blood_type}</span>` : ""}</div>
-  <div style="font-size:11px;color:#555;margin-top:4px;">${p.passenger_phone || ""}</div>
+  <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:10px;">
+    ${p.selfie_url ? `<img src="${p.selfie_url}" style="width:60px;height:60px;border-radius:30px;object-fit:cover;border:2px solid #22c55e;flex-shrink:0;" />` : `<div style="width:60px;height:60px;border-radius:30px;background:#f3f4f6;border:2px solid #d1d5db;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:22px;font-weight:800;color:#9ca3af;">${(p.passenger_name||"?")[0].toUpperCase()}</div>`}
+    <div>
+      <div class="p-name">${i + 1}. ${p.passenger_name || "Unknown"} ${p.blood_type ? `<span class="blood">${p.blood_type}</span>` : ""}</div>
+      <div style="font-size:11px;color:#555;margin-top:4px;">${p.passenger_phone || ""}</div>
+    </div>
+  </div>
   ${p.medical_conditions ? `<div style="background:#fff8f0;padding:6px 8px;border-radius:4px;margin:6px 0;font-size:11px;">⚕ <strong>Medical:</strong> ${p.medical_conditions}</div>` : ""}
   ${p.allergies ? `<div style="background:#fff8f0;padding:6px 8px;border-radius:4px;margin:6px 0;font-size:11px;">⚠ <strong>Allergies:</strong> ${p.allergies}</div>` : ""}
   <div class="section">Emergency Contacts</div>

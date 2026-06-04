@@ -554,12 +554,32 @@ export const api = {
   safetyProfile: () => request<any>("/api/safety/profile"),
 
   saveSafetyProfile: (body: {
-    full_name?: string; id_number?: string; date_of_birth?: string; blood_type?: string;
+    full_name?: string; id_number?: string; passport_number?: string; date_of_birth?: string; blood_type?: string;
     home_address?: string; medical_conditions?: string; allergies?: string;
     emergency_contact_1_name?: string; emergency_contact_1_phone?: string; emergency_contact_1_relationship?: string;
     emergency_contact_2_name?: string; emergency_contact_2_phone?: string; emergency_contact_2_relationship?: string;
     next_of_kin_name?: string; next_of_kin_phone?: string; next_of_kin_relationship?: string;
   }) => request<any>("/api/safety/profile", { method: "POST", body: JSON.stringify(body) }),
+
+  saveSafetySelfie: async (selfie: { uri: string; type: string; name: string }) => {
+    const token = await tokenStore.get();
+    const formData = new FormData();
+    formData.append("selfie", { uri: selfie.uri, name: selfie.name, type: selfie.type } as any);
+    const res = await fetch(`${BASE}/api/safety/selfie`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = text;
+      try { msg = JSON.parse(text)?.detail || text; } catch {}
+      throw new Error(msg || "Selfie upload failed");
+    }
+    return res.json();
+  },
+
+  safetySelfieUrl: () => request<{ url: string }>("/api/safety/selfie-url"),
 
   updateSafetyProfile: (body: {
     id_number?: string; blood_type?: string; home_address?: string;

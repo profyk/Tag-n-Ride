@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator,
+  TextInput, Alert, ActivityIndicator, Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { api } from "../../src/api";
@@ -25,6 +26,9 @@ export default function SafetyProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [profileComplete, setProfileComplete] = useState(false);
+
+  const [uploadedSelfieUrl, setUploadedSelfieUrl] = useState<string | null>(null);
+  const [uploadingSelfie, setUploadingSelfie] = useState(false);
 
   const [idNumber, setIdNumber] = useState("");
   const [passportNumber, setPassportNumber] = useState("");
@@ -49,7 +53,11 @@ export default function SafetyProfileScreen() {
   const loadProfile = useCallback(async () => {
     setLoading(true);
     try {
-      const p = await api.safetyProfile();
+      const [p, selfie] = await Promise.all([
+        api.safetyProfile(),
+        api.safetySelfieUrl().catch(() => null),
+      ]);
+      if (selfie?.url) setUploadedSelfieUrl(selfie.url);
       if (p) {
         setIdNumber(p.id_number || "");
         setPassportNumber(p.passport_number || "");
@@ -78,6 +86,37 @@ export default function SafetyProfileScreen() {
   const filledFields = [idNumber || passportNumber, dob, bloodType, medical, allergies, homeAddress,
     ec1Name, ec1Phone, ec1Rel, ec2Name, ec2Phone, ec2Rel, nokName, nokPhone, nokRel];
   const pct = Math.round((filledFields.filter(Boolean).length / filledFields.length) * 100);
+
+  const takeSelfie = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Camera access is required to take your photo."); return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, aspect: [1, 1], quality: 0.85,
+        cameraType: "front" as any,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const photo = { uri: result.assets[0].uri, type: "image/jpeg", name: "safety_selfie.jpg" };
+      setUploadingSelfie(true);
+      try {
+        const res = await api.saveSafetySelfie(photo);
+        if (res?.url) setUploadedSelfieUrl(res.url);
+        else {
+          // reload to get fresh signed URL
+          const fresh = await api.safetySelfieUrl().catch(() => null);
+          if (fresh?.url) setUploadedSelfieUrl(fresh.url);
+        }
+        Alert.alert("Photo saved ✓", "Your identification photo has been updated.");
+      } catch (e: any) {
+        Alert.alert("Upload failed", e?.message || "Could not upload photo. Please try again.");
+      } finally { setUploadingSelfie(false); }
+    } catch (e: any) {
+      Alert.alert("Camera error", e?.message || "Could not open camera.");
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -163,6 +202,44 @@ export default function SafetyProfileScreen() {
                 </View>
               </View>
             )}
+
+            {/* ── SECTION 0: Identification Photo ── */}
+            <Text style={s.section}>IDENTIFICATION PHOTO</Text>
+            <View style={s.photoRow}>
+              <View style={s.photoWrap}>
+                {uploadedSelfieUrl ? (
+                  <Image source={{ uri: uploadedSelfieUrl }} style={s.selfieImg} />
+                ) : (
+                  <View style={s.selfiePlaceholder}>
+                    <Ionicons name="person-outline" size={36} color={colors.textDim} />
+                  </View>
+                )}
+                {uploadingSelfie && (
+                  <View style={s.selfieOverlay}>
+                    <ActivityIndicator color="#fff" size="small" />
+                  </View>
+                )}
+                {uploadedSelfieUrl && !uploadingSelfie && (
+                  <View style={s.selfieCheck}>
+                    <Ionicons name="checkmark-circle" size={20} color={colors.green} />
+                  </View>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.photoTitle}>
+                  {uploadedSelfieUrl ? "Photo on file" : "No photo yet"}
+                </Text>
+                <Text style={s.photoSub}>
+                  Used to identify you in case of emergency — shown to rescue services and next of kin
+                </Text>
+                <TouchableOpacity style={s.photoBtn} onPress={takeSelfie} disabled={uploadingSelfie} activeOpacity={0.7}>
+                  <Ionicons name="camera-outline" size={15} color={colors.cyan} />
+                  <Text style={s.photoBtnText}>
+                    {uploadedSelfieUrl ? "Update Photo" : "Take Photo"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
             {/* ── SECTION 1: Personal Information ── */}
             <Text style={s.section}>PERSONAL INFORMATION</Text>
@@ -324,4 +401,14 @@ const makeStyles = (colors: any) => StyleSheet.create({
   infoText: { color: colors.textMuted, fontSize: 12, flex: 1, lineHeight: 17 },
   savedRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.green + "15", borderRadius: radius.sm, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: colors.green + "40" },
   savedText: { color: colors.green, fontSize: 14, fontWeight: "600" },
+  photoRow: { flexDirection: "row", alignItems: "center", gap: 16, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 8 },
+  photoWrap: { position: "relative", width: 80, height: 80 },
+  selfieImg: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: colors.green },
+  selfiePlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.bg, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  selfieOverlay: { position: "absolute", inset: 0, borderRadius: 40, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" } as any,
+  selfieCheck: { position: "absolute", bottom: 0, right: 0, backgroundColor: colors.bg2, borderRadius: 12, padding: 1 },
+  photoTitle: { color: colors.text, fontWeight: "700", fontSize: 14, marginBottom: 4 },
+  photoSub: { color: colors.textMuted, fontSize: 11, lineHeight: 16, marginBottom: 10 },
+  photoBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.cyan, backgroundColor: colors.cyanDim },
+  photoBtnText: { color: colors.cyan, fontSize: 13, fontWeight: "700" },
 });
