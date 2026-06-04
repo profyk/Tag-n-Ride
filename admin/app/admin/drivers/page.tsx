@@ -389,8 +389,8 @@ export default function DriversPage() {
                       <QrCode size={13} className={d.qr_code ? "" : "text-textDim"} />
                     </Button>
                     <Link href={`/admin/drivers/${d.user_id}/statements`}>
-                      <Button variant="ghost" title="View earnings statements">
-                        <FileText size={13} /> Statements
+                      <Button variant="ghost" title="View earnings documents">
+                        <FileText size={13} /> Documents
                       </Button>
                     </Link>
                     <Link href={`/admin/drivers/${d.user_id}`}>

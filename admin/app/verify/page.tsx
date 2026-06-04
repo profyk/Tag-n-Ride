@@ -4,13 +4,22 @@ import { useSearchParams } from "next/navigation";
 
 const BASE_URL = "https://tag-n-ride-production.up.railway.app";
 
-async function verifyPayslip(ref: string): Promise<any> {
+async function verifyDocument(ref: string): Promise<any> {
   const res = await fetch(`${BASE_URL}/api/driver/payslip/verify?ref=${encodeURIComponent(ref)}`);
   return res.json();
 }
 
 function formatZAR(n: number) {
   return `R ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+}
+
+function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex justify-between items-center">
+      <span className="text-[#666] text-xs">{label}</span>
+      <span className={`font-bold text-sm ${highlight ? "text-[#00D4FF]" : "text-white"}`}>{value}</span>
+    </div>
+  );
 }
 
 function VerifyContent() {
@@ -22,11 +31,13 @@ function VerifyContent() {
 
   useEffect(() => {
     if (!ref) { setLoading(false); return; }
-    verifyPayslip(ref)
+    verifyDocument(ref)
       .then(setResult)
       .catch(() => setResult({ valid: false }))
       .finally(() => setLoading(false));
   }, [ref]);
+
+  const isPayslip = result?.document_type === "payslip";
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-center p-6">
@@ -42,7 +53,7 @@ function VerifyContent() {
             <div className="text-5xl mb-4">🔍</div>
             <p className="text-white font-bold text-lg">No Reference Provided</p>
             <p className="text-[#888] text-sm mt-2">
-              Please scan the QR code on the earnings statement or visit the URL printed on the document.
+              Please scan the QR code on the document or visit the URL printed on the payslip.
             </p>
           </div>
         ) : loading ? (
@@ -52,9 +63,21 @@ function VerifyContent() {
           </div>
         ) : result?.valid ? (
           <div className="text-center">
-            <div className="text-6xl mb-4">✅</div>
-            <p className="text-[#22c55e] font-black text-xl tracking-wide mb-1">VERIFIED DOCUMENT</p>
-            <p className="text-[#00D4FF] font-bold text-sm mb-6">TAG N RIDE PTY LTD · Official Earnings Statement</p>
+            {isPayslip ? (
+              <>
+                <div className="text-6xl mb-4">🛡️</div>
+                <p className="text-[#22c55e] font-black text-xl tracking-wide mb-1">VERIFIED FORMAL PAYSLIP</p>
+                <p className="text-[#22c55e] font-bold text-sm mb-2">TAG N RIDE PTY LTD</p>
+                <p className="text-[#888] text-xs mb-6">Official Driver Payslip</p>
+              </>
+            ) : (
+              <>
+                <div className="text-6xl mb-4">✅</div>
+                <p className="text-[#00D4FF] font-black text-xl tracking-wide mb-1">VERIFIED EARNINGS STATEMENT</p>
+                <p className="text-[#00D4FF] font-bold text-sm mb-2">TAG N RIDE PTY LTD</p>
+                <p className="text-[#888] text-xs mb-6">Official Earnings Document</p>
+              </>
+            )}
 
             <div className="bg-[#0d0d15] border border-[#1a1a2e] rounded-xl p-5 text-left space-y-3 mb-6">
               <Row label="Driver" value={result.driver_name} />
@@ -71,10 +94,31 @@ function VerifyContent() {
               />
             </div>
 
-            <div className="bg-[#00D4FF]/10 border border-[#00D4FF]/30 rounded-xl p-4">
-              <p className="text-[#00D4FF] text-xs font-bold tracking-wider mb-1">REFERENCE NUMBER</p>
+            <div
+              className={`border rounded-xl p-4 mb-4 ${
+                isPayslip
+                  ? "bg-[#22c55e]/10 border-[#22c55e]/30"
+                  : "bg-[#00D4FF]/10 border-[#00D4FF]/30"
+              }`}
+            >
+              <p
+                className={`text-xs font-bold tracking-wider mb-1 ${
+                  isPayslip ? "text-[#22c55e]" : "text-[#00D4FF]"
+                }`}
+              >
+                REFERENCE NUMBER
+              </p>
               <p className="font-mono text-white text-sm break-all">{ref}</p>
             </div>
+
+            {isPayslip && (
+              <div className="bg-[#22c55e]/10 border border-[#22c55e]/20 rounded-xl p-4 text-left">
+                <p className="text-[#22c55e] text-xs font-bold mb-1">BANK-GRADE VERIFIED DOCUMENT</p>
+                <p className="text-[#888] text-xs">
+                  This is a bank-grade verified document. It may be used as proof of income for credit, loan, and financial applications.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center">
@@ -110,15 +154,6 @@ function VerifyContent() {
           This portal verifies documents digitally issued by Tag n Ride Pty Ltd.
         </p>
       </div>
-    </div>
-  );
-}
-
-function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className="flex justify-between items-center">
-      <span className="text-[#666] text-xs">{label}</span>
-      <span className={`font-bold text-sm ${highlight ? "text-[#00D4FF]" : "text-white"}`}>{value}</span>
     </div>
   );
 }

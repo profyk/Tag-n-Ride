@@ -512,8 +512,23 @@ export const api = {
       fee_12months: number;
     }>("/api/driver/payslip/pricing"),
 
+  formalPayslipPricing: () =>
+    request<{
+      enabled: boolean;
+      fee_1month: number;
+      fee_3months: number;
+      fee_6months: number;
+      fee_12months: number;
+    }>("/api/driver/formal-payslip/pricing"),
+
   payslipRequest: (body: { period_type: string; month: string }) =>
     request<any>("/api/driver/payslip/request", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  formalPayslipRequest: (body: { period_type: string; month: string }) =>
+    request<any>("/api/driver/formal-payslip/request", {
       method: "POST",
       body: JSON.stringify(body),
     }),
