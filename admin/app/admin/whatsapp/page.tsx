@@ -245,7 +245,7 @@ export default function WhatsAppPage() {
         m.status, m.sent_at, m.sent_by_name ?? "System",
       ]),
     ];
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const csv = rows.map(r => r.map((c: string | number) => `"${c}"`).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = `whatsapp_history_${new Date().toISOString().slice(0, 10)}.csv`;

@@ -102,7 +102,7 @@ export default function FeedbackPage() {
         i.rated_name, i.rated_role, i.is_flagged ? "Yes" : "No", formatDate(i.created_at),
       ]),
     ];
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const csv = rows.map(r => r.map((c: string | number) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

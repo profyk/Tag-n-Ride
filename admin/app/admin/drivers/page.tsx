@@ -267,7 +267,7 @@ export default function DriversPage() {
         d.created_at ? formatDate(d.created_at) : "",
       ]),
     ];
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const csv = rows.map(r => r.map((c: string | number) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `drivers-${filter}.csv`; a.click();

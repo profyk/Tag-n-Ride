@@ -66,7 +66,7 @@ export default function ReferralsPage() {
         formatZAR(r.reward_amount), r.status, formatDate(r.created_at),
       ]),
     ];
-    const csv = rows.map(row => row.map(c => `"${c}"`).join(",")).join("\n");
+    const csv = rows.map(row => row.map((c: string | number) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
