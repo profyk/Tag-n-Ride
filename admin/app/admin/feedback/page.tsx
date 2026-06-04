@@ -80,7 +80,7 @@ export default function FeedbackPage() {
   };
 
   const handleBulkDelete = async () => {
-    const ids = [...selected];
+    const ids = Array.from(selected);
     if (!ids.length) return;
     if (!confirm(`Permanently delete ${ids.length} review${ids.length > 1 ? "s" : ""}?`)) return;
     setBulkDeleting(true);
