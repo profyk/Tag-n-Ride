@@ -111,7 +111,7 @@ export default function RiskPage() {
           <StatCard label="High-Risk (≥75)" value={String(highRisk)} tone={highRisk > 0 ? "red" : "green"} />
           <StatCard label="Medium-Risk (50–74)" value={String(medRisk)} tone={medRisk > 0 ? "yellow" : "green"} />
           <StatCard label="Avg Risk Score" value={String(avgScore)} tone={avgScore >= 50 ? "yellow" : "green"} />
-          <StatCard label="Frozen Wallets" value={String(frozenCount)} tone={frozenCount > 0 ? "purple" : "muted"} />
+          <StatCard label="Frozen Wallets" value={String(frozenCount)} tone={frozenCount > 0 ? "purple" : undefined} />
         </div>
 
         {highUnfrozen > 0 && (
