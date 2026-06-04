@@ -506,7 +506,7 @@ export default function DataAnalyticsPage() {
                   <h3 className="text-text font-bold text-sm">Anomalous Days ({anomalyIdxs.size} detected)</h3>
                 </div>
                 <div className="space-y-2">
-                  {[...anomalyIdxs].map(i => {
+                  {Array.from(anomalyIdxs).map(i => {
                     const d = daily[i];
                     const zScore = sdVol > 0 ? ((d.amount - avgDaily) / sdVol) : 0;
                     return (
