@@ -282,7 +282,10 @@ export default function Home() {
   };
 
   const handleCashUp = async () => {
-    if (!cashupStatus?.has_owner) return;
+    if (!cashupStatus?.has_owner) {
+      Alert.alert("No Owner", "You are not linked to a fleet owner. Use the Payout button to send funds to your own bank account.");
+      return;
+    }
     const amount = parseFloat(cashUpAmount);
     if (!cashUpAmount || isNaN(amount) || amount <= 0) {
       Alert.alert("Invalid amount", "Please enter a valid amount."); return;
@@ -291,6 +294,18 @@ export default function Home() {
     if (amount > (wallet?.balance ?? 0)) {
       Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
     }
+    const dest = cashUpMethod === "wallet" ? "owner's wallet (free)" : `owner's bank account (R3.50 fee)`;
+    const confirmed = await new Promise<boolean>(resolve =>
+      Alert.alert(
+        "Confirm CashUp",
+        `Send ${formatZAR(amount)} to ${dest}?\n\nThis cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Confirm CashUp", onPress: () => resolve(true) },
+        ]
+      )
+    );
+    if (!confirmed) return;
     setCashUpLoading(true);
     try {
       const res = await api.driverCashupV2(cashupStatus.owner_user_id, cashUpMethod, amount);
@@ -322,6 +337,17 @@ export default function Home() {
     if (amount > (wallet?.balance ?? 0)) {
       Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
     }
+    const confirmed = await new Promise<boolean>(resolve =>
+      Alert.alert(
+        "Confirm Payout",
+        `Submit ${formatZAR(amount)} for admin approval?\n\nFunds will be sent to your registered bank account.`,
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Confirm", onPress: () => resolve(true) },
+        ]
+      )
+    );
+    if (!confirmed) return;
     setCashUpLoading(true);
     try {
       await api.cashup({ amount, type: "owner" });
@@ -353,6 +379,17 @@ export default function Home() {
     if (amount > (wallet?.balance ?? 0)) {
       Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(wallet?.balance ?? 0)}.`); return;
     }
+    const confirmed = await new Promise<boolean>(resolve =>
+      Alert.alert(
+        "Confirm Payout",
+        `Withdraw ${formatZAR(amount)} to your bank account?\n\nR3.50 fee applies. Arrives within seconds.`,
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Withdraw", onPress: () => resolve(true) },
+        ]
+      )
+    );
+    if (!confirmed) return;
     setPayOutLoading(true);
     try {
       await api.driverPayout(amount);

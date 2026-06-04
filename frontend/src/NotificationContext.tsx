@@ -10,7 +10,7 @@ type NotifContextType = {
   markRead: (id: string) => void;
   markAllRead: () => void;
   deleteNotification: (id: string) => void;
-  refresh: () => void;
+  refresh: () => Promise<void>;
 };
 
 const NotifContext = createContext<NotifContextType>({
@@ -20,7 +20,7 @@ const NotifContext = createContext<NotifContextType>({
   markRead: () => {},
   markAllRead: () => {},
   deleteNotification: () => {},
-  refresh: () => {},
+  refresh: () => Promise.resolve(),
 });
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {

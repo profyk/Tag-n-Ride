@@ -9,26 +9,35 @@ export const tokenStore = {
   clear: () => AsyncStorage.removeItem(TOKEN_KEY),
 };
 
-async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, opts: RequestInit = {}, timeoutMs = 20000): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const token = await tokenStore.get();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((opts.headers as Record<string, string>) || {}),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
-  const text = await res.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; }
-  catch { data = { detail: text }; }
-  if (!res.ok) {
-    const detail = data?.detail;
-    const msg = Array.isArray(detail)
-      ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(", ")
-      : typeof detail === "string" ? detail : `Request failed (${res.status})`;
-    throw new Error(msg);
+  try {
+    const res = await fetch(`${BASE}${path}`, { ...opts, headers, signal: controller.signal });
+    clearTimeout(timeoutId);
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; }
+    catch { data = { detail: text }; }
+    if (!res.ok) {
+      const detail = data?.detail;
+      const msg = Array.isArray(detail)
+        ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(", ")
+        : typeof detail === "string" ? detail : `Request failed (${res.status})`;
+      throw new Error(msg);
+    }
+    return data as T;
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+    if (e.name === "AbortError") throw new Error("Request timed out. Check your connection and try again.");
+    throw e;
   }
-  return data as T;
 }
 
 export const api = {

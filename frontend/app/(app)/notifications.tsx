@@ -49,8 +49,7 @@ export default function NotificationsScreen() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    refresh();
-    setTimeout(() => setRefreshing(false), 800);
+    try { await refresh(); } finally { setRefreshing(false); }
   };
 
   const s = makeStyles(colors);

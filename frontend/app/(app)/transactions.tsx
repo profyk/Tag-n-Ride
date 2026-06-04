@@ -40,6 +40,8 @@ export default function Transactions() {
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Txn | null>(null);
+  const [undoId, setUndoId] = useState<string | null>(null);
+  const undoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +58,23 @@ export default function Transactions() {
     await addHidden([id]);
     setHidden(prev => [...prev, id]);
     if (selected?.id === id) setSelected(null);
+    // Show undo for 4 seconds
+    setUndoId(id);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => setUndoId(null), 4000);
+  };
+
+  const handleUndoHide = async () => {
+    if (!undoId) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    const id = undoId;
+    setUndoId(null);
+    try {
+      const existing = await AsyncStorage.getItem(HIDDEN_KEY);
+      const ids: string[] = existing ? JSON.parse(existing) : [];
+      await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(ids.filter(i => i !== id)));
+      setHidden(prev => prev.filter(i => i !== id));
+    } catch {}
   };
 
   const handleClearAll = () => {
@@ -123,7 +142,7 @@ export default function Transactions() {
       <FlatList
         data={filtered}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 10 }}
+        contentContainerStyle={{ padding: 20, paddingBottom: undoId ? 80 : 40, gap: 10 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -131,6 +150,10 @@ export default function Transactions() {
             tintColor={colors.cyan}
           />
         }
+        removeClippedSubviews
+        maxToRenderPerBatch={15}
+        initialNumToRender={20}
+        windowSize={10}
         renderItem={({ item: t }) => {
           const isIn = t.direction === "in" || t.type === "topup";
           const isWithdraw = t.type === "withdrawal";
@@ -257,6 +280,16 @@ export default function Transactions() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Undo hide banner */}
+      {undoId && (
+        <View style={[s.undoBanner, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
+          <Text style={{ color: colors.textMuted, fontSize: 13 }}>Transaction hidden</Text>
+          <TouchableOpacity onPress={handleUndoHide} style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
+            <Text style={{ color: colors.cyan, fontSize: 13, fontWeight: "700" }}>Undo</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -287,6 +320,12 @@ const detailRowStyle = StyleSheet.create({
 
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  undoBanner: {
+    position: "absolute", bottom: 20, left: 16, right: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    padding: 14, borderRadius: 12, borderWidth: 1,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 4,
+  },
   header: {
     flexDirection: "row", alignItems: "center",
     justifyContent: "space-between", padding: 20, paddingBottom: 8,

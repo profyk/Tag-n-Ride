@@ -115,7 +115,7 @@ const FARE_PRESETS = [10, 15, 20, 25, 30, 35, 50];export default function Earnin
   const handleEndRoute = async () => {
     if (Platform.OS === "web") {
       try { const res = await api.endRoute(); setSummary(res.summary); setSummaryModal(true); prevPaymentCount.current = 0; load(); }
-      catch (e: any) { console.error(e); }
+      catch (e: any) { Alert.alert("Error", e?.message || "Could not end route"); }
       return;
     }
     Alert.alert("End Route?", "This will close the current route.", [

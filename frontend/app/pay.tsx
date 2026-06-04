@@ -5,7 +5,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Field, Button } from "../src/ui";
 import { api, DriverInfo, Txn } from "../src/api";
-import { colors, formatZAR, radius } from "../src/theme";
+import { formatZAR, radius } from "../src/theme";
+import { useTheme } from "../src/ThemeContext";
 
 const QUICKS = [20, 50, 100, 150, 200, 500];
 
@@ -13,6 +14,8 @@ type Stage = "review" | "confirm" | "success";
 
 export default function Pay() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const params = useLocalSearchParams<{ qr_code?: string; driver_id?: string }>();
 
   // Support both new qr_code param and old driver_id param
@@ -206,33 +209,35 @@ export default function Pay() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, paddingBottom: 8 },
-  title: { color: colors.text, fontSize: 24, fontWeight: "800" },
-  sub: { color: colors.textMuted, fontSize: 14, marginTop: 8, textAlign: "center" },
-  close: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bg2, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
-  driverCard: { alignItems: "center", padding: 20, backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
-  driverAvatar: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan },
-  driverName: { color: colors.text, fontSize: 20, fontWeight: "800", marginTop: 12 },
-  driverPhone: { color: colors.textMuted, marginTop: 4 },
-  driverMeta: { flexDirection: "row", gap: 8, marginTop: 12 },
-  metaPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
-  metaText: { fontSize: 11, fontWeight: "700" },
-  plateBox: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#FFD60A", borderRadius: 8, borderWidth: 2, borderColor: "#0A0A0A" },
-  plateLabel: { color: "#666", fontSize: 9, fontWeight: "800", letterSpacing: 1.4, textAlign: "center" },
-  plateValue: { color: "#0A0A0A", fontSize: 22, fontWeight: "900", letterSpacing: 2, textAlign: "center", fontFamily: "monospace" },
-  quickRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 },
-  quick: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
-  quickText: { color: colors.text, fontWeight: "700", fontSize: 12 },
-  err: { color: colors.red, marginTop: 4 },
-  successIcon: { width: 88, height: 88, borderRadius: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.green },
-  successTitle: { color: colors.text, fontSize: 24, fontWeight: "800", marginTop: 18 },
-  successAmt: { color: colors.green, fontSize: 40, fontWeight: "800", marginTop: 8, letterSpacing: -1 },
-  successSub: { color: colors.textMuted, marginTop: 4 },
-  refText: { color: colors.textDim, fontSize: 12, marginTop: 12, letterSpacing: 1 },
-  rateBox: { marginTop: 32, padding: 20, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, backgroundColor: colors.bg2 },
-  rateTitle: { color: colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
-  starRow: { flexDirection: "row", justifyContent: "center", gap: 8, marginTop: 14 },
-  thanks: { color: colors.green, textAlign: "center", marginTop: 12, fontWeight: "700" },
-});
+function makeStyles(colors: any) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bg },
+    headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 20, paddingBottom: 8 },
+    title: { color: colors.text, fontSize: 24, fontWeight: "800" },
+    sub: { color: colors.textMuted, fontSize: 14, marginTop: 8, textAlign: "center" },
+    close: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bg2, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
+    driverCard: { alignItems: "center", padding: 20, backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
+    driverAvatar: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan },
+    driverName: { color: colors.text, fontSize: 20, fontWeight: "800", marginTop: 12 },
+    driverPhone: { color: colors.textMuted, marginTop: 4 },
+    driverMeta: { flexDirection: "row", gap: 8, marginTop: 12 },
+    metaPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
+    metaText: { fontSize: 11, fontWeight: "700" },
+    plateBox: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#FFD60A", borderRadius: 8, borderWidth: 2, borderColor: "#0A0A0A" },
+    plateLabel: { color: "#666", fontSize: 9, fontWeight: "800", letterSpacing: 1.4, textAlign: "center" },
+    plateValue: { color: "#0A0A0A", fontSize: 22, fontWeight: "900", letterSpacing: 2, textAlign: "center", fontFamily: "monospace" },
+    quickRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 },
+    quick: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
+    quickText: { color: colors.text, fontWeight: "700", fontSize: 12 },
+    err: { color: colors.red, marginTop: 4 },
+    successIcon: { width: 88, height: 88, borderRadius: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.green },
+    successTitle: { color: colors.text, fontSize: 24, fontWeight: "800", marginTop: 18 },
+    successAmt: { color: colors.green, fontSize: 40, fontWeight: "800", marginTop: 8, letterSpacing: -1 },
+    successSub: { color: colors.textMuted, marginTop: 4 },
+    refText: { color: colors.textDim, fontSize: 12, marginTop: 12, letterSpacing: 1 },
+    rateBox: { marginTop: 32, padding: 20, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, backgroundColor: colors.bg2 },
+    rateTitle: { color: colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
+    starRow: { flexDirection: "row", justifyContent: "center", gap: 8, marginTop: 14 },
+    thanks: { color: colors.green, textAlign: "center", marginTop: 12, fontWeight: "700" },
+  });
+}
