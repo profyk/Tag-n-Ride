@@ -211,27 +211,44 @@ export default function PayslipScreen() {
 
   const handleGenerate = () => {
     const fee = getFee();
-    const range = getPeriodRange(selectedPeriod, year, month);
-    Alert.alert(
-      "Are you sure?",
-      `${formatR(fee)} will be deducted from your wallet to generate the statement for ${range}.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Generate", style: "default", onPress: doGenerate },
-      ]
-    );
+    if (walletBalance < fee) {
+      Alert.alert(
+        "Insufficient Balance",
+        `You need ${formatR(fee)} to generate this statement but your wallet only has ${formatR(walletBalance)}. Please top up first.`,
+        [{ text: "OK" }]
+      );
+      return;
+    }
+    doGenerate();
   };
 
   const doGenerate = async () => {
     setGenerating(true);
     try {
-      await api.payslipRequest({
+      const fresh = await api.payslipPricing();
+      if (!fresh?.enabled) {
+        Alert.alert("Unavailable", "Earnings statements are currently disabled. Please try again later.");
+        return;
+      }
+      const newEntry = await api.payslipRequest({
         period_type: selectedPeriod,
         month: monthStr(year, month),
       });
       await loadHistory();
       await loadBalance();
-      Alert.alert("Generated ✓", "Your earnings statement is ready in My Statements.");
+      const idToFetch = newEntry?.id ?? newEntry?.payslip_id;
+      if (idToFetch) {
+        const data = await api.payslipGet(idToFetch);
+        const html = buildPDF(data);
+        const { uri } = await Print.printToFileAsync({ html, base64: false });
+        await Sharing.shareAsync(uri, {
+          mimeType: "application/pdf",
+          dialogTitle: "Your Earnings Statement",
+          UTI: "com.adobe.pdf",
+        });
+      } else {
+        Alert.alert("Generated ✓", "Your earnings statement is ready in My Statements below.");
+      }
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to generate statement.");
     } finally { setGenerating(false); }

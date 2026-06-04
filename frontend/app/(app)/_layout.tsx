@@ -125,6 +125,7 @@ function AppTabs() {
       <Tabs.Screen name="my-qr" options={{ href: null }} />
       <Tabs.Screen name="transfer" options={{ href: null }} />
       <Tabs.Screen name="statement" options={{ href: null }} />
+      <Tabs.Screen name="payslip" options={{ href: null }} />
     </Tabs>
   );
 }
