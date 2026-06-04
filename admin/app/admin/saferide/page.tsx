@@ -25,6 +25,8 @@ export default function SafeRidePage() {
   const [sosChargeId, setSosChargeId] = useState<string | null>(null);
   const [sosChargePrice, setSosChargePrice] = useState("");
   const [sosActionLoading, setSosActionLoading] = useState<string | null>(null);
+  const [bulkActionLoading, setBulkActionLoading] = useState<string | null>(null);
+  const [expandedCluster, setExpandedCluster] = useState<number | null>(null);
   const sosRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const knownSosIdsRef = useRef<Set<string> | null>(null);
 
@@ -67,14 +69,26 @@ export default function SafeRidePage() {
     finally { setSosLoading(false); }
   }, []);
 
-  const handleSosAction = async (sosId: string, status: "dispatched" | "resolved", notes?: string) => {
+  const handleSosAction = async (sosId: string, status: "help_coming" | "dispatched" | "resolved", notes?: string) => {
     setSosActionLoading(sosId + status);
     try {
       await client.patch(`/api/admin/saferide/sos/${sosId}`, { status, notes });
-      toast.success(status === "dispatched" ? "Marked as dispatched" : "SOS resolved");
+      toast.success(status === "help_coming" ? "User notified — Help Coming" : status === "dispatched" ? "Marked as dispatched" : "SOS resolved");
       fetchSos();
     } catch (e: any) { toast.error(e.message || "Failed"); }
     finally { setSosActionLoading(null); }
+  };
+
+  const handleBulkSosAction = async (sosIds: string[], status: "help_coming" | "resolved", clusterKey: string, notes?: string) => {
+    setBulkActionLoading(clusterKey + status);
+    try {
+      await client.patch("/api/admin/saferide/sos/bulk", { sos_ids: sosIds, status, notes });
+      toast.success(status === "help_coming"
+        ? `Help Coming sent to all ${sosIds.length} passengers`
+        : `${sosIds.length} SOS resolved`);
+      fetchSos();
+    } catch (e: any) { toast.error(e.message || "Bulk action failed"); }
+    finally { setBulkActionLoading(null); }
   };
 
   const handleSosCharge = async (sosId: string) => {
@@ -125,7 +139,7 @@ export default function SafeRidePage() {
 
   useEffect(() => {
     const activeIds = new Set(
-      sosList.filter(s => s.status === "active" || s.status === "dispatched").map((s: any) => s.id as string)
+      sosList.filter(s => s.status === "active" || s.status === "help_coming" || s.status === "dispatched").map((s: any) => s.id as string)
     );
     if (knownSosIdsRef.current === null) {
       // First load — record without alarming
@@ -170,7 +184,42 @@ export default function SafeRidePage() {
     return new Date(iso).toLocaleString("en-ZA", { dateStyle: "short", timeStyle: "short" });
   };
 
-  const activeSos = sosList.filter(s => s.status === "active" || s.status === "dispatched");
+  const activeSos = sosList.filter(s => s.status === "active" || s.status === "help_coming" || s.status === "dispatched");
+
+  // ── Cluster detection: group active SOS within 300 m and 10 min of each other ──
+  const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const R = 6371, toRad = (d: number) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(a));
+  };
+
+  const sosClusters: any[][] = (() => {
+    const candidates = activeSos.filter(s => s.status === "active");
+    const visited = new Set<string>();
+    const clusters: any[][] = [];
+    for (const anchor of candidates) {
+      if (visited.has(anchor.id)) continue;
+      const aLat = anchor.latest_lat ?? anchor.latitude;
+      const aLng = anchor.latest_lng ?? anchor.longitude;
+      if (!aLat || !aLng) continue;
+      const group = candidates.filter(other => {
+        if (visited.has(other.id) && other.id !== anchor.id) return false;
+        const oLat = other.latest_lat ?? other.latitude;
+        const oLng = other.latest_lng ?? other.longitude;
+        if (!oLat || !oLng) return false;
+        const timeDiff = Math.abs(new Date(anchor.created_at).getTime() - new Date(other.created_at).getTime()) / 60000;
+        return timeDiff <= 10 && haversineKm(aLat, aLng, oLat, oLng) <= 0.3;
+      });
+      if (group.length >= 2) {
+        group.forEach(s => visited.add(s.id));
+        clusters.push(group);
+      }
+    }
+    return clusters;
+  })();
+
+  const clusteredIds = new Set(sosClusters.flatMap(c => c.map((s: any) => s.id)));
 
   return (
     <AdminShell title="SafeRide Command Centre">
@@ -214,8 +263,93 @@ export default function SafeRidePage() {
             <p className="text-textMuted text-sm text-center py-6">No SOS requests</p>
           ) : (
             <div className="space-y-3">
+
+              {/* ── GROUP INCIDENT CLUSTERS ── */}
+              {sosClusters.map((cluster, ci) => {
+                const clusterKey = cluster.map((s: any) => s.id).join("-");
+                const ids = cluster.map((s: any) => s.id);
+                const anchor = cluster[0];
+                const mapsUrl = (anchor.latest_lat ?? anchor.latitude)
+                  ? `https://maps.google.com/?q=${anchor.latest_lat ?? anchor.latitude},${anchor.latest_lng ?? anchor.longitude}`
+                  : null;
+                const types = [...new Set(cluster.map((s: any) => s.emergency_type as string))];
+                const isExpanded = expandedCluster === ci;
+                return (
+                  <div key={clusterKey} className="rounded-xl border-2 border-orange-500 bg-orange-950/30 shadow-[0_0_16px_rgba(249,115,22,0.2)] p-4">
+                    {/* Cluster header */}
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center flex-shrink-0 animate-pulse">
+                          <Users size={18} className="text-orange-400" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-orange-400 font-black text-sm">GROUP INCIDENT DETECTED</span>
+                            <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{cluster.length} PEOPLE</span>
+                            {types.map(t => (
+                              <span key={t} className={`text-[10px] font-bold px-2 py-0.5 rounded border ${t === "police" ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}>
+                                {t?.toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="text-xs text-orange-300/70 mt-0.5">
+                            {cluster.map((s: any) => s.user_name || "Unknown").join(" · ")} — same location, within 10 min
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Location */}
+                    {mapsUrl && (
+                      <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-xs text-cyan hover:underline bg-bg border border-border rounded-lg px-3 py-2 mb-3">
+                        <MapPin size={12} /> View group location on map
+                      </a>
+                    )}
+
+                    {/* Expanded passenger list */}
+                    {isExpanded && (
+                      <div className="mb-3 space-y-1.5">
+                        {cluster.map((s: any) => (
+                          <div key={s.id} className="flex items-center justify-between bg-bg border border-border rounded-lg px-3 py-2 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${s.emergency_type === "police" ? "bg-blue-400" : "bg-red-400"}`} />
+                              <span className="text-text font-semibold">{s.user_name || "Unknown"}</span>
+                              <a href={`tel:${s.user_phone}`} className="text-cyan hover:underline">{s.user_phone}</a>
+                            </div>
+                            <span className="text-textDim">{Math.floor((Date.now() - new Date(s.created_at).getTime()) / 60000)}m ago</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => setExpandedCluster(isExpanded ? null : ci)} className="text-[10px] text-orange-400 hover:underline mb-3 block">
+                      {isExpanded ? "Hide passengers" : `Show all ${cluster.length} passengers`}
+                    </button>
+
+                    {/* Bulk actions */}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        disabled={!!bulkActionLoading}
+                        onClick={() => handleBulkSosAction(ids, "help_coming", clusterKey, "Group incident — help dispatched to scene")}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-black rounded-lg hover:bg-orange-500/30 transition-colors disabled:opacity-50">
+                        {bulkActionLoading === clusterKey + "help_coming" ? <Spinner size={10} /> : <Phone size={12} />}
+                        Help Coming — All {cluster.length} People
+                      </button>
+                      <button
+                        disabled={!!bulkActionLoading}
+                        onClick={() => handleBulkSosAction(ids, "resolved", clusterKey, "Group incident resolved")}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
+                        {bulkActionLoading === clusterKey + "resolved" ? <Spinner size={10} /> : null}
+                        Resolve All
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* ── INDIVIDUAL SOS CARDS ── */}
               {sosList.map(sos => {
-                const isActive = sos.status === "active" || sos.status === "dispatched";
+                const isActive = sos.status === "active" || sos.status === "help_coming" || sos.status === "dispatched";
                 const typePolice = sos.emergency_type === "police";
                 const mapsUrl = sos.latest_lat
                   ? `https://maps.google.com/?q=${sos.latest_lat},${sos.latest_lng}`
@@ -231,14 +365,17 @@ export default function SafeRidePage() {
                           <Radio size={18} className={typePolice ? "text-blue-400" : "text-red-400"} />
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <p className="font-extrabold text-text text-sm">{sos.user_name || "Unknown"}</p>
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${typePolice ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}>
                               {sos.emergency_type?.toUpperCase()}
                             </span>
-                            <Badge tone={sos.status === "resolved" ? "green" : sos.status === "dispatched" ? "yellow" : "red"}>
-                              {sos.status}
+                            <Badge tone={sos.status === "resolved" ? "green" : (sos.status === "help_coming" || sos.status === "dispatched") ? "yellow" : "red"}>
+                              {sos.status === "help_coming" ? "HELP COMING" : sos.status}
                             </Badge>
+                            {clusteredIds.has(sos.id) && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-orange-500/10 text-orange-400 border-orange-500/20">GROUP</span>
+                            )}
                           </div>
                           <a href={`tel:${sos.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
                             <Phone size={10} /> {sos.user_phone || "No phone"}
@@ -274,11 +411,16 @@ export default function SafeRidePage() {
                         {sos.status === "active" && (
                           <button
                             disabled={!!sosActionLoading}
-                            onClick={() => handleSosAction(sos.id, "dispatched", "Services contacted")}
+                            onClick={() => handleSosAction(sos.id, "help_coming", "Help is on the way")}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold rounded-lg hover:bg-yellow-500/20 transition-colors disabled:opacity-50">
-                            {sosActionLoading === sos.id + "dispatched" ? <Spinner size={10} /> : <Phone size={11} />}
-                            Mark Dispatched
+                            {sosActionLoading === sos.id + "help_coming" ? <Spinner size={10} /> : <Phone size={11} />}
+                            Help Coming
                           </button>
+                        )}
+                        {sos.status === "help_coming" && (
+                          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold rounded-lg">
+                            <Phone size={11} /> Waiting for user confirmation…
+                          </span>
                         )}
                         <button
                           disabled={!!sosActionLoading}

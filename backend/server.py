@@ -19,7 +19,7 @@ import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
 
 import asyncio
 import asyncpg
@@ -11682,7 +11682,7 @@ class SosLocationIn(BaseModel):
     longitude: float
 
 class SosUpdateIn(BaseModel):
-    status: str  # 'dispatched' or 'resolved'
+    status: str  # 'help_coming', 'dispatched', or 'resolved'
     notes: Optional[str] = None
 
 class SosChargeIn(BaseModel):
@@ -12322,8 +12322,8 @@ async def sos_location_ping(sos_id: str, body: SosLocationIn, user: dict = Depen
         req = await conn.fetchrow("SELECT id,user_id,status FROM sos_requests WHERE id=$1", sos_id)
         if not req or req["user_id"] != user["id"]:
             raise HTTPException(404, "SOS request not found")
-        if req["status"] == "resolved":
-            return {"ok": True, "resolved": True}
+        if req["status"] in ("resolved", "help_received"):
+            return {"ok": True, "resolved": True, "help_coming": False}
         await conn.execute(
             "INSERT INTO sos_locations (id,sos_id,latitude,longitude) VALUES ($1,$2,$3,$4)",
             str(uuid.uuid4()), sos_id, body.latitude, body.longitude
@@ -12332,7 +12332,23 @@ async def sos_location_ping(sos_id: str, body: SosLocationIn, user: dict = Depen
             "UPDATE sos_requests SET latitude=$1,longitude=$2 WHERE id=$3",
             body.latitude, body.longitude, sos_id
         )
-    return {"ok": True, "resolved": False}
+    help_coming = req["status"] in ("help_coming", "dispatched")
+    return {"ok": True, "resolved": False, "help_coming": help_coming}
+
+
+# ── PATCH /api/saferide/sos/{sos_id}/received ── user confirms help arrived
+@api.patch("/saferide/sos/{sos_id}/received")
+async def sos_user_received(sos_id: str, user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow("SELECT id,user_id,status FROM sos_requests WHERE id=$1", sos_id)
+        if not req or req["user_id"] != user["id"]:
+            raise HTTPException(404, "SOS request not found")
+        await conn.execute(
+            "UPDATE sos_requests SET status='resolved',resolved_at=$1,admin_notes=COALESCE(admin_notes||' | ','')|| 'User confirmed help received' WHERE id=$2",
+            now, sos_id
+        )
+    return {"ok": True}
 
 
 # ── GET /api/admin/saferide/sos ── list all SOS requests
@@ -12358,17 +12374,44 @@ async def admin_list_sos(admin: dict = Depends(require_admin)):
     return result
 
 
+# ── PATCH /api/admin/saferide/sos/bulk ── bulk-update multiple SOS (group incident)
+class SosBulkUpdateIn(BaseModel):
+    sos_ids: List[str]
+    status: str  # 'help_coming' or 'resolved'
+    notes: Optional[str] = None
+
+@api.patch("/admin/saferide/sos/bulk")
+async def admin_bulk_update_sos(body: SosBulkUpdateIn, admin: dict = Depends(require_admin)):
+    if body.status not in ("help_coming", "dispatched", "resolved"):
+        raise HTTPException(400, "status must be 'help_coming', 'dispatched', or 'resolved'")
+    if not body.sos_ids:
+        raise HTTPException(400, "sos_ids must not be empty")
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        if body.status in ("help_coming", "dispatched"):
+            await conn.execute(
+                "UPDATE sos_requests SET status=$1,admin_id=$2,admin_notes=$3,dispatched_at=$4 WHERE id=ANY($5::text[])",
+                body.status, admin["id"], body.notes, now, body.sos_ids
+            )
+        else:
+            await conn.execute(
+                "UPDATE sos_requests SET status='resolved',admin_id=$1,admin_notes=$2,resolved_at=$3 WHERE id=ANY($4::text[])",
+                admin["id"], body.notes, now, body.sos_ids
+            )
+    return {"ok": True, "updated": len(body.sos_ids)}
+
+
 # ── PATCH /api/admin/saferide/sos/{sos_id} ── update status
 @api.patch("/admin/saferide/sos/{sos_id}")
 async def admin_update_sos(sos_id: str, body: SosUpdateIn, admin: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc)
-    if body.status not in ("dispatched", "resolved"):
-        raise HTTPException(400, "status must be 'dispatched' or 'resolved'")
+    if body.status not in ("help_coming", "dispatched", "resolved"):
+        raise HTTPException(400, "status must be 'help_coming', 'dispatched', or 'resolved'")
     async with pool.acquire() as conn:
-        if body.status == "dispatched":
+        if body.status in ("help_coming", "dispatched"):
             await conn.execute(
-                "UPDATE sos_requests SET status='dispatched',admin_id=$1,admin_notes=$2,dispatched_at=$3 WHERE id=$4",
-                admin["id"], body.notes, now, sos_id
+                "UPDATE sos_requests SET status=$1,admin_id=$2,admin_notes=$3,dispatched_at=$4 WHERE id=$5",
+                body.status, admin["id"], body.notes, now, sos_id
             )
         else:
             await conn.execute(

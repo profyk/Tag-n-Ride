@@ -85,9 +85,11 @@ export default function Home() {
   const [sosLocationLoading, setSosLocationLoading] = useState(false);
   const [sosActive, setSosActive] = useState(false);
   const [activeSosId, setActiveSosId] = useState<string | null>(null);
+  const [sosHelpComing, setSosHelpComing] = useState(false);
   const [sosTapCount, setSosTapCount] = useState(0);
   const sosTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sosLocationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sosHelpComingRef = useRef(false);
   const [fuelModal, setFuelModal] = useState(false);
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
@@ -142,6 +144,7 @@ export default function Home() {
   };
 
   const startSosLocationPing = (sosId: string) => {
+    sosHelpComingRef.current = false;
     if (sosLocationIntervalRef.current) clearInterval(sosLocationIntervalRef.current);
     sosLocationIntervalRef.current = setInterval(async () => {
       try {
@@ -154,6 +157,10 @@ export default function Home() {
           sosLocationIntervalRef.current = null;
           setSosActive(false);
           setActiveSosId(null);
+          setSosHelpComing(false);
+        } else if (res.help_coming && !sosHelpComingRef.current) {
+          sosHelpComingRef.current = true;
+          setSosHelpComing(true);
         }
       } catch {}
     }, 10000);
@@ -200,7 +207,22 @@ export default function Home() {
     if (sosLocationIntervalRef.current) { clearInterval(sosLocationIntervalRef.current); sosLocationIntervalRef.current = null; }
     setSosActive(false);
     setActiveSosId(null);
+    setSosHelpComing(false);
+    sosHelpComingRef.current = false;
     Alert.alert("SOS Cancelled", "Your live tracking has stopped. Contact 10111 or 10177 if you still need help.");
+  };
+
+  const confirmHelpReceived = async () => {
+    if (!activeSosId) return;
+    try {
+      await api.sosReceived(activeSosId);
+    } catch {}
+    if (sosLocationIntervalRef.current) { clearInterval(sosLocationIntervalRef.current); sosLocationIntervalRef.current = null; }
+    setSosActive(false);
+    setActiveSosId(null);
+    setSosHelpComing(false);
+    sosHelpComingRef.current = false;
+    Alert.alert("Thank you", "We're glad help arrived. Stay safe!");
   };
 
   const handleHideTxn = async (id: string) => {
@@ -380,14 +402,16 @@ export default function Home() {
           </TouchableOpacity>
           {/* SOS button in top bar — tap 3× to open */}
           <TouchableOpacity
-            style={[s.sosBtn, sosActive && { backgroundColor: "#cc0000", borderWidth: 2, borderColor: "#ff6666" }]}
+            style={[s.sosBtn, sosActive && (sosHelpComing
+              ? { backgroundColor: "#15803d", borderWidth: 2, borderColor: "#4ade80" }
+              : { backgroundColor: "#cc0000", borderWidth: 2, borderColor: "#ff6666" })]}
             onPress={sosActive ? cancelActiveSos : handleSosTap}
             disabled={sendingPanic}
             testID="panic-btn">
             {sendingPanic
               ? <ActivityIndicator color="#fff" size="small" />
               : sosActive
-                ? <Text style={[s.sosBtnText, { fontSize: 9 }]}>● LIVE</Text>
+                ? <Text style={[s.sosBtnText, { fontSize: 8 }]}>{sosHelpComing ? "HELP\nCOMING" : "● LIVE"}</Text>
                 : <Text style={s.sosBtnText}>{sosTapCount > 0 ? `${sosTapCount}×` : "SOS"}</Text>}
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push("/(app)/profile")} testID="home-profile-btn" style={s.avatar}>
@@ -395,6 +419,29 @@ export default function Home() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* ─── HELP COMING BANNER ─── */}
+      {sosHelpComing && (
+        <View style={{ marginHorizontal: 16, marginTop: 10, borderRadius: 14, backgroundColor: "#14532d", borderWidth: 2, borderColor: "#4ade80", padding: 14, alignItems: "center", gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Ionicons name="checkmark-circle" size={22} color="#4ade80" />
+            <Text style={{ color: "#4ade80", fontWeight: "900", fontSize: 16, letterSpacing: 0.5 }}>HELP IS ON THE WAY</Text>
+          </View>
+          <Text style={{ color: "#86efac", fontSize: 12, textAlign: "center" }}>Admin has acknowledged your SOS. Stay calm and keep your phone with you.</Text>
+          <TouchableOpacity
+            onPress={() => Alert.alert(
+              "Received Help?",
+              "Press confirm only when help has physically arrived.",
+              [
+                { text: "Not Yet", style: "cancel" },
+                { text: "Confirm — Help Arrived", style: "default", onPress: confirmHelpReceived },
+              ]
+            )}
+            style={{ backgroundColor: "#15803d", borderRadius: 10, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: "#4ade80" }}>
+            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 14 }}>Received Help</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ─── FIXED WALLET CARD ─── */}
       <View style={s.walletCardWrap}>
