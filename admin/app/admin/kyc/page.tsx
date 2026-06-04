@@ -210,8 +210,12 @@ export default function KYCPage() {
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    if (!viewDoc || lightboxOpen) return;
+    if (!viewDoc) return;
     const onKey = (e: KeyboardEvent) => {
+      if (lightboxOpen) {
+        if (e.key === "Escape") { e.preventDefault(); setLightboxOpen(false); }
+        return;
+      }
       if (e.key === "a" || e.key === "A") { if (viewDoc.status === "pending") handleApprove(viewDoc); }
       if (e.key === "r" || e.key === "R") { if (viewDoc.status === "pending") { setRejectModal(viewDoc); setViewDoc(null); } }
       if (e.key === "Escape") setViewDoc(null);

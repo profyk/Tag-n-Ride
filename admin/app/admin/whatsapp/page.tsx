@@ -6,8 +6,10 @@ import { formatDate } from "@/lib/utils";
 import {
   MessageCircle, Send, CheckCheck, Check, Clock, XCircle,
   Users, Car, AlertTriangle, Phone, RefreshCw, Copy,
-  FileText, UserX, Wifi, WifiOff, ChevronRight,
+  FileText, UserX, Wifi, WifiOff, ChevronRight, Download,
+  BarChart3, UserCheck,
 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import toast from "react-hot-toast";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
@@ -17,7 +19,7 @@ const authHeaders = () => ({
 });
 
 type MsgStatus = "sent" | "delivered" | "read" | "failed" | "pending";
-type TabId = "send" | "history" | "templates" | "optouts";
+type TabId = "send" | "history" | "templates" | "optouts" | "analytics";
 
 const TEMPLATES = [
   {
@@ -100,6 +102,8 @@ export default function WhatsAppPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingOptouts, setLoadingOptouts] = useState(false);
   const [statusLoading, setStatusLoading] = useState(true);
+  const [apiTemplates, setApiTemplates] = useState<typeof TEMPLATES | null>(null);
+  const [removingOptout, setRemovingOptout] = useState<string | null>(null);
 
   // Send form
   const [recipientType, setRecipientType] = useState<"phone" | "audience">("phone");
@@ -148,7 +152,19 @@ export default function WhatsAppPage() {
     finally { setLoadingOptouts(false); }
   }, []);
 
-  useEffect(() => { loadStatus(); }, []);
+  // Fetch templates from backend; fall back to hardcoded if unavailable
+  const loadTemplates = useCallback(async () => {
+    try {
+      const r = await fetch(`${BASE}/api/admin/whatsapp/templates`, { headers: authHeaders() });
+      if (r.ok) {
+        const d = await r.json();
+        const items = Array.isArray(d) ? d : d.templates;
+        if (Array.isArray(items) && items.length > 0) setApiTemplates(items);
+      }
+    } catch { /* use hardcoded fallback */ }
+  }, []);
+
+  useEffect(() => { loadStatus(); loadTemplates(); }, []);
   useEffect(() => {
     if (tab === "history") loadHistory();
     if (tab === "optouts") loadOptouts();
@@ -184,10 +200,14 @@ export default function WhatsAppPage() {
               variables: templateVars,
             };
 
-      await fetch(`${BASE}/api/admin/whatsapp/send`, {
+      const res = await fetch(`${BASE}/api/admin/whatsapp/send`, {
         method: "POST", headers: authHeaders(),
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || `Send failed (${res.status})`);
+      }
       toast.success(recipientType === "phone" ? `Message sent to ${phone}` : `Broadcast queued for ${audience}`);
       setPhone(""); setFreeText(""); setTemplateVars([]);
       loadStatus();
@@ -199,6 +219,42 @@ export default function WhatsAppPage() {
     navigator.clipboard.writeText(body);
     toast.success("Copied to clipboard");
   };
+
+  const handleRemoveOptout = async (phone: string) => {
+    if (!confirm(`Re-subscribe ${phone}? They will start receiving messages again.`)) return;
+    setRemovingOptout(phone);
+    try {
+      const res = await fetch(`${BASE}/api/admin/whatsapp/optouts/${encodeURIComponent(phone)}`, {
+        method: "DELETE", headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed");
+      toast.success(`${phone} re-subscribed`);
+      setOptouts(prev => prev.filter(o => o.phone !== phone));
+    } catch (e: any) { toast.error(e.message); }
+    finally { setRemovingOptout(null); }
+  };
+
+  const exportHistory = () => {
+    if (!messages.length) { toast.error("No messages to export"); return; }
+    const rows = [
+      ["Recipient", "Phone", "Template/Message", "Type", "Status", "Sent At", "Sent By"],
+      ...messages.map(m => [
+        m.recipient_name ?? "", m.to ?? "",
+        m.template_name ?? m.message_preview ?? "",
+        m.message_type ?? "template",
+        m.status, m.sent_at, m.sent_by_name ?? "System",
+      ]),
+    ];
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `whatsapp_history_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    toast.success("History exported");
+  };
+
+  // Use API templates if fetched, otherwise fall back to hardcoded
+  const activeTemplates = apiTemplates ?? TEMPLATES;
 
   const filteredMessages = messages.filter(m =>
     (histStatus === "all" || m.status === histStatus) &&
@@ -221,10 +277,11 @@ export default function WhatsAppPage() {
     : 0;
 
   const TABS: { id: TabId; label: string; icon: any }[] = [
-    { id: "send",      label: "Send Message",  icon: Send },
-    { id: "history",   label: "History",       icon: MessageCircle },
-    { id: "templates", label: "Templates",     icon: FileText },
-    { id: "optouts",   label: "Opt-outs",      icon: UserX },
+    { id: "send",      label: "Send",      icon: Send },
+    { id: "history",   label: "History",   icon: MessageCircle },
+    { id: "templates", label: "Templates", icon: FileText },
+    { id: "optouts",   label: "Opt-outs",  icon: UserX },
+    { id: "analytics", label: "Analytics", icon: BarChart3 },
   ];
 
   const connected = apiStatus?.status === "connected";
@@ -411,11 +468,11 @@ export default function WhatsAppPage() {
                   <Select
                     value={selectedTemplate.id}
                     onChange={(e) => {
-                      const t = TEMPLATES.find(t => t.id === e.target.value);
+                      const t = activeTemplates.find(t => t.id === e.target.value);
                       if (t) { setSelectedTemplate(t); setTemplateVars([]); }
                     }}
                     className="w-full">
-                    {TEMPLATES.filter(t => t.status === "approved").map(t => (
+                    {activeTemplates.filter(t => t.status === "approved").map(t => (
                       <option key={t.id} value={t.id}>{t.name}</option>
                     ))}
                   </Select>
@@ -511,8 +568,12 @@ export default function WhatsAppPage() {
         {tab === "history" && (
           <Card>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-text font-bold">Message History</h2>
+              <h2 className="text-text font-bold">Message History ({filteredMessages.length})</h2>
               <div className="flex gap-2 items-center">
+                <button onClick={exportHistory} title="Export CSV"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-textMuted text-xs font-bold hover:text-green hover:border-green/30 transition-all">
+                  <Download size={12} /> Export
+                </button>
                 <div className="w-48">
                   <Input
                     placeholder="Search phone or name..."
@@ -573,7 +634,7 @@ export default function WhatsAppPage() {
         {tab === "templates" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-textMuted text-sm">{TEMPLATES.length} templates — {TEMPLATES.filter(t => t.status === "approved").length} approved</p>
+              <p className="text-textMuted text-sm">{activeTemplates.length} templates — {activeTemplates.filter(t => t.status === "approved").length} approved{apiTemplates ? " (live from API)" : " (local)"}</p>
               <div className="flex items-center gap-2 text-xs text-textDim">
                 <span className="w-2 h-2 rounded-full bg-green inline-block" /> Approved
                 <span className="w-2 h-2 rounded-full bg-yellow inline-block ml-2" /> Pending
@@ -581,7 +642,7 @@ export default function WhatsAppPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {TEMPLATES.map((t) => (
+              {activeTemplates.map((t) => (
                 <Card key={t.id} className={`${t.status === "pending" ? "border-yellow/20" : t.status === "rejected" ? "border-red/20" : ""}`}>
                   <div className="flex items-start justify-between mb-3">
                     <div>
@@ -600,7 +661,7 @@ export default function WhatsAppPage() {
                       </button>
                       {t.status === "approved" && (
                         <button
-                          onClick={() => { setSelectedTemplate(t); setTemplateVars([]); setTab("send"); }}
+                          onClick={() => { setSelectedTemplate(t as any); setTemplateVars([]); setTab("send"); }}
                           className="text-textDim hover:text-cyan transition-colors p-1"
                           title="Use this template">
                           <ChevronRight size={13} />
@@ -669,7 +730,7 @@ export default function WhatsAppPage() {
                   </div>
                 ) : (
                   <Table
-                    headers={["User", "Phone", "Opted Out", "Reason"]}
+                    headers={["User", "Phone", "Opted Out", "Reason", "Action"]}
                     empty={false}>
                     {filteredOptouts.map((o: any) => (
                       <Tr key={o.phone}>
@@ -678,6 +739,16 @@ export default function WhatsAppPage() {
                         <Td className="text-textMuted text-xs whitespace-nowrap">{formatDate(o.opted_out_at)}</Td>
                         <Td>
                           <span className="text-xs text-red font-bold">{o.reason || "STOP reply"}</span>
+                        </Td>
+                        <Td>
+                          <button
+                            onClick={() => handleRemoveOptout(o.phone)}
+                            disabled={removingOptout === o.phone}
+                            title="Re-subscribe this contact"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-green/30 text-green text-[10px] font-bold hover:bg-green/10 transition-all disabled:opacity-50">
+                            <UserCheck size={10} />
+                            {removingOptout === o.phone ? "…" : "Re-subscribe"}
+                          </button>
                         </Td>
                       </Tr>
                     ))}
@@ -688,6 +759,109 @@ export default function WhatsAppPage() {
             )}
           </Card>
         )}
+
+        {/* ─── ANALYTICS TAB ─── */}
+        {tab === "analytics" && (() => {
+          const statuses: MsgStatus[] = ["read", "delivered", "sent", "pending", "failed"];
+          const deliveryData = statuses.map(s => ({
+            status: s,
+            count: messages.filter(m => m.status === s).length,
+          })).filter(d => d.count > 0);
+
+          const deliveryColors: Record<string, string> = {
+            read: "#00D4FF", delivered: "#00E676", sent: "#7777AA", pending: "#FFD60A", failed: "#FF3B30",
+          };
+
+          // Daily volume (last 14 days)
+          const last14: Record<string, number> = {};
+          messages.forEach(m => {
+            if (!m.sent_at) return;
+            const day = m.sent_at.slice(0, 10);
+            last14[day] = (last14[day] || 0) + 1;
+          });
+          const dailyData = Object.entries(last14)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .slice(-14)
+            .map(([date, count]) => ({
+              date: new Date(date).toLocaleDateString("en-ZA", { month: "short", day: "numeric" }),
+              count,
+            }));
+
+          return (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {statuses.map(s => {
+                  const cnt = messages.filter(m => m.status === s).length;
+                  const pct = messages.length > 0 ? Math.round(cnt / messages.length * 100) : 0;
+                  return (
+                    <div key={s} className="bg-bg2 border border-border rounded-xl p-3 text-center">
+                      <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest capitalize mb-1">{s}</p>
+                      <p className="text-xl font-black" style={{ color: deliveryColors[s] }}>{cnt}</p>
+                      <p className="text-textDim text-[10px]">{pct}%</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="bg-bg2 border border-border rounded-xl p-5">
+                  <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-4">Delivery Status Breakdown</p>
+                  {deliveryData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={deliveryData} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                        <XAxis type="number" tick={{ fill: "var(--textDim)", fontSize: 10 }} />
+                        <YAxis type="category" dataKey="status" tick={{ fill: "var(--textMuted)", fontSize: 11 }} width={60} />
+                        <Tooltip contentStyle={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }} />
+                        <Bar dataKey="count" radius={[0, 4, 4, 0]} name="Messages">
+                          {deliveryData.map((d, i) => <Cell key={i} fill={deliveryColors[d.status as MsgStatus] ?? "#777"} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="text-textDim text-sm text-center py-8">No data</p>
+                  )}
+                </div>
+
+                <div className="bg-bg2 border border-border rounded-xl p-5">
+                  <p className="text-xs font-bold text-textMuted uppercase tracking-widest mb-4">Messages Sent — Last 14 Days</p>
+                  {dailyData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={dailyData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                        <XAxis dataKey="date" tick={{ fill: "var(--textDim)", fontSize: 9 }} />
+                        <YAxis tick={{ fill: "var(--textDim)", fontSize: 9 }} />
+                        <Tooltip contentStyle={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 11 }} />
+                        <Bar dataKey="count" fill="#00D4FF" radius={[3, 3, 0, 0]} name="Sent" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="text-textDim text-sm text-center py-8">Load history first to see chart</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-bg2 border border-border rounded-xl p-4">
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">Total Sent</p>
+                    <p className="text-2xl font-black text-cyan mt-1">{messages.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">Read Rate</p>
+                    <p className={`text-2xl font-black mt-1 ${readRate >= 70 ? "text-green" : readRate >= 40 ? "text-yellow" : "text-red"}`}>{readRate}%</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">Opt-out Rate</p>
+                    <p className={`text-2xl font-black mt-1 ${optouts.length / Math.max(messages.length, 1) < 0.02 ? "text-green" : "text-yellow"}`}>
+                      {messages.length > 0 ? (optouts.length / messages.length * 100).toFixed(1) : "0.0"}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
     </AdminShell>

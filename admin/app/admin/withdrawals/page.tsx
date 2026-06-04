@@ -30,6 +30,7 @@ export default function WithdrawalsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [minAmt, setMinAmt] = useState("");
+  const [maxAmt, setMaxAmt] = useState("");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "largest">("oldest");
   const [processing, setProcessing] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"withdrawals" | "payouts">("withdrawals");
@@ -111,20 +112,32 @@ export default function WithdrawalsPage() {
   const handleBulkApprove = async () => {
     const pending = filteredAndSorted.filter(w => selected.has(w.id) && w.status === "pending");
     if (!pending.length) { toast.error("No pending withdrawals selected"); return; }
-    if (!confirm(`Approve ${pending.length} withdrawals totalling ${formatZAR(pending.reduce((s, w) => s + w.amount, 0))}?`)) return;
+    if (!confirm(`Approve ${pending.length} withdrawal${pending.length > 1 ? "s" : ""} totalling ${formatZAR(pending.reduce((s, w) => s + w.amount, 0))}?\n\nMoney will be sent instantly via Stitch.`)) return;
     setBulkApproving(true);
     let done = 0;
+    const failed: { name: string; reason: string }[] = [];
     for (const w of pending) {
       try {
-        await fetch(`${BASE}/api/admin/withdraw/${w.id}/approve/v2`, {
+        const res = await fetch(`${BASE}/api/admin/withdraw/${w.id}/approve/v2`, {
           method: "POST", headers: authHeaders(),
         });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          failed.push({ name: w.user_name || w.id, reason: d.detail || `HTTP ${res.status}` });
+          continue;
+        }
         done++;
-      } catch {}
+      } catch (e: any) {
+        failed.push({ name: w.user_name || w.id, reason: "Network error" });
+      }
     }
     setBulkApproving(false);
     setSelected(new Set());
-    toast.success(`${done}/${pending.length} withdrawals approved`);
+    if (done > 0) toast.success(`${done}/${pending.length} approved ⚡`);
+    if (failed.length > 0) {
+      const names = failed.slice(0, 3).map(f => `${f.name} (${f.reason})`).join("\n");
+      toast.error(`${failed.length} failed:\n${names}${failed.length > 3 ? `\n+${failed.length - 3} more` : ""}`, { duration: 10000 });
+    }
     load();
   };
 
@@ -135,6 +148,7 @@ export default function WithdrawalsPage() {
       if (from && new Date(w.created_at) < new Date(from)) return false;
       if (to && new Date(w.created_at) > new Date(to + "T23:59:59")) return false;
       if (minAmt && w.amount < parseFloat(minAmt)) return false;
+      if (maxAmt && w.amount > parseFloat(maxAmt)) return false;
       return true;
     });
     if (sortBy === "oldest") list = [...list].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -245,13 +259,14 @@ export default function WithdrawalsPage() {
                 <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" />
                 <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" />
                 <Input type="number" placeholder="Min amount" value={minAmt} onChange={(e) => setMinAmt(e.target.value)} className="w-32" />
+                <Input type="number" placeholder="Max amount" value={maxAmt} onChange={(e) => setMaxAmt(e.target.value)} className="w-32" />
                 <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="w-36">
                   <option value="oldest">Oldest first</option>
                   <option value="newest">Newest first</option>
                   <option value="largest">Largest first</option>
                 </Select>
-                {(search || from || to || minAmt) && (
-                  <Button variant="ghost" onClick={() => { setSearch(""); setFrom(""); setTo(""); setMinAmt(""); }}>
+                {(search || from || to || minAmt || maxAmt) && (
+                  <Button variant="ghost" onClick={() => { setSearch(""); setFrom(""); setTo(""); setMinAmt(""); setMaxAmt(""); }}>
                     <X size={13} /> Clear
                   </Button>
                 )}
@@ -292,7 +307,16 @@ export default function WithdrawalsPage() {
             {loading ? <Spinner /> : (
               <Table
                 headers={[
-                  ...(canApprove && filter === "pending" ? [""] : []),
+                  ...(canApprove && filter === "pending" ? [
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-cyan"
+                      checked={filteredAndSorted.filter(w => w.status === "pending").length > 0 &&
+                        filteredAndSorted.filter(w => w.status === "pending").every(w => selected.has(w.id))}
+                      onChange={toggleSelectAll}
+                      title="Select all pending"
+                    />
+                  ] : []),
                   "Driver", "Phone", "Amount", "Net Payout", "Bank", "Account", "Wallet", "Status", "Date", "Actions"
                 ]}
                 empty={!filteredAndSorted.length}>

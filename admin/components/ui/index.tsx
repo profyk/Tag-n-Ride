@@ -114,15 +114,15 @@ export function Select({
 export function Table({
   headers, children, empty,
 }: {
-  headers: string[]; children?: React.ReactNode; empty?: boolean;
+  headers: (string | React.ReactNode)[]; children?: React.ReactNode; empty?: boolean;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full text-sm">
         <thead className="bg-bg3 border-b border-border">
           <tr>
-            {headers.map((h) => (
-              <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-textMuted uppercase tracking-wider">
+            {headers.map((h, i) => (
+              <th key={i} className="px-4 py-3 text-left text-[10px] font-bold text-textMuted uppercase tracking-wider">
                 {h}
               </th>
             ))}

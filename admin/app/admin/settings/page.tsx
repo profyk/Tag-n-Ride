@@ -18,6 +18,13 @@ const CEO_ONLY_KEYS = [
   "topup_gateway_fee_percent",
   "topup_gateway_fee_fixed",
   "platform_fee_percent",
+  "company_name",
+  "company_reg_number",
+  "company_vat_number",
+  "company_address_line1",
+  "company_address_line2",
+  "company_phone",
+  "company_email",
 ];
 
 const DANGEROUS_KEYS = [
@@ -91,6 +98,28 @@ const CONFIG_GROUPS = [
     descriptions: {
       support_whatsapp: "Support WhatsApp number digits only no +",
       support_email: "Support email address",
+    },
+  },
+  {
+    label: "Company & Payslip Letterhead",
+    ceoOnly: true,
+    keys: [
+      "company_name",
+      "company_reg_number",
+      "company_vat_number",
+      "company_address_line1",
+      "company_address_line2",
+      "company_phone",
+      "company_email",
+    ],
+    descriptions: {
+      company_name: "Legal company name as it appears on payslips e.g. Tag-n-Ride (Pty) Ltd",
+      company_reg_number: "CIPC registration number e.g. 2024/123456/07",
+      company_vat_number: "VAT registration number if applicable e.g. 4123456789",
+      company_address_line1: "Registered address line 1 e.g. 12 Main Street, Sandton",
+      company_address_line2: "Address line 2 e.g. Johannesburg, Gauteng, 2196",
+      company_phone: "Company contact number e.g. 011 123 4567",
+      company_email: "Payroll contact email e.g. payroll@tagnride.co.za",
     },
   },
 ];

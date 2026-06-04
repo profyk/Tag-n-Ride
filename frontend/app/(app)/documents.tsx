@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, FlatList, RefreshControl,
   TouchableOpacity, Modal, ScrollView, Pressable, Alert,
-  ActivityIndicator,
+  ActivityIndicator, Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -141,12 +141,23 @@ export default function DocumentsScreen() {
     );
   };
 
+  const handleShare = async (doc: UserDocument) => {
+    if (doc.reference_number) {
+      const url = `https://tagnride.com/verify?ref=${doc.reference_number}`;
+      try {
+        await Share.share({ message: `View my payslip: ${url}`, url });
+      } catch {}
+    } else {
+      handleDownload(doc);
+    }
+  };
+
   const handleDownload = async (doc: UserDocument) => {
     setDownloading(doc.id);
     try {
       const meta = doc.metadata || {};
-      const payslipId = meta.payslip_id;
-      if (!payslipId) { Alert.alert("Download", "No PDF available for this document."); return; }
+      // Fall back to doc.id if metadata.payslip_id wasn't stored by backend
+      const payslipId = meta.payslip_id ?? doc.id;
       const data = await api.payslipGet(payslipId);
       const isPayslip = (data.document_type ?? doc.document_type) === "payslip";
       const html = isPayslip ? buildFormalPayslipPDF(data) : buildStatementPDF(data);
@@ -264,6 +275,11 @@ export default function DocumentsScreen() {
                         : <Ionicons name="download-outline" size={18} color={color} />}
                     </TouchableOpacity>
                   )}
+                  {doc.document_type === "payslip" && (
+                    <TouchableOpacity onPress={() => handleShare(doc)} style={s.actionBtn}>
+                      <Ionicons name="share-outline" size={18} color={colors.cyan} />
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity onPress={() => handleDelete(doc)} style={s.actionBtn}>
                     <Ionicons name="trash-outline" size={18} color={colors.red} />
                   </TouchableOpacity>
@@ -337,6 +353,14 @@ export default function DocumentsScreen() {
                         disabled={downloading === selected.id}>
                         <Ionicons name="download-outline" size={18} color="#fff" />
                         <Text style={s.sheetActionBtnText}>Download PDF</Text>
+                      </TouchableOpacity>
+                    )}
+                    {selected.document_type === "payslip" && (
+                      <TouchableOpacity
+                        style={[s.sheetActionBtn, { backgroundColor: colors.cyanDim, borderColor: colors.cyan + "60" }]}
+                        onPress={() => { setSelected(null); handleShare(selected); }}>
+                        <Ionicons name="share-outline" size={18} color={colors.cyan} />
+                        <Text style={[s.sheetActionBtnText, { color: colors.cyan }]}>Share Verification Link</Text>
                       </TouchableOpacity>
                     )}
                     {selected.document_type === "kyc" && (

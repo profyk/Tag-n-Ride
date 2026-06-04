@@ -14,7 +14,7 @@ import {
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
   Zap, Globe, Star, ToggleRight, Key, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
-  Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent,
+  Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -96,10 +96,11 @@ const NAV_GROUPS: NavGroup[] = [
     icon: BarChart3,
     color: "text-purple",
     items: [
-      { label: "Analytics",      href: "/admin/analytics",  icon: BarChart3,  permission: "view_analytics" },
-      { label: "Growth Charts",  href: "/admin/growth",     icon: Rocket,     permission: "view_analytics" },
-      { label: "Routes & Trips", href: "/admin/routes",     icon: MapPin,     permission: "view_analytics" },
-      { label: "Fleet Reports",  href: "/admin/fleet",      icon: Truck,      permission: "view_analytics" },
+      { label: "Analytics",        href: "/admin/analytics",      icon: BarChart3,  permission: "view_analytics" },
+      { label: "Data Analytics",  href: "/admin/data-analytics", icon: Cpu,        permission: "view_analytics" },
+      { label: "Growth Charts",   href: "/admin/growth",         icon: Rocket,     permission: "view_analytics" },
+      { label: "Routes & Trips",  href: "/admin/routes",         icon: MapPin,     permission: "view_analytics" },
+      { label: "Fleet Reports",   href: "/admin/fleet",          icon: Truck,      permission: "view_analytics" },
     ],
   },
   {
@@ -157,9 +158,10 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Settings,
     color: "text-textMuted",
     items: [
-      { label: "Pricing Rules",   href: "/admin/pricing",   icon: Zap,     permission: "manage_pricing" },
-      { label: "Coverage Zones",  href: "/admin/geography", icon: Globe,   permission: "view_analytics" },
-      { label: "System Health",   href: "/admin/health",    icon: Activity, permission: "view_audit" },
+      { label: "Pricing Rules",    href: "/admin/pricing",          icon: Zap,      permission: "manage_pricing" },
+      { label: "Document Pricing", href: "/admin/document-pricing", icon: FileText, permission: "edit_fees" },
+      { label: "Coverage Zones",   href: "/admin/geography",        icon: Globe,    permission: "view_analytics" },
+      { label: "System Health",    href: "/admin/health",           icon: Activity, permission: "view_audit" },
     ],
   },
 ];

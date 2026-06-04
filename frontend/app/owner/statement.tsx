@@ -1,20 +1,26 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, Modal,
+  Alert, ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../src/api";
-import { colors, formatZAR, radius } from "../../src/theme";
+import { formatZAR, radius } from "../../src/theme";
+import { useTheme } from "../../src/ThemeContext";
 
 const MONTHS = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",
 ];
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function formatR(val: number) {
+  return `R ${val.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+}
+
+function Section({ title, children, colors }: { title: string; children: React.ReactNode; colors: any }) {
+  const s = sectionStyles(colors);
   return (
     <View style={s.section}>
       <Text style={s.sectionTitle}>{title}</Text>
@@ -23,7 +29,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, value, bold, green, red }: any) {
+function Row({ label, value, bold, green, red, colors }: any) {
+  const s = sectionStyles(colors);
   return (
     <View style={s.row}>
       <Text style={s.rowLabel}>{label}</Text>
@@ -34,24 +41,84 @@ function Row({ label, value, bold, green, red }: any) {
   );
 }
 
+const sectionStyles = (colors: any) => StyleSheet.create({
+  section: { marginBottom: 20 },
+  sectionTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 10 },
+  row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border + "55" },
+  rowLabel: { color: colors.textMuted, fontSize: 13, flex: 1 },
+  rowValue: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+});
+
 export default function OwnerStatementScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+  const [year, setYear]       = useState(now.getFullYear());
+  const [month, setMonth]     = useState(now.getMonth());
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<any>(null);
+  const [data, setData]       = useState<any>(null);
   const [stmtRef, setStmtRef] = useState("");
   const [charged, setCharged] = useState(0);
+
+  // Pricing + wallet state
+  const [pricing, setPricing]             = useState<{ enabled: boolean; price: number } | null>(null);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [loadingPricing, setLoadingPricing] = useState(true);
+
+  const loadPricing = useCallback(async () => {
+    setLoadingPricing(true);
+    try {
+      const [p, w] = await Promise.all([
+        api.ownerStatementPricing().catch(() => null),
+        api.wallet().catch(() => null),
+      ]);
+      if (p) setPricing(p);
+      if (w) setWalletBalance(w.balance);
+    } finally {
+      setLoadingPricing(false);
+    }
+  }, []);
+
+  useEffect(() => { loadPricing(); }, []);
 
   const periodStart = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const lastDay = new Date(year, month + 1, 0).getDate();
   const periodEnd = `${year}-${String(month + 1).padStart(2, "0")}-${lastDay}`;
 
   const request = async () => {
+    // Re-fetch fresh pricing + wallet at request time
+    let freshPricing = pricing;
+    let freshBalance = walletBalance;
+    try {
+      const [p, w] = await Promise.all([
+        api.ownerStatementPricing().catch(() => null),
+        api.wallet().catch(() => null),
+      ]);
+      if (p) { freshPricing = p; setPricing(p); }
+      if (w) { freshBalance = w.balance; setWalletBalance(w.balance); }
+    } catch {}
+
+    if (freshPricing && !freshPricing.enabled) {
+      Alert.alert("Unavailable", "Fleet statements are currently disabled. Please try again later.");
+      return;
+    }
+
+    const fee = freshPricing?.price ?? 0;
+    if (fee > 0 && freshBalance < fee) {
+      Alert.alert(
+        "Insufficient Balance",
+        `You need ${formatR(fee)} to generate this statement.\n\nYour balance: ${formatR(freshBalance)}\n\nPlease top up your wallet first.`
+      );
+      return;
+    }
+
+    const feeLabel = fee > 0
+      ? `${formatR(fee)} will be deducted from your wallet.`
+      : "This statement is free.";
+
     Alert.alert(
-      "Download Statement",
-      `This will generate a fleet breakdown for ${MONTHS[month]} ${year}.\nA fee will be deducted from your wallet.`,
+      "Download Fleet Statement",
+      `Generate a full fleet breakdown for ${MONTHS[month]} ${year}.\n\n${feeLabel}`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -75,6 +142,7 @@ export default function OwnerStatementScreen() {
   };
 
   const d = data;
+  const s = makeStyles(colors);
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
@@ -91,25 +159,60 @@ export default function OwnerStatementScreen() {
           <View style={s.periodCard}>
             <Text style={s.periodLabel}>SELECT PERIOD</Text>
             <View style={s.monthRow}>
-              <TouchableOpacity onPress={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }} style={s.arrow}>
+              <TouchableOpacity
+                onPress={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
+                style={s.arrow}>
                 <Ionicons name="chevron-back" size={20} color={colors.cyan} />
               </TouchableOpacity>
               <Text style={s.monthText}>{MONTHS[month]} {year}</Text>
-              <TouchableOpacity onPress={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }} style={s.arrow}>
+              <TouchableOpacity
+                onPress={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }}
+                style={s.arrow}>
                 <Ionicons name="chevron-forward" size={20} color={colors.cyan} />
               </TouchableOpacity>
             </View>
             <Text style={s.periodRange}>{periodStart} → {periodEnd}</Text>
-            <TouchableOpacity style={s.dlBtn} onPress={request} disabled={loading}>
-              {loading
-                ? <ActivityIndicator color={colors.bg} />
-                : <>
-                    <Ionicons name="document-text-outline" size={18} color={colors.bg} />
-                    <Text style={s.dlBtnText}>Generate Statement</Text>
-                  </>
-              }
-            </TouchableOpacity>
-            <Text style={s.feeNote}>A statement fee will be deducted from your wallet</Text>
+
+            {/* Pricing info */}
+            {loadingPricing ? (
+              <ActivityIndicator color={colors.cyan} style={{ marginBottom: 16 }} />
+            ) : pricing && !pricing.enabled ? (
+              <View style={s.disabledBox}>
+                <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
+                <Text style={s.disabledText}>Fleet statements are currently unavailable.</Text>
+              </View>
+            ) : (
+              <>
+                <View style={s.feeBox}>
+                  <View style={s.feeRow}>
+                    <Text style={s.feeLabel}>Statement Fee</Text>
+                    <Text style={[s.feeValue, { color: colors.cyan }]}>
+                      {pricing ? formatR(pricing.price) : "—"}
+                    </Text>
+                  </View>
+                  <View style={s.feeRow}>
+                    <Text style={s.feeLabel}>Your Balance</Text>
+                    <Text style={[s.feeValue, {
+                      color: pricing && walletBalance >= pricing.price ? colors.green : colors.red,
+                    }]}>
+                      {formatR(walletBalance)}
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity style={s.dlBtn} onPress={request} disabled={loading}>
+                  {loading
+                    ? <ActivityIndicator color={colors.bg} />
+                    : <>
+                        <Ionicons name="document-text-outline" size={18} color={colors.bg} />
+                        <Text style={s.dlBtnText}>
+                          Generate Statement{pricing && pricing.price > 0 ? ` — ${formatR(pricing.price)}` : ""}
+                        </Text>
+                      </>
+                  }
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         )}
 
@@ -129,24 +232,26 @@ export default function OwnerStatementScreen() {
             </View>
 
             {/* Summary */}
-            <Section title="EARNINGS SUMMARY">
-              <Row label="Total cashup received from drivers" value={formatZAR(d.summary.total_cashup_received)} green />
-              <Row label="Total fuel deducted" value={`- ${formatZAR(d.summary.total_fuel_deducted)}`} red />
-              <Row label="Total driver profit paid out" value={`- ${formatZAR(d.summary.total_driver_profit)}`} />
-              <Row label="Subscription fees paid" value={`- ${formatZAR(d.summary.subscription_fees_paid)}`} red />
-              <Row label="Withdrawals / payouts" value={`- ${formatZAR(d.summary.total_payouts)}`} />
+            <Section title="EARNINGS SUMMARY" colors={colors}>
+              <Row label="Total cashup received from drivers" value={formatZAR(d.summary.total_cashup_received)} green colors={colors} />
+              <Row label="Total fuel deducted" value={`- ${formatZAR(d.summary.total_fuel_deducted)}`} red colors={colors} />
+              <Row label="Total driver profit paid out" value={`- ${formatZAR(d.summary.total_driver_profit)}`} colors={colors} />
+              <Row label="Subscription fees paid" value={`- ${formatZAR(d.summary.subscription_fees_paid)}`} red colors={colors} />
+              <Row label="Withdrawals / payouts" value={`- ${formatZAR(d.summary.total_payouts)}`} colors={colors} />
               <View style={s.divider} />
-              <Row label="Net earnings" value={formatZAR(d.summary.net_earnings)} bold green={d.summary.net_earnings >= 0} red={d.summary.net_earnings < 0} />
+              <Row label="Net earnings" value={formatZAR(d.summary.net_earnings)} bold green={d.summary.net_earnings >= 0} red={d.summary.net_earnings < 0} colors={colors} />
             </Section>
 
             {/* Fleet */}
             {d.drivers.length > 0 && (
-              <Section title={`FLEET (${d.drivers.length} DRIVERS)`}>
+              <Section title={`FLEET (${d.drivers.length} DRIVERS)`} colors={colors}>
                 {d.drivers.map((dr: any, i: number) => (
                   <View key={i} style={s.driverRow}>
                     <View style={s.driverInfo}>
                       <Text style={s.driverName}>{dr.name}</Text>
-                      <Text style={s.driverSub}>{dr.vehicle_plate || "No plate"} · {dr.payment_mode === "commission_split" ? `${dr.commission_pct}% comm.` : "Daily target"}</Text>
+                      <Text style={s.driverSub}>
+                        {dr.vehicle_plate || "No plate"} · {dr.payment_mode === "commission_split" ? `${dr.commission_pct}% comm.` : "Daily target"}
+                      </Text>
                     </View>
                     <Text style={s.driverEarnings}>{formatZAR(dr.total_earnings)}</Text>
                   </View>
@@ -156,7 +261,7 @@ export default function OwnerStatementScreen() {
 
             {/* Cashup records */}
             {d.cashup_records.length > 0 && (
-              <Section title="CASHUP RECORDS">
+              <Section title="CASHUP RECORDS" colors={colors}>
                 {d.cashup_records.map((r: any, i: number) => (
                   <View key={i} style={[s.cashupRow, i < d.cashup_records.length - 1 && s.cashupBorder]}>
                     <View style={{ flex: 1 }}>
@@ -174,15 +279,14 @@ export default function OwnerStatementScreen() {
 
             {/* Subscription fees */}
             {d.subscription_fees.length > 0 && (
-              <Section title="SUBSCRIPTION FEES">
+              <Section title="SUBSCRIPTION FEES" colors={colors}>
                 {d.subscription_fees.map((f: any, i: number) => (
-                  <Row key={i} label={`${f.period} · ${f.taxis} taxis`} value={`- ${formatZAR(f.amount)}`} red />
+                  <Row key={i} label={`${f.period} · ${f.taxis} taxis`} value={`- ${formatZAR(f.amount)}`} red colors={colors} />
                 ))}
               </Section>
             )}
 
-            {/* New statement button */}
-            <TouchableOpacity style={s.newBtn} onPress={() => setData(null)}>
+            <TouchableOpacity style={s.newBtn} onPress={() => { setData(null); loadPricing(); }}>
               <Text style={s.newBtnText}>Generate Another Statement</Text>
             </TouchableOpacity>
           </>
@@ -192,7 +296,7 @@ export default function OwnerStatementScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   back: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 16 },
   backText: { color: colors.text, fontSize: 16 },
@@ -203,21 +307,21 @@ const s = StyleSheet.create({
   monthRow: { flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 8 },
   arrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
   monthText: { color: colors.text, fontSize: 20, fontWeight: "800", minWidth: 180, textAlign: "center" },
-  periodRange: { color: colors.textMuted, fontSize: 12, marginBottom: 20 },
+  periodRange: { color: colors.textMuted, fontSize: 12, marginBottom: 16 },
+  feeBox: { width: "100%", backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 16 },
+  feeRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 },
+  feeLabel: { color: colors.textMuted, fontSize: 13 },
+  feeValue: { fontSize: 13, fontWeight: "800" },
   dlBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.cyan, borderRadius: radius.md, paddingVertical: 14, paddingHorizontal: 28 },
   dlBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
-  feeNote: { color: colors.textDim, fontSize: 11, marginTop: 12 },
+  disabledBox: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, backgroundColor: colors.bg, borderRadius: radius.sm, marginBottom: 8 },
+  disabledText: { color: colors.textMuted, fontSize: 13, flex: 1 },
   stmtHeader: { flexDirection: "row", alignItems: "flex-start", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16 },
   stmtTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
   stmtMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   stmtRef: { color: colors.cyan, fontSize: 11, fontWeight: "700", marginTop: 6 },
-  stmtFeeTag: { backgroundColor: colors.redDim, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 4 },
+  stmtFeeTag: { backgroundColor: colors.redDim ?? colors.red + "20", borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 4 },
   stmtFeeText: { color: colors.red, fontSize: 12, fontWeight: "700" },
-  section: { marginBottom: 20 },
-  sectionTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 10 },
-  row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border + "55" },
-  rowLabel: { color: colors.textMuted, fontSize: 13, flex: 1 },
-  rowValue: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },
   driverRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border + "44" },
   driverInfo: { flex: 1 },

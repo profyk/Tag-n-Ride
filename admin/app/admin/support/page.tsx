@@ -3,12 +3,14 @@ import { useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Spinner, Badge } from "@/components/ui";
 import { api, hasPermission } from "@/lib/api";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   Search, Key, Snowflake, Copy, CheckCircle, User,
   Wallet, ArrowLeftRight, ShieldAlert, Bell, FileText,
   Phone, Calendar, Shield, AlertTriangle, RefreshCw,
   XCircle, Flag, Unlock, ChevronDown, ChevronUp,
+  MessageCircle, PlusCircle, MinusCircle, ExternalLink,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -59,10 +61,24 @@ const TXN_TONE: Record<string, any> = {
   const [noteText, setNoteText] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [expandedTxn, setExpandedTxn] = useState<string | null>(null);
+  const [txnSearch, setTxnSearch] = useState("");
+  const [adjustModal, setAdjustModal] = useState(false);
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [adjustType, setAdjustType] = useState<"credit" | "debit">("credit");
+  const [adjusting, setAdjusting] = useState(false);
 
   const canManage = hasPermission("manage_users");
   const canFreeze = hasPermission("freeze_wallet");
   const canReset = hasPermission("reset_pin");
+  const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
+
+  // Pre-fill from ?q= param (e.g. deep-linked from Risk page)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setQuery(q);
+  }, []);
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -112,14 +128,17 @@ const TXN_TONE: Record<string, any> = {
   const handleFreeze = async () => {
     if (!result?.user?.id) return;
     const isFrozen = result.wallet?.is_frozen;
-    if (!confirm(`${isFrozen ? "Unfreeze" : "Freeze"} wallet for ${result.user.full_name}?`)) return;
+    const token = await requestPin();
+    if (!token) return;
     setActionLoading("freeze");
     try {
       if (isFrozen) {
         await api.unfreezeWallet(result.user.id);
         toast.success("Wallet unfrozen");
       } else {
-        await api.freezeWallet(result.user.id, "Support action");
+        const reason = prompt(`Freeze reason for ${result.user.full_name} (required):`);
+        if (!reason?.trim()) { setActionLoading(null); return; }
+        await api.freezeWallet(result.user.id, reason.trim());
         toast.success("Wallet frozen");
       }
       handleSearch();
@@ -163,14 +182,37 @@ const TXN_TONE: Record<string, any> = {
     finally { setSavingNote(false); }
   };
 
+  const handleWalletAdjust = async () => {
+    if (!result?.user?.id || !adjustAmount.trim()) return;
+    const amt = parseFloat(adjustAmount);
+    if (isNaN(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    const token = await requestPin();
+    if (!token) return;
+    setAdjusting(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/wallets/${result.user.id}/adjust`, {
+        method: "POST",
+        headers: { ...authHeaders(), "X-Danger-Token": token },
+        body: JSON.stringify({ amount: adjustType === "credit" ? amt : -amt, note: adjustNote || `Support ${adjustType}` }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Adjustment failed");
+      toast.success(`Wallet ${adjustType === "credit" ? "credited" : "debited"} ${formatZAR(amt)}`);
+      setAdjustModal(false); setAdjustAmount(""); setAdjustNote("");
+      handleSearch();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setAdjusting(false); }
+  };
+
   const TABS = [
     { key: "overview",     label: "Overview",     icon: User },
     { key: "transactions", label: `Transactions${result?.recent_transactions?.length ? ` (${result.recent_transactions.length})` : ""}`, icon: ArrowLeftRight },
     { key: "withdrawals",  label: "Withdrawals",  icon: Wallet },
     { key: "audit",        label: "Audit Trail",  icon: FileText },
     { key: "notes",        label: "Notes",        icon: Bell },
-  ];return (
+  ];
+  return (
     <AdminShell title="Support">
+      <DangerPinModal open={pinOpen} onSuccess={pinSuccess} onCancel={pinCancel} actionLabel="wallet freeze/unfreeze" />
       <div className="space-y-5 max-w-3xl">
 
         <div className="flex gap-3">
@@ -233,6 +275,20 @@ const TXN_TONE: Record<string, any> = {
               </div>
 
               <div className="flex gap-2 mt-4 flex-wrap">
+                {/* WhatsApp shortcut */}
+                <a
+                  href={`/admin/whatsapp-support?phone=${encodeURIComponent(result.user.phone_number)}`}
+                  target="_blank"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/20 rounded-lg text-green text-xs font-bold hover:bg-green/20 transition-colors">
+                  <MessageCircle size={12} /> WhatsApp
+                </a>
+                {/* Wallet adjustment */}
+                {canFreeze && (
+                  <button onClick={() => setAdjustModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-purple/10 border border-purple/20 rounded-lg text-purple text-xs font-bold hover:bg-purple/20 transition-colors">
+                    <Wallet size={12} /> Adjust Wallet
+                  </button>
+                )}
                 {canReset && (
                   <button onClick={handleResetPin} disabled={actionLoading === "pin"}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-purple/10 border border-purple/20 rounded-lg text-purple text-xs font-bold hover:bg-purple/20 transition-colors disabled:opacity-50">
@@ -342,16 +398,43 @@ const TXN_TONE: Record<string, any> = {
               </div>
             )}
 
-            {activeTab === "transactions" && (
+            {activeTab === "transactions" && (() => {
+              const txns: any[] = result.recent_transactions ?? [];
+              const filtered = txnSearch.trim()
+                ? txns.filter((t: any) => {
+                    const q = txnSearch.toLowerCase();
+                    return `${t.reference} ${t.type} ${t.status} ${t.note || ""}`.toLowerCase().includes(q);
+                  })
+                : txns;
+              return (
               <Card>
-                <h3 className="text-text font-bold text-sm mb-4">
-                  Recent Transactions ({result.recent_transactions?.length || 0})
-                </h3>
-                {!result.recent_transactions?.length ? (
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-text font-bold text-sm">
+                    Recent Transactions ({txns.length})
+                    {txnSearch && <span className="ml-2 text-cyan text-xs font-normal">— {filtered.length} matching</span>}
+                  </h3>
+                </div>
+                <div className="flex gap-2 mb-3">
+                  <div className="relative flex-1">
+                    <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-textDim" />
+                    <input
+                      value={txnSearch}
+                      onChange={e => setTxnSearch(e.target.value)}
+                      placeholder="Filter by reference, type, status..."
+                      className="w-full pl-7 pr-3 py-1.5 bg-bg border border-border rounded-lg text-xs text-text placeholder:text-textDim focus:outline-none focus:border-cyan"
+                    />
+                  </div>
+                  {txnSearch && (
+                    <button onClick={() => setTxnSearch("")} className="text-textDim hover:text-text px-2">
+                      <XCircle size={14} />
+                    </button>
+                  )}
+                </div>
+                {!txns.length ? (
                   <p className="text-textMuted text-sm text-center py-8">No transactions found</p>
                 ) : (
                   <div className="space-y-2">
-                    {result.recent_transactions.map((t: any) => (
+                    {filtered.map((t: any) => (
                       <div key={t.id || t.reference}>
                         <div onClick={() => setExpandedTxn(expandedTxn === t.id ? null : t.id)}
                           className="flex items-center gap-3 p-3 bg-bg rounded-xl border border-border cursor-pointer hover:border-cyan/20 transition-colors">
@@ -409,7 +492,9 @@ const TXN_TONE: Record<string, any> = {
                   </div>
                 )}
               </Card>
-            )}{activeTab === "withdrawals" && (
+              );
+            })()}
+            {activeTab === "withdrawals" && (
               <Card>
                 <h3 className="text-text font-bold text-sm mb-4">Withdrawal History</h3>
                 {!result.withdrawals?.length ? (
@@ -518,6 +603,68 @@ const TXN_TONE: Record<string, any> = {
           </div>
         )}
       </div>
+
+      {/* ── Wallet Adjustment Modal ── */}
+      {adjustModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-bg2 border border-border rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-text font-extrabold">Wallet Adjustment</h2>
+              <button onClick={() => setAdjustModal(false)} className="text-textDim hover:text-text">
+                <XCircle size={18} />
+              </button>
+            </div>
+            <p className="text-textMuted text-xs">Adjusting wallet for <strong className="text-text">{result?.user?.full_name}</strong></p>
+
+            {/* Credit / Debit toggle */}
+            <div className="flex gap-2">
+              <button onClick={() => setAdjustType("credit")}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold border transition-all ${adjustType === "credit" ? "bg-green/10 border-green/20 text-green" : "bg-bg text-textMuted border-border"}`}>
+                <PlusCircle size={13} /> Credit
+              </button>
+              <button onClick={() => setAdjustType("debit")}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold border transition-all ${adjustType === "debit" ? "bg-red/10 border-red/20 text-red" : "bg-bg text-textMuted border-border"}`}>
+                <MinusCircle size={13} /> Debit
+              </button>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest block mb-1.5">Amount (ZAR)</label>
+              <input
+                type="number" min="0.01" step="0.01"
+                value={adjustAmount}
+                onChange={e => setAdjustAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest block mb-1.5">Note (required)</label>
+              <input
+                value={adjustNote}
+                onChange={e => setAdjustNote(e.target.value)}
+                placeholder="Reason for adjustment..."
+                className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan"
+              />
+            </div>
+
+            <div className="flex items-center gap-3 p-3 bg-yellow/5 border border-yellow/20 rounded-lg">
+              <AlertTriangle size={13} className="text-yellow flex-shrink-0" />
+              <p className="text-yellow text-xs">Requires Danger PIN. All adjustments are logged in the audit trail.</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setAdjustModal(false)} className="flex-1 py-2.5 rounded-lg border border-border text-textMuted text-sm font-bold hover:bg-bg3 transition-colors">Cancel</button>
+              <button
+                onClick={handleWalletAdjust}
+                disabled={adjusting || !adjustAmount || !adjustNote}
+                className={`flex-1 py-2.5 rounded-lg text-white text-sm font-bold disabled:opacity-50 transition-colors ${adjustType === "credit" ? "bg-green hover:bg-green/90" : "bg-red hover:bg-red/90"}`}>
+                {adjusting ? "Processing…" : `${adjustType === "credit" ? "Credit" : "Debit"} Wallet`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminShell>
   );
 }

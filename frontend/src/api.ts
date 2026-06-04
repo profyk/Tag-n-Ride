@@ -483,6 +483,12 @@ export const api = {
     }>("/api/owner/subscription"),
 
   // ── Statements ──
+  ownerStatementPricing: () =>
+    request<{ enabled: boolean; price: number }>("/api/owner/statement/pricing"),
+
+  passengerStatementPricing: () =>
+    request<{ enabled: boolean; price: number }>("/api/passenger/statement/pricing"),
+
   requestOwnerStatement: (period_start: string, period_end: string) =>
     request<{ statement_id: string; reference: string; amount_charged: number; data: any }>(
       "/api/owner/statement/request",

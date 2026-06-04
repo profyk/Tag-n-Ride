@@ -8,7 +8,8 @@ import {
   Search, Send, CheckCheck, Check, Clock, MessageCircle,
   Phone, User, RefreshCw, ChevronDown, MoreVertical,
   CheckCircle, XCircle, AlertCircle, Paperclip, Smile,
-  ExternalLink, Archive,
+  ExternalLink, Archive, Ban, Tag, StickyNote, AlertTriangle,
+  CheckSquare,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -92,6 +93,12 @@ export default function WhatsAppSupportPage() {
   const [search, setSearch] = useState("");
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [internalNote, setInternalNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [internalNotes, setInternalNotes] = useState<Record<string, { text: string; by: string; at: string }[]>>({});
+  const [showNotes, setShowNotes] = useState(false);
+  const [blockingPhone, setBlockingPhone] = useState<string | null>(null);
+  const [bulkResolving, setBulkResolving] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -101,9 +108,10 @@ export default function WhatsAppSupportPage() {
   const loadConversations = useCallback(async () => {
     try {
       const r = await fetch(`${BASE}/api/admin/whatsapp/support/conversations`, { headers: authHeaders() });
+      if (!r.ok) { setLoadingConvs(false); return; }
       const d = await r.json();
       setConversations(Array.isArray(d) ? d : (d.conversations || []));
-    } catch { /* silent */ }
+    } catch { /* API unavailable */ }
     finally { setLoadingConvs(false); }
   }, []);
 
@@ -190,6 +198,65 @@ export default function WhatsAppSupportPage() {
     finally { setUpdatingStatus(false); }
   };
 
+  const handleSaveNote = () => {
+    if (!selectedId || !internalNote.trim()) return;
+    setSavingNote(true);
+    const note = { text: internalNote.trim(), by: "Admin", at: new Date().toISOString() };
+    setInternalNotes(prev => ({
+      ...prev,
+      [selectedId]: [...(prev[selectedId] ?? []), note],
+    }));
+    setInternalNote("");
+    setSavingNote(false);
+    toast.success("Internal note saved");
+  };
+
+  const handleBlockContact = async (phone: string) => {
+    if (!confirm(`Block ${phone}? They will be unable to message support.`)) return;
+    setBlockingPhone(phone);
+    try {
+      const res = await fetch(`${BASE}/api/admin/whatsapp/support/block`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ phone }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Block failed");
+      toast.success(`${phone} blocked from support`);
+      setConversations(prev => prev.filter(c => c.phone !== phone));
+      setSelectedId(null);
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBlockingPhone(null); }
+  };
+
+  const handleBulkResolve = async () => {
+    const open = conversations.filter(c => c.status === "open" || c.status === "pending");
+    if (!open.length) { toast.error("No open conversations to resolve"); return; }
+    if (!confirm(`Mark ${open.length} open conversations as resolved?`)) return;
+    setBulkResolving(true);
+    let done = 0;
+    for (const c of open) {
+      try {
+        await fetch(`${BASE}/api/admin/whatsapp/support/conversations/${c.id}/status`, {
+          method: "PATCH", headers: authHeaders(),
+          body: JSON.stringify({ status: "resolved" }),
+        });
+        done++;
+      } catch {}
+    }
+    setBulkResolving(false);
+    toast.success(`${done} conversations resolved`);
+    loadConversations();
+    setSelectedId(null);
+  };
+
+  // SLA: minutes since last inbound message
+  const slaMinutes = (conv: Conversation | null): number | null => {
+    if (!conv) return null;
+    const lastInbound = messages.filter(m => m.direction === "inbound").slice(-1)[0];
+    if (!lastInbound) return null;
+    return Math.floor((Date.now() - new Date(lastInbound.sent_at).getTime()) / 60000);
+  };
+
   const filteredConvs = conversations.filter(c =>
     (statusFilter === "all" || c.status === statusFilter) &&
     (!search ||
@@ -215,14 +282,21 @@ export default function WhatsAppSupportPage() {
         <div className="w-80 flex-shrink-0 flex flex-col border-r border-border bg-bg2">
 
           {/* Support number banner */}
-          <div className="px-4 py-3 border-b border-border bg-bg3 flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-green/20 flex items-center justify-center flex-shrink-0">
-              <MessageCircle size={14} className="text-green" />
+          <div className="px-3 py-2.5 border-b border-border bg-bg3 flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-green/20 flex items-center justify-center flex-shrink-0">
+              <MessageCircle size={12} className="text-green" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-text font-bold text-xs">Support Inbox</p>
-              <p className="text-textDim text-[10px] font-mono">{SUPPORT_NUMBER}</p>
+              <p className="text-textDim text-[9px] font-mono">{SUPPORT_NUMBER}</p>
             </div>
+            <button
+              title="Bulk resolve all open"
+              onClick={handleBulkResolve}
+              disabled={bulkResolving}
+              className="p-1 text-textDim hover:text-green transition-colors">
+              {bulkResolving ? <RefreshCw size={12} className="animate-spin" /> : <CheckSquare size={12} />}
+            </button>
             <button onClick={loadConversations} className="text-textDim hover:text-cyan transition-colors p-1">
               <RefreshCw size={13} />
             </button>
@@ -305,9 +379,17 @@ export default function WhatsAppSupportPage() {
                       </span>
                     )}
                   </div>
-                  {conv.status !== "open" && (
-                    <Badge label={conv.status} tone={STATUS_CONFIG[conv.status].tone} />
-                  )}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {conv.status !== "open" && (
+                      <Badge label={conv.status} tone={STATUS_CONFIG[conv.status].tone} />
+                    )}
+                    {conv.status === "open" && (() => {
+                      const mins = Math.floor((Date.now() - new Date(conv.last_message_at).getTime()) / 60000);
+                      if (mins > 60) return <span className="text-[9px] font-bold text-red">{Math.floor(mins/60)}h SLA</span>;
+                      if (mins > 30) return <span className="text-[9px] font-bold text-yellow">{mins}m</span>;
+                      return null;
+                    })()}
+                  </div>
                 </div>
               </button>
             ))}
@@ -349,8 +431,18 @@ export default function WhatsAppSupportPage() {
                       <Badge label={selectedConv.status} tone={STATUS_CONFIG[selectedConv.status].tone} />
                     )}
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <p className="text-textDim text-[10px] font-mono">{selectedConv?.phone}</p>
+                    {(() => {
+                      const sla = slaMinutes(selectedConv);
+                      if (sla === null) return null;
+                      const color = sla > 60 ? "text-red" : sla > 30 ? "text-yellow" : "text-green";
+                      const label = sla > 60 ? `${Math.floor(sla/60)}h ${sla%60}m waiting` : `${sla}m waiting`;
+                      return <span className={`text-[9px] font-bold ${color} flex items-center gap-0.5`}><Clock size={8} /> {label}</span>;
+                    })()}
+                    {selectedId && internalNotes[selectedId]?.length > 0 && (
+                      <span className="text-[9px] text-yellow font-bold">{internalNotes[selectedId].length} note{internalNotes[selectedId].length > 1 ? "s" : ""}</span>
+                    )}
                     {selectedConv?.user_id && (
                       <Link
                         href={`/admin/support?q=${selectedConv.phone}`}
@@ -389,6 +481,22 @@ export default function WhatsAppSupportPage() {
                     <Clock size={12} /> Pending
                   </button>
                 )}
+                <button
+                  onClick={() => setShowNotes(v => !v)}
+                  title="Internal notes"
+                  className={`text-textDim hover:text-yellow p-1.5 rounded-lg hover:bg-bg3 transition-colors ${showNotes ? "text-yellow bg-yellow/10" : ""}`}>
+                  <StickyNote size={14} />
+                  {selectedId && internalNotes[selectedId]?.length > 0 && (
+                    <span className="sr-only">{internalNotes[selectedId].length} notes</span>
+                  )}
+                </button>
+                <button
+                  onClick={() => selectedConv && handleBlockContact(selectedConv.phone)}
+                  disabled={blockingPhone === selectedConv?.phone}
+                  title="Block this contact"
+                  className="text-textDim hover:text-red p-1.5 rounded-lg hover:bg-bg3 transition-colors">
+                  <Ban size={14} />
+                </button>
                 <button
                   onClick={() => loadMessages(selectedId)}
                   className="text-textDim hover:text-cyan transition-colors p-1.5 rounded-lg hover:bg-bg3">
@@ -481,6 +589,37 @@ export default function WhatsAppSupportPage() {
                       <p className="text-textDim truncate">{r.text}</p>
                     </button>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Internal notes panel */}
+            {showNotes && selectedId && (
+              <div className="border-t border-yellow/20 bg-yellow/5 px-3 py-3 flex-shrink-0">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold text-yellow uppercase tracking-widest flex items-center gap-1.5">
+                    <StickyNote size={10} /> Internal Notes (not visible to customer)
+                  </p>
+                  <button onClick={() => setShowNotes(false)} className="text-textDim hover:text-text"><XCircle size={12} /></button>
+                </div>
+                {(internalNotes[selectedId] ?? []).map((n, i) => (
+                  <div key={i} className="mb-1.5 px-2.5 py-1.5 bg-yellow/10 border border-yellow/20 rounded-lg text-xs">
+                    <p className="text-text">{n.text}</p>
+                    <p className="text-textDim text-[9px] mt-0.5">{n.by} · {new Date(n.at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}</p>
+                  </div>
+                ))}
+                <div className="flex gap-2 mt-2">
+                  <input
+                    value={internalNote}
+                    onChange={e => setInternalNote(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleSaveNote(); } }}
+                    placeholder="Add internal note..."
+                    className="flex-1 bg-bg border border-yellow/30 rounded-lg px-3 py-1.5 text-text text-xs focus:outline-none focus:border-yellow"
+                  />
+                  <button onClick={handleSaveNote} disabled={!internalNote.trim() || savingNote}
+                    className="px-3 py-1.5 bg-yellow text-bg rounded-lg text-xs font-bold disabled:opacity-50 hover:bg-yellow/90 transition-colors">
+                    Save
+                  </button>
                 </div>
               </div>
             )}

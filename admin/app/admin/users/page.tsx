@@ -58,9 +58,18 @@ export default function UsersPage() {
     if (!blockModal) return;
     const u = blockModal;
     try {
-      if (u.is_active) { await api.blockUser(u.id, blockReason || undefined); toast.success(`${u.full_name} blocked`); }
-      else { await api.unblockUser(u.id); toast.success(`${u.full_name} unblocked`); }
+      await api.blockUser(u.id, blockReason || undefined);
+      toast.success(`${u.full_name} blocked`);
       setBlockModal(null); setBlockReason("");
+      load(query);
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleUnblock = async (u: User) => {
+    if (!confirm(`Unblock ${u.full_name}?`)) return;
+    try {
+      await api.unblockUser(u.id);
+      toast.success(`${u.full_name} unblocked`);
       load(query);
     } catch (e: any) { toast.error(e.message); }
   };
@@ -186,7 +195,7 @@ export default function UsersPage() {
                       variant={u.is_active ? "danger" : "secondary"}
                       onClick={() => {
                         if (u.is_active) setBlockModal(u);
-                        else handleBlock();
+                        else handleUnblock(u);
                       }}
                     >
                       {u.is_active ? <><ShieldOff size={12} /> Block</> : <><ShieldCheck size={12} /> Unblock</>}

@@ -349,11 +349,34 @@ export default function PayslipScreen() {
   const doGenerateStatement = async () => {
     setGeneratingStmt(true);
     try {
-      const fresh = await api.payslipPricing();
+      // Always re-fetch pricing + wallet — never trust cached values for a paid action
+      const [fresh, freshWallet] = await Promise.all([
+        api.payslipPricing(),
+        api.wallet().catch(() => null),
+      ]);
+
       if (!fresh?.enabled) {
-        Alert.alert("Unavailable", "Earnings statements are currently disabled.");
+        Alert.alert("Unavailable", "Earnings statements are currently disabled by admin.");
         return;
       }
+
+      const fee = getFee(fresh, stmtPeriod);
+      if (fee <= 0) {
+        Alert.alert("Pricing Error", "Statement pricing has not been configured. Please contact support.");
+        return;
+      }
+
+      const balance = freshWallet?.balance ?? walletBalance;
+      if (freshWallet) setWalletBalance(freshWallet.balance);
+
+      if (balance < fee) {
+        Alert.alert(
+          "Insufficient Balance",
+          `You need ${formatR(fee)} to generate this statement.\n\nYour balance: ${formatR(balance)}\n\nPlease top up your wallet first.`
+        );
+        return;
+      }
+
       const newEntry = await api.payslipRequest({
         period_type: stmtPeriod,
         month: monthStr(stmtYear, stmtMonth),
@@ -396,11 +419,34 @@ export default function PayslipScreen() {
   const doGenerateFormal = async () => {
     setGeneratingFrm(true);
     try {
-      const fresh = await api.formalPayslipPricing();
+      // Always re-fetch pricing + wallet — never trust cached values for a paid action
+      const [fresh, freshWallet] = await Promise.all([
+        api.formalPayslipPricing(),
+        api.wallet().catch(() => null),
+      ]);
+
       if (!fresh?.enabled) {
-        Alert.alert("Unavailable", "Formal payslip feature is currently disabled.");
+        Alert.alert("Unavailable", "Formal payslips are currently disabled by admin.");
         return;
       }
+
+      const fee = getFee(fresh, frmPeriod);
+      if (fee <= 0) {
+        Alert.alert("Pricing Error", "Payslip pricing has not been configured. Please contact support.");
+        return;
+      }
+
+      const balance = freshWallet?.balance ?? walletBalance;
+      if (freshWallet) setWalletBalance(freshWallet.balance);
+
+      if (balance < fee) {
+        Alert.alert(
+          "Insufficient Balance",
+          `You need ${formatR(fee)} to generate this payslip.\n\nYour balance: ${formatR(balance)}\n\nPlease top up your wallet first.`
+        );
+        return;
+      }
+
       const newEntry = await api.formalPayslipRequest({
         period_type: frmPeriod,
         month: monthStr(frmYear, frmMonth),

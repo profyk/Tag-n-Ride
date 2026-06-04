@@ -72,8 +72,27 @@ export default function AnalyticsPage() {
                 {r}
               </button>
             ))}
-            <Button variant="secondary" onClick={() => api.exportTransactions()}>
-              <Download size={13} /> Export CSV
+            <Button variant="secondary" onClick={() => {
+              if (!daily.length) { return; }
+              const rows = [
+                ["Date", "Volume (ZAR)", "Transaction Count", "Fees (ZAR)"],
+                ...daily.map((d: any) => [
+                  d.date || d.day || "",
+                  (d.amount || 0).toFixed(2),
+                  String(d.count || 0),
+                  (d.fees || 0).toFixed(2),
+                ]),
+              ];
+              const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `analytics_${range}_${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}>
+              <Download size={13} /> Export Analytics CSV
             </Button>
           </div>
         </div>

@@ -2,35 +2,38 @@
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard } from "@/components/ui";
-import { formatZAR, formatDate } from "@/lib/utils";
-import { DollarSign, TrendingUp, Percent, Download } from "lucide-react";
+import { formatZAR } from "@/lib/utils";
+import { DollarSign, TrendingUp, Percent, Download, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
-const h = () => ({ Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}` });
-
-const FEE_TYPES = [
-  { type: "ride_payment", label: "Ride Payment", rate: "8%", description: "Standard ride fare commission" },
-  { type: "wallet_topup", label: "Wallet Top-up", rate: "1.5%", description: "Topup processing fee" },
-  { type: "withdrawal", label: "Withdrawal", rate: "R2.50 flat", description: "Bank payout fee" },
-  { type: "instant_payout", label: "Instant Payout", rate: "1%", description: "Express driver payout fee" },
-];
+const h = () => ({ Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`, "Content-Type": "application/json" });
 
 export default function RevenuePage() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState("30d");
+  const [feeConfig, setFeeConfig] = useState<Record<string, string>>({});
+  const [payoutCfg, setPayoutCfg] = useState<any>({});
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${BASE}/api/admin/analytics?range=${range}`, { headers: h() })
-      .then((r) => r.json())
-      .then(setAnalytics)
-      .catch(() => toast.error("Failed to load revenue data"))
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetch(`${BASE}/api/admin/analytics?range=${range}`, { headers: h() }).then(r => r.json()),
+      fetch(`${BASE}/api/admin/config`, { headers: h() }).then(r => r.json()).catch(() => []),
+      fetch(`${BASE}/api/admin/payout-settings`, { headers: h() }).then(r => r.json()).catch(() => ({})),
+    ]).then(([anal, cfg, ps]) => {
+      setAnalytics(anal);
+      const cfgMap: Record<string, string> = {};
+      if (Array.isArray(cfg)) cfg.forEach((row: any) => { cfgMap[row.key] = row.value; });
+      setFeeConfig(cfgMap);
+      setPayoutCfg(ps);
+    })
+    .catch(() => toast.error("Failed to load revenue data"))
+    .finally(() => setLoading(false));
   }, [range]);
 
   const daily = analytics?.daily_volume || [];
@@ -107,16 +110,65 @@ export default function RevenuePage() {
             </Card>
 
             <Card>
-              <div className="flex items-center gap-2 mb-4">
-                <Percent size={16} className="text-yellow" />
-                <h2 className="text-text font-bold">Fee Schedule</h2>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Percent size={16} className="text-yellow" />
+                  <h2 className="text-text font-bold">Live Fee Schedule</h2>
+                  <span className="text-[10px] text-textDim bg-bg border border-border px-2 py-0.5 rounded-full">from admin config</span>
+                </div>
+                <a href="/admin/settings" className="text-xs text-cyan hover:underline flex items-center gap-1">
+                  <RefreshCw size={11} /> Edit fees
+                </a>
               </div>
-              <Table headers={["Transaction Type", "Rate", "Description"]} empty={false}>
-                {FEE_TYPES.map((f) => (
-                  <Tr key={f.type}>
-                    <Td className="font-semibold">{f.label}</Td>
-                    <Td><Badge label={f.rate} tone="cyan" /></Td>
-                    <Td className="text-textMuted text-xs">{f.description}</Td>
+              <Table headers={["Fee Type", "Current Rate", "Description"]} empty={false}>
+                {[
+                  {
+                    label: "Platform Fee (ride payment)",
+                    rate: feeConfig["platform_fee_percent"] ? `${feeConfig["platform_fee_percent"]}%` : "—",
+                    desc: "Deducted from driver earnings on every ride",
+                    key: "platform_fee_percent",
+                  },
+                  {
+                    label: "Top-up Processing Fee",
+                    rate: feeConfig["topup_processing_fee_percent"] ? `${feeConfig["topup_processing_fee_percent"]}%` : "—",
+                    desc: "Charged to user on wallet top-up",
+                    key: "topup_processing_fee_percent",
+                  },
+                  {
+                    label: "Gateway Fee (top-up)",
+                    rate: feeConfig["topup_gateway_fee_percent"]
+                      ? `${feeConfig["topup_gateway_fee_percent"]}% + R${feeConfig["topup_gateway_fee_fixed"] ?? "0"}`
+                      : "—",
+                    desc: "Actual gateway cost passed through",
+                    key: "topup_gateway_fee_percent",
+                  },
+                  {
+                    label: "Instant Payout Fee",
+                    rate: "R3.50 flat",
+                    desc: "Stitch payout fee per withdrawal",
+                    key: null,
+                  },
+                  {
+                    label: "Owner Statement",
+                    rate: payoutCfg.owner_statement_price != null ? `R${parseFloat(payoutCfg.owner_statement_price).toFixed(2)}` : "—",
+                    desc: "Per fleet statement generated by owner",
+                    key: null,
+                  },
+                  {
+                    label: "Passenger Statement",
+                    rate: payoutCfg.passenger_statement_price != null ? `R${parseFloat(payoutCfg.passenger_statement_price).toFixed(2)}` : "—",
+                    desc: "Per expense statement generated by passenger",
+                    key: null,
+                  },
+                ].map((f) => (
+                  <Tr key={f.label}>
+                    <Td className="font-semibold text-sm">{f.label}</Td>
+                    <Td>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
+                        f.rate === "—" ? "text-textDim border-border bg-bg" : "text-cyan border-cyan/20 bg-cyanDim"
+                      }`}>{f.rate}</span>
+                    </Td>
+                    <Td className="text-textMuted text-xs">{f.desc}</Td>
                   </Tr>
                 ))}
               </Table>

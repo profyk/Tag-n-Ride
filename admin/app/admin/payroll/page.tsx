@@ -94,6 +94,16 @@ type StaffBasic = {
   status: string;
 };
 
+type CompanyConfig = {
+  company_name?: string;
+  company_reg_number?: string;
+  company_vat_number?: string;
+  company_address_line1?: string;
+  company_address_line2?: string;
+  company_phone?: string;
+  company_email?: string;
+};
+
 const STATUS_TONE: Record<string, any> = {
   draft: "cyan", submitted: "yellow", approved: "purple", executed: "green", cancelled: "red",
 };
@@ -165,12 +175,52 @@ function WorkflowBar({ status }: { status: string }) {
 }
 
 // ── Payslip print preview ──────────────────────────────────────────────────────
-function PayslipModal({ line, period, onClose }: { line: PayslipLine; period: string; onClose: () => void }) {
+function PayslipModal({ line, period, company, onClose }: {
+  line: PayslipLine;
+  period: string;
+  company: CompanyConfig;
+  onClose: () => void;
+}) {
   const employerCost = line.gross_salary + line.uif_employer + line.sdl;
+  const hasCompany = company.company_name || company.company_address_line1;
   return (
     <Modal open onClose={onClose} title={`Payslip — ${line.full_name}`}>
       <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-        {/* Header */}
+
+        {/* Letterhead */}
+        {hasCompany && (
+          <div className="rounded-xl border border-border bg-bg2 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                {company.company_name && (
+                  <p className="font-extrabold text-text text-sm">{company.company_name}</p>
+                )}
+                {company.company_address_line1 && (
+                  <p className="text-textMuted text-[11px] mt-0.5">{company.company_address_line1}</p>
+                )}
+                {company.company_address_line2 && (
+                  <p className="text-textMuted text-[11px]">{company.company_address_line2}</p>
+                )}
+              </div>
+              <div className="text-right shrink-0 space-y-0.5">
+                {company.company_reg_number && (
+                  <p className="text-[10px] text-textDim">Reg: <span className="text-textMuted font-mono">{company.company_reg_number}</span></p>
+                )}
+                {company.company_vat_number && (
+                  <p className="text-[10px] text-textDim">VAT: <span className="text-textMuted font-mono">{company.company_vat_number}</span></p>
+                )}
+                {company.company_phone && (
+                  <p className="text-[10px] text-textDim">Tel: <span className="text-textMuted">{company.company_phone}</span></p>
+                )}
+                {company.company_email && (
+                  <p className="text-[10px] text-textDim">Email: <span className="text-textMuted">{company.company_email}</span></p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Employee header */}
         <div className="flex items-center justify-between p-4 rounded-xl bg-cyanDim border border-cyan/20">
           <div>
             <p className="font-extrabold text-text text-base">{line.full_name}</p>
@@ -294,6 +344,7 @@ function PayrollPageInner() {
   const [runs, setRuns]     = useState<PayrollRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [staff, setStaff]   = useState<StaffBasic[]>([]);
+  const [company, setCompany] = useState<CompanyConfig>({});
 
   // Selected run for detail
   const [selectedRun, setSelectedRun] = useState<PayrollRun | null>(null);
@@ -339,7 +390,24 @@ function PayrollPageInner() {
     } catch { setStaff([]); }
   }, []);
 
-  useEffect(() => { loadRuns(); loadStaff(); }, [loadRuns, loadStaff]);
+  // ── Load company config for letterhead ──
+  const loadCompany = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/api/admin/config`, { headers: authHeaders() });
+      const rows: { key: string; value: string }[] = await res.json();
+      const keys: (keyof CompanyConfig)[] = [
+        "company_name", "company_reg_number", "company_vat_number",
+        "company_address_line1", "company_address_line2", "company_phone", "company_email",
+      ];
+      const cfg: CompanyConfig = {};
+      if (Array.isArray(rows)) {
+        rows.forEach(r => { if (keys.includes(r.key as keyof CompanyConfig)) (cfg as any)[r.key] = r.value; });
+      }
+      setCompany(cfg);
+    } catch { /* letterhead optional */ }
+  }, []);
+
+  useEffect(() => { loadRuns(); loadStaff(); loadCompany(); }, [loadRuns, loadStaff, loadCompany]);
 
   // ── Load run detail ──
   const openRun = async (run: PayrollRun) => {
@@ -841,6 +909,7 @@ function PayrollPageInner() {
         <PayslipModal
           line={payslipLine}
           period={selectedRun.period_month}
+          company={company}
           onClose={() => setPayslipLine(null)}
         />
       )}

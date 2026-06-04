@@ -6,7 +6,7 @@ import { api, DashboardStats } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   AlertTriangle, Download, CheckCircle, RefreshCw, TrendingUp, TrendingDown,
-  ArrowRight, Copy, Clock,
+  ArrowRight, Copy, Clock, ShieldCheck, Zap, Users, Activity,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const load = async (silent = false) => {
@@ -63,6 +64,7 @@ export default function DashboardPage() {
     try {
       const r = await api.dashboard();
       setData(r.data);
+      setLastRefreshed(new Date());
       setCountdown(REFRESH_INTERVAL);
     } finally {
       setLoading(false);
@@ -83,6 +85,8 @@ export default function DashboardPage() {
 
   const copyRef = (ref: string) => { navigator.clipboard.writeText(ref); toast.success("Copied"); };
 
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+
   if (loading || !data) return <AdminShell title="Dashboard"><Spinner /></AdminShell>;
 
   const hasAlerts = data.pending_withdrawals > 0 || data.pending_drivers > 0 || data.pending_kyc > 0 || data.flagged_accounts > 0;
@@ -93,9 +97,16 @@ export default function DashboardPage() {
 
         {/* Header actions */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs text-textMuted">
-            <Clock size={12} />
-            <span>Auto-refresh in <span className="text-cyan font-bold">{countdown}s</span></span>
+          <div className="flex items-center gap-3 text-xs text-textMuted">
+            <div className="flex items-center gap-1.5">
+              <Clock size={12} />
+              <span>Refresh in <span className="text-cyan font-bold">{countdown}s</span></span>
+            </div>
+            {lastRefreshed && (
+              <span className="text-textDim">
+                Last updated {lastRefreshed.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+            )}
           </div>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => load(true)} disabled={refreshing}>
@@ -108,6 +119,24 @@ export default function DashboardPage() {
               <Download size={13} /> Export Txns
             </Button>
           </div>
+        </div>
+
+        {/* Quick links */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {[
+            { href: "/admin/withdrawals", label: "Withdrawals", color: "text-yellow border-yellow/20 hover:bg-yellow/5" },
+            { href: "/admin/kyc", label: "KYC Review", color: "text-cyan border-cyan/20 hover:bg-cyan/5" },
+            { href: "/admin/drivers", label: "Drivers", color: "text-purple border-purple/20 hover:bg-purple/5" },
+            { href: "/admin/support", label: "Support Lookup", color: "text-green border-green/20 hover:bg-green/5" },
+            { href: "/admin/transactions", label: "Transactions", color: "text-textMuted border-border hover:bg-bg2" },
+            { href: "/admin/payroll", label: "Payroll", color: "text-textMuted border-border hover:bg-bg2" },
+          ].map(l => (
+            <Link key={l.href} href={l.href}>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${l.color}`}>
+                {l.label}
+              </span>
+            </Link>
+          ))}
         </div>
 
         {/* Today stats */}
@@ -159,23 +188,76 @@ export default function DashboardPage() {
           <StatCard label="Flagged Accounts" value={String(data.flagged_accounts)} tone="red" />
         </div>
 
-        {/* Action alerts — clickable, link to relevant page */}
-        {hasAlerts && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {data.pending_withdrawals > 0 && (
-              <AlertBanner href="/admin/withdrawals" tone="yellow" count={data.pending_withdrawals} label="Pending Withdrawals" sub="Require approval" />
-            )}
-            {data.pending_kyc > 0 && (
-              <AlertBanner href="/admin/kyc" tone="cyan" count={data.pending_kyc} label="KYC Pending" sub="Documents to review" />
-            )}
-            {data.pending_drivers > 0 && (
-              <AlertBanner href="/admin/drivers" tone="purple" count={data.pending_drivers} label="Unverified Drivers" sub="Need verification" />
-            )}
-            {data.flagged_accounts > 0 && (
-              <AlertBanner href="/admin/users" tone="red" count={data.flagged_accounts} label="Flagged Accounts" sub="Require review" />
-            )}
+        {/* Action queue — always visible, shows "all clear" state */}
+        <div>
+          <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Activity size={11} /> Action Queue
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Link href="/admin/withdrawals">
+              <div className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-all hover:opacity-80 ${
+                data.pending_withdrawals > 0 ? "bg-yellow/5 border-yellow/20" : "bg-bg2 border-border"
+              }`}>
+                <Zap size={16} className={data.pending_withdrawals > 0 ? "text-yellow" : "text-textDim"} />
+                <div>
+                  <p className={`text-lg font-black leading-none ${data.pending_withdrawals > 0 ? "text-yellow" : "text-textMuted"}`}>
+                    {data.pending_withdrawals}
+                  </p>
+                  <p className="text-[10px] text-textDim mt-0.5">Withdrawals</p>
+                </div>
+                {data.pending_withdrawals === 0 && <ShieldCheck size={12} className="text-green ml-auto" />}
+              </div>
+            </Link>
+            <Link href="/admin/kyc">
+              <div className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-all hover:opacity-80 ${
+                data.pending_kyc > 0 ? "bg-cyan/5 border-cyan/20" : "bg-bg2 border-border"
+              }`}>
+                <CheckCircle size={16} className={data.pending_kyc > 0 ? "text-cyan" : "text-textDim"} />
+                <div>
+                  <p className={`text-lg font-black leading-none ${data.pending_kyc > 0 ? "text-cyan" : "text-textMuted"}`}>
+                    {data.pending_kyc}
+                  </p>
+                  <p className="text-[10px] text-textDim mt-0.5">KYC Reviews</p>
+                </div>
+                {data.pending_kyc === 0 && <ShieldCheck size={12} className="text-green ml-auto" />}
+              </div>
+            </Link>
+            <Link href="/admin/drivers">
+              <div className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-all hover:opacity-80 ${
+                data.pending_drivers > 0 ? "bg-purple/5 border-purple/20" : "bg-bg2 border-border"
+              }`}>
+                <Users size={16} className={data.pending_drivers > 0 ? "text-purple" : "text-textDim"} />
+                <div>
+                  <p className={`text-lg font-black leading-none ${data.pending_drivers > 0 ? "text-purple" : "text-textMuted"}`}>
+                    {data.pending_drivers}
+                  </p>
+                  <p className="text-[10px] text-textDim mt-0.5">Driver Verif.</p>
+                </div>
+                {data.pending_drivers === 0 && <ShieldCheck size={12} className="text-green ml-auto" />}
+              </div>
+            </Link>
+            <Link href="/admin/users">
+              <div className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-all hover:opacity-80 ${
+                data.flagged_accounts > 0 ? "bg-red/5 border-red/20" : "bg-bg2 border-border"
+              }`}>
+                <AlertTriangle size={16} className={data.flagged_accounts > 0 ? "text-red" : "text-textDim"} />
+                <div>
+                  <p className={`text-lg font-black leading-none ${data.flagged_accounts > 0 ? "text-red" : "text-textMuted"}`}>
+                    {data.flagged_accounts}
+                  </p>
+                  <p className="text-[10px] text-textDim mt-0.5">Flagged</p>
+                </div>
+                {data.flagged_accounts === 0 && <ShieldCheck size={12} className="text-green ml-auto" />}
+              </div>
+            </Link>
           </div>
-        )}
+          {!hasAlerts && (
+            <div className="flex items-center gap-2 mt-2 px-1">
+              <ShieldCheck size={12} className="text-green" />
+              <p className="text-green text-xs font-semibold">All clear — no pending actions</p>
+            </div>
+          )}
+        </div>
 
         {/* Pending driver verification queue */}
         {data.pending_driver_list?.length > 0 && (
@@ -207,10 +289,16 @@ export default function DashboardPage() {
                       </span>
                     </Td>
                     <Td>
-                      <Button variant="secondary" onClick={async () => {
-                        try { await api.verifyDriver(d.user_id); toast.success(`${d.full_name} verified`); load(); }
-                        catch (e: any) { toast.error(e.message); }
-                      }}>
+                      <Button
+                        variant="secondary"
+                        loading={verifyingId === d.user_id}
+                        disabled={!!verifyingId}
+                        onClick={async () => {
+                          setVerifyingId(d.user_id);
+                          try { await api.verifyDriver(d.user_id); toast.success(`${d.full_name} verified`); load(); }
+                          catch (e: any) { toast.error(e.message); }
+                          finally { setVerifyingId(null); }
+                        }}>
                         <CheckCircle size={13} /> Verify
                       </Button>
                     </Td>
