@@ -29,7 +29,7 @@ export function Button({
 
 type Tone = "green" | "red" | "yellow" | "cyan" | "purple" | "muted" | "orange";
 
-export function Badge({ label, tone = "muted" }: { label: string; tone?: Tone }) {
+export function Badge({ label, tone = "muted", children }: { label?: string; tone?: Tone; children?: React.ReactNode }) {
   const tones: Record<Tone, string> = {
     green: "bg-green/10 text-green border-green/20",
     red: "bg-red/10 text-red border-red/20",
@@ -44,7 +44,7 @@ export function Badge({ label, tone = "muted" }: { label: string; tone?: Tone })
       "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border",
       tones[tone]
     )}>
-      {label}
+      {children ?? label}
     </span>
   );
 }
@@ -76,7 +76,10 @@ export function StatCard({
   );
 }
 
-export function Spinner() {
+export function Spinner({ size }: { size?: number } = {}) {
+  if (size !== undefined) {
+    return <Loader2 size={size} className="animate-spin text-cyan" />;
+  }
   return (
     <div className="flex items-center justify-center py-16">
       <Loader2 size={28} className="animate-spin text-cyan" />
