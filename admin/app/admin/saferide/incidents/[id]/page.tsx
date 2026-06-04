@@ -61,19 +61,19 @@ export default function IncidentDetailPage() {
   };
 
   if (loading) return (
-    <AdminShell>
+    <AdminShell title="Incident Detail">
       <div className="flex items-center justify-center h-64"><Spinner size={24} /></div>
     </AdminShell>
   );
 
   if (!incident) return (
-    <AdminShell>
+    <AdminShell title="Incident Detail">
       <div className="p-6 text-textMuted">Incident not found.</div>
     </AdminShell>
   );
 
   return (
-    <AdminShell>
+    <AdminShell title="Incident Detail">
       <div className="p-6 space-y-6 max-w-4xl">
         {/* Back + header */}
         <div>
