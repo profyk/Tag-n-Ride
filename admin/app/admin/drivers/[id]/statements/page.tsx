@@ -359,8 +359,8 @@ export default function DriverStatementsPage() {
                     <Td><Badge label={p.status} tone={STATUS_TONE[p.status] ?? "muted"} /></Td>
 
                     {/* Action buttons */}
-                    <Td onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
+                    <Td>
+                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                         {/* Print / Download */}
                         <button
                           title="Print / Download PDF"
