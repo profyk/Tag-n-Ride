@@ -5,7 +5,7 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Select } from "@/components/ui";
 import { api, Driver } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff, RefreshCw } from "lucide-react";
+import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff, RefreshCw, FileText } from "lucide-react";
 import toast from "react-hot-toast";
 
 const KYC_TONE: Record<string, any> = { approved: "green", pending: "yellow", rejected: "red" };
@@ -388,6 +388,11 @@ export default function DriversPage() {
                     <Button variant="ghost" onClick={() => setQrDriver(d)} title={d.qr_code ? "View / Print QR code" : "Generate QR code"}>
                       <QrCode size={13} className={d.qr_code ? "" : "text-textDim"} />
                     </Button>
+                    <Link href={`/admin/drivers/${d.user_id}/statements`}>
+                      <Button variant="ghost" title="View earnings statements">
+                        <FileText size={13} /> Statements
+                      </Button>
+                    </Link>
                     <Link href={`/admin/drivers/${d.user_id}`}>
                       <Button variant="ghost">
                         <ExternalLink size={13} /> View

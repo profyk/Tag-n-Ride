@@ -502,6 +502,29 @@ export const api = {
       `/api/passenger/statement/${id}`
     ),
 
+  // ── Driver Payslips ──
+  payslipPricing: () =>
+    request<{
+      enabled: boolean;
+      fee_1month: number;
+      fee_3months: number;
+      fee_6months: number;
+      fee_12months: number;
+    }>("/api/driver/payslip/pricing"),
+
+  payslipRequest: (body: { period_type: string; month: string }) =>
+    request<any>("/api/driver/payslip/request", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  payslipHistory: () => request<any[]>("/api/driver/payslip/history"),
+
+  payslipGet: (id: string) => request<any>(`/api/driver/payslip/${id}`),
+
+  payslipDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/driver/payslip/${id}`, { method: "DELETE" }),
+
   // ── Admin: Payout settings ──
   getPayoutSettings: () =>
     request<PayoutSettings>("/api/admin/payout-settings"),

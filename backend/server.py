@@ -11,6 +11,7 @@ import json
 import random
 import string
 import logging
+import calendar as _calendar
 import uuid
 import secrets
 import hashlib
@@ -3804,6 +3805,47 @@ async def create_new_tables():
                 """)
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status)")
+
+                # ── Driver payslips ──
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS payslips (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id TEXT NOT NULL,
+                        period_type TEXT NOT NULL,
+                        period_label TEXT NOT NULL,
+                        period_start TIMESTAMPTZ NOT NULL,
+                        period_end TIMESTAMPTZ NOT NULL,
+                        gross_earnings NUMERIC DEFAULT 0,
+                        platform_fee NUMERIC DEFAULT 0,
+                        total_net NUMERIC DEFAULT 0,
+                        owner_payouts NUMERIC DEFAULT 0,
+                        driver_net_earnings NUMERIC DEFAULT 0,
+                        driver_cashups_self NUMERIC DEFAULT 0,
+                        wallet_balance_at_generation NUMERIC DEFAULT 0,
+                        total_trips INTEGER DEFAULT 0,
+                        rating_avg NUMERIC DEFAULT 0,
+                        rating_count INTEGER DEFAULT 0,
+                        fee_charged NUMERIC DEFAULT 0,
+                        reference_number TEXT UNIQUE NOT NULL,
+                        verification_code TEXT NOT NULL,
+                        status TEXT DEFAULT 'generated',
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_payslips_user ON payslips(user_id)")
+
+                # Payslip config seeds
+                for _k, _v, _d in [
+                    ("payslip_fee_1month", "2.00", "Payslip fee for 1-month period"),
+                    ("payslip_fee_3months", "5.00", "Payslip fee for 3-month period"),
+                    ("payslip_fee_6months", "8.00", "Payslip fee for 6-month period"),
+                    ("payslip_fee_12months", "12.00", "Payslip fee for 12-month period"),
+                    ("payslip_enabled", "true", "Enable/disable driver payslip feature"),
+                ]:
+                    await conn.execute(
+                        "INSERT INTO system_config (key,value,description) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+                        _k, _v, _d
+                    )
 
         except Exception as e:
             print("New tables error:", e)
@@ -10839,6 +10881,262 @@ async def delete_signed_document(doc_id: str, request: Request, admin: dict = De
         )
         await audit(conn, admin["id"], "SIGNED_DOC_DELETE", doc_id, "signed_documents", {}, request.client.host)
     return {"ok": True}
+
+# ════════════════════════════════════════════════════════════════
+# Driver Payslip Feature
+# ════════════════════════════════════════════════════════════════
+
+class PayslipRequestIn(BaseModel):
+    period_type: str
+    month: str  # "YYYY-MM"
+
+_PAYSLIP_FEE_KEYS = {
+    "1month": "payslip_fee_1month",
+    "3months": "payslip_fee_3months",
+    "6months": "payslip_fee_6months",
+    "12months": "payslip_fee_12months",
+}
+_PAYSLIP_MONTHS = {"1month": 1, "3months": 3, "6months": 6, "12months": 12}
+_MONTH_NAMES = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"]
+
+def _payslip_period(period_type: str, month: str):
+    year, mon = map(int, month.split("-"))
+    n = _PAYSLIP_MONTHS[period_type]
+    last_day = _calendar.monthrange(year, mon)[1]
+    period_end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
+    start_mon = mon - (n - 1)
+    start_year = year
+    while start_mon <= 0:
+        start_mon += 12
+        start_year -= 1
+    period_start = datetime(start_year, start_mon, 1, tzinfo=timezone.utc)
+    if period_type == "1month":
+        label = f"{_MONTH_NAMES[mon-1]} {year}"
+    else:
+        label = f"{_MONTH_NAMES[start_mon-1]} {start_year} – {_MONTH_NAMES[mon-1]} {year}"
+    return period_start, period_end, label
+
+
+@api.get("/driver/payslip/pricing")
+async def payslip_pricing(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT key, value FROM system_config WHERE key = ANY($1::text[])",
+            list(_PAYSLIP_FEE_KEYS.values()) + ["payslip_enabled"]
+        )
+    cfg = {r["key"]: r["value"] for r in rows}
+    return {
+        "enabled": cfg.get("payslip_enabled", "true").lower() == "true",
+        "fee_1month": float(cfg.get("payslip_fee_1month", "2.00")),
+        "fee_3months": float(cfg.get("payslip_fee_3months", "5.00")),
+        "fee_6months": float(cfg.get("payslip_fee_6months", "8.00")),
+        "fee_12months": float(cfg.get("payslip_fee_12months", "12.00")),
+    }
+
+
+@api.post("/driver/payslip/request")
+async def payslip_request(body: PayslipRequestIn, user: dict = Depends(get_current_user)):
+    if body.period_type not in _PAYSLIP_FEE_KEYS:
+        raise HTTPException(status_code=400, detail="Invalid period_type")
+    try:
+        yr, mn = map(int, body.month.split("-"))
+        if not (1 <= mn <= 12 and yr >= 2020):
+            raise ValueError
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid month format, use YYYY-MM")
+
+    async with pool.acquire() as conn:
+        enabled_row = await conn.fetchrow("SELECT value FROM system_config WHERE key='payslip_enabled'")
+        if enabled_row and enabled_row["value"].lower() != "true":
+            raise HTTPException(status_code=403, detail="Feature not available")
+
+        fee_key = _PAYSLIP_FEE_KEYS[body.period_type]
+        fee_row = await conn.fetchrow("SELECT value FROM system_config WHERE key=$1", fee_key)
+        fee = float(fee_row["value"]) if fee_row else 2.00
+
+        wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"])
+        if not wallet or float(wallet["balance"]) < fee:
+            raise HTTPException(status_code=400, detail="Insufficient balance to generate statement")
+
+        await conn.execute("UPDATE wallets SET balance = balance - $1 WHERE user_id=$2", fee, user["id"])
+
+        period_start, period_end, period_label = _payslip_period(body.period_type, body.month)
+
+        gross = float(await conn.fetchval(
+            """SELECT COALESCE(SUM(amount),0) FROM transactions
+               WHERE receiver_id=$1 AND type='payment' AND status='completed'
+               AND created_at >= $2 AND created_at <= $3""",
+            user["id"], period_start, period_end
+        ))
+        platform_fee_amt = round(gross * 0.03, 2)
+        total_net = round(gross - platform_fee_amt, 2)
+
+        owner_payouts = float(await conn.fetchval(
+            """SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests
+               WHERE user_id=$1 AND payout_type='cashup_owner'
+               AND status IN ('approved','completed','auto_approved')
+               AND created_at >= $2 AND created_at <= $3""",
+            user["id"], period_start, period_end
+        ))
+        driver_net_earnings = round(total_net - owner_payouts, 2)
+
+        driver_cashups_self = float(await conn.fetchval(
+            """SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests
+               WHERE user_id=$1 AND payout_type='driver_payout'
+               AND status IN ('approved','completed','auto_approved')
+               AND created_at >= $2 AND created_at <= $3""",
+            user["id"], period_start, period_end
+        ))
+
+        wallet_after = float((await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"]))["balance"])
+
+        total_trips = int(await conn.fetchval(
+            """SELECT COUNT(*) FROM transactions
+               WHERE receiver_id=$1 AND type='payment' AND status='completed'
+               AND created_at >= $2 AND created_at <= $3""",
+            user["id"], period_start, period_end
+        ))
+
+        drv = await conn.fetchrow("SELECT rating_avg, rating_count FROM drivers WHERE user_id=$1", user["id"])
+        rating_avg = float(drv["rating_avg"]) if drv else 0.0
+        rating_count = int(drv["rating_count"]) if drv else 0
+
+        yyyymm = body.month.replace("-", "")
+        base_ref = f"TNR-PAY-{yyyymm}-{user['id'][:6].upper()}"
+        existing = await conn.fetchval("SELECT id FROM payslips WHERE reference_number=$1", base_ref)
+        reference_number = f"{base_ref}-{secrets.token_hex(2).upper()}" if existing else base_ref
+
+        verification_code = hmac.new(
+            JWT_SECRET.encode(), reference_number.encode(), hashlib.sha256
+        ).hexdigest()[:16]
+
+        payslip_id = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO payslips
+               (id,user_id,period_type,period_label,period_start,period_end,
+                gross_earnings,platform_fee,total_net,owner_payouts,driver_net_earnings,
+                driver_cashups_self,wallet_balance_at_generation,total_trips,
+                rating_avg,rating_count,fee_charged,reference_number,verification_code)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)""",
+            payslip_id, user["id"], body.period_type, period_label,
+            period_start, period_end, gross, platform_fee_amt, total_net,
+            owner_payouts, driver_net_earnings, driver_cashups_self,
+            wallet_after, total_trips, rating_avg, rating_count,
+            fee, reference_number, verification_code
+        )
+
+        fee_ref = f"TNR-PAYSLIP-{secrets.token_hex(4).upper()}"
+        await conn.execute(
+            """INSERT INTO transactions
+               (id,reference,type,status,amount,currency,sender_id,receiver_id,note)
+               VALUES ($1,$2,$3,$4,$5,'ZAR',$6,$7,$8)""",
+            str(uuid.uuid4()), fee_ref, "payslip_fee", "completed",
+            fee, user["id"], None, f"Payslip fee – {period_label}"
+        )
+
+    return {
+        "id": payslip_id,
+        "period_type": body.period_type,
+        "period_label": period_label,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "gross_earnings": gross,
+        "platform_fee": platform_fee_amt,
+        "total_net": total_net,
+        "owner_payouts": owner_payouts,
+        "driver_net_earnings": driver_net_earnings,
+        "driver_cashups_self": driver_cashups_self,
+        "wallet_balance_at_generation": wallet_after,
+        "total_trips": total_trips,
+        "rating_avg": rating_avg,
+        "rating_count": rating_count,
+        "fee_charged": fee,
+        "reference_number": reference_number,
+        "verification_code": verification_code,
+        "status": "generated",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "driver_name": user["full_name"],
+        "driver_phone": user.get("phone_number"),
+        "vehicle_plate": user.get("vehicle_plate"),
+    }
+
+
+@api.get("/driver/payslip/history")
+async def payslip_history(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM payslips WHERE user_id=$1 AND status != 'deleted' ORDER BY created_at DESC",
+            user["id"]
+        )
+    return [dict(r) for r in rows]
+
+
+@api.get("/driver/payslip/verify")
+async def payslip_verify(ref: str):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT p.*, u.full_name, u.phone_number FROM payslips p
+               JOIN users u ON u.id = p.user_id
+               WHERE p.reference_number=$1 AND p.status != 'deleted'""",
+            ref
+        )
+    if not row:
+        return {"valid": False}
+    name_parts = row["full_name"].split()
+    masked_name = (f"{name_parts[0]} {name_parts[-1][0]}***" if len(name_parts) >= 2
+                   else f"{row['full_name'][:2]}***")
+    phone = row["phone_number"] or ""
+    masked_phone = (f"{phone[:4]} XX XXX {phone[-4:]}" if len(phone) >= 7 else "***")
+    return {
+        "valid": True,
+        "driver_name": masked_name,
+        "phone": masked_phone,
+        "period_label": row["period_label"],
+        "driver_net_earnings": float(row["driver_net_earnings"]),
+        "total_trips": int(row["total_trips"]),
+        "issued_by": "Tag n Ride Pty Ltd",
+        "verified_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@api.get("/driver/payslip/{payslip_id}")
+async def payslip_get(payslip_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT p.*, u.full_name as driver_name, u.phone_number as driver_phone,
+                      u.vehicle_plate
+               FROM payslips p JOIN users u ON u.id = p.user_id
+               WHERE p.id=$1 AND p.user_id=$2""",
+            payslip_id, user["id"]
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    return dict(row)
+
+
+@api.delete("/driver/payslip/{payslip_id}")
+async def payslip_delete(payslip_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM payslips WHERE id=$1 AND user_id=$2 AND status != 'deleted'",
+            payslip_id, user["id"]
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Payslip not found")
+        await conn.execute("UPDATE payslips SET status='deleted' WHERE id=$1", payslip_id)
+    return {"ok": True}
+
+
+@api.get("/admin/drivers/{user_id}/payslips")
+async def admin_driver_payslips(user_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM payslips WHERE user_id=$1 ORDER BY created_at DESC",
+            user_id
+        )
+    return [dict(r) for r in rows]
+
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line

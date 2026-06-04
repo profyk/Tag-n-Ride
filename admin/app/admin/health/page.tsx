@@ -1,15 +1,160 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Button, Badge } from "@/components/ui";
+import { Card, Spinner, Button, Badge, Input } from "@/components/ui";
 import {
   CheckCircle, XCircle, RefreshCw, Activity, Database, Users,
-  AlertTriangle, Wifi, Server, Clock, Zap, ExternalLink,
+  AlertTriangle, Wifi, Server, Clock, Zap, ExternalLink, FileText, Save, Toggle,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { getToken, getRole } from "@/lib/api";
+import toast from "react-hot-toast";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
 const h = () => ({ Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}` });
+
+const PAYSLIP_PRICING_KEYS = [
+  { key: "payslip_fee_1month", label: "1 Month Statement" },
+  { key: "payslip_fee_3months", label: "3 Month Statement" },
+  { key: "payslip_fee_6months", label: "6 Month Statement" },
+  { key: "payslip_fee_12months", label: "12 Month Statement" },
+];
+
+async function fetchConfig(key: string): Promise<string> {
+  const res = await fetch(`${BASE}/api/admin/config`, { headers: h() });
+  const rows: any[] = await res.json();
+  return rows.find((r: any) => r.key === key)?.value ?? "";
+}
+
+async function patchConfig(key: string, value: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/admin/config/${key}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).detail || `Failed to update ${key}`);
+  }
+}
+
+function PayslipPricingSection() {
+  const role = getRole();
+  const canEdit = ["superadmin", "cfo", "ceo"].includes(role ?? "");
+
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [prices, setPrices] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [savingToggle, setSavingToggle] = useState(false);
+
+  useEffect(() => {
+    const token = getToken();
+    fetch(`${BASE}/api/admin/config`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((rows: any[]) => {
+        const cfg: Record<string, string> = {};
+        rows.forEach((r: any) => { cfg[r.key] = r.value; });
+        setEnabled(cfg["payslip_enabled"] !== "false");
+        const p: Record<string, string> = {};
+        PAYSLIP_PRICING_KEYS.forEach(({ key }) => { p[key] = cfg[key] ?? ""; });
+        setPrices(p);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggle = async () => {
+    if (!canEdit) return;
+    setSavingToggle(true);
+    try {
+      const newVal = enabled ? "false" : "true";
+      await patchConfig("payslip_enabled", newVal);
+      setEnabled(!enabled);
+      toast.success(`Payslips ${!enabled ? "enabled" : "disabled"}`);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update");
+    } finally { setSavingToggle(false); }
+  };
+
+  const handleSavePrice = async (key: string) => {
+    setSaving((s) => ({ ...s, [key]: true }));
+    try {
+      await patchConfig(key, prices[key]);
+      toast.success("Price saved");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to save");
+    } finally { setSaving((s) => ({ ...s, [key]: false })); }
+  };
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-1">
+        <FileText size={16} className="text-cyan" />
+        <h2 className="text-text font-bold">Payslip &amp; Statement Pricing</h2>
+      </div>
+      <p className="text-textMuted text-xs mb-5">Drivers are charged these fees from their wallet when requesting a statement.</p>
+
+      {/* Enable toggle */}
+      <div className="flex items-center justify-between p-4 bg-bg border border-border rounded-xl mb-5">
+        <div>
+          <p className="text-text font-semibold">Enable Payslips</p>
+          <p className="text-textMuted text-xs mt-0.5">
+            {enabled ? "ON — drivers can request statements" : "OFF — disabled for all drivers"}
+          </p>
+        </div>
+        <button
+          onClick={handleToggle}
+          disabled={!canEdit || savingToggle || enabled === null}
+          className={`w-12 h-6 rounded-full transition-all relative ${
+            enabled ? "bg-cyan" : "bg-border"
+          } ${!canEdit ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+        >
+          <span
+            className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${
+              enabled ? "left-6.5" : "left-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Pricing inputs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {PAYSLIP_PRICING_KEYS.map(({ key, label }) => (
+          <div key={key} className="bg-bg border border-border rounded-xl p-4">
+            <p className="text-text font-semibold text-sm mb-1">{label}</p>
+            <p className="text-textMuted text-xs mb-3 font-mono">{key}</p>
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={prices[key] ?? ""}
+                onChange={(e) => setPrices((p) => ({ ...p, [key]: e.target.value }))}
+                disabled={!canEdit}
+                placeholder="0.00"
+                className="flex-1"
+              />
+              <Button
+                onClick={() => handleSavePrice(key)}
+                disabled={!canEdit || saving[key]}
+                variant="secondary"
+              >
+                {saving[key] ? "…" : <><Save size={12} /> Save</>}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!canEdit && (
+        <p className="text-textMuted text-xs mt-4 italic">Only Superadmin, CFO, and CEO can edit these values.</p>
+      )}
+      <p className="text-textMuted text-xs mt-3">
+        Changes take effect immediately. Fees are deducted from driver wallet on request. This is a Tag n Ride revenue stream.
+      </p>
+    </Card>
+  );
+}
 
 const SERVICES = [
   { name: "Backend API", url: BASE, key: "api" },
@@ -204,6 +349,9 @@ export default function HealthPage() {
                 </div>
               </Card>
             </div>
+
+            {/* Payslip pricing */}
+            <PayslipPricingSection />
 
             {/* Service endpoints */}
             <Card>
