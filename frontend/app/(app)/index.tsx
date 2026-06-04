@@ -286,41 +286,48 @@ export default function Home() {
 
   return (
     <SafeAreaView style={s.root} edges={["top"]} testID="home-screen">
-      <ScrollView
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}>
 
-        {/* Header */}
-        <View style={s.headerRow}>
-          <View>
-            <Text style={s.hello}>Hello,</Text>
-            <Text style={s.name} testID="home-username">{state.user.full_name.split(" ")[0]} 👋</Text>
-          </View>
-          <View style={s.headerActions}>
-            <TouchableOpacity onPress={() => router.push("/(app)/documents")} style={s.headerBtn} testID="home-docs-btn">
-              <Ionicons name="document-text-outline" size={22} color={colors.text} />
-              {docsUnreadCount > 0 && (
-                <View style={s.badge}><Text style={s.badgeText}>{docsUnreadCount > 9 ? "9+" : docsUnreadCount}</Text></View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push("/(app)/notifications")} style={s.headerBtn} testID="home-notif-btn">
-              <Ionicons name="notifications-outline" size={22} color={colors.text} />
-              {unreadCount > 0 && (
-                <View style={s.badge}><Text style={s.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push("/(app)/profile")} testID="home-profile-btn" style={s.avatar}>
-              <Ionicons name={isDriver ? "car-sport" : "person"} size={22} color={colors.cyan} />
-            </TouchableOpacity>
-          </View>
+      {/* ─── FIXED TOP NAV BAR ─── */}
+      <View style={s.topBar}>
+        <View>
+          <Text style={s.hello}>Hello,</Text>
+          <Text style={s.name} testID="home-username">{state.user.full_name.split(" ")[0]} 👋</Text>
         </View>
+        <View style={s.headerActions}>
+          <TouchableOpacity onPress={() => router.push("/(app)/documents")} style={s.headerBtn} testID="home-docs-btn">
+            <Ionicons name="document-text-outline" size={22} color={colors.text} />
+            {docsUnreadCount > 0 && (
+              <View style={s.badge}><Text style={s.badgeText}>{docsUnreadCount > 9 ? "9+" : docsUnreadCount}</Text></View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/(app)/notifications")} style={s.headerBtn} testID="home-notif-btn">
+            <Ionicons name="notifications-outline" size={22} color={colors.text} />
+            {unreadCount > 0 && (
+              <View style={s.badge}><Text style={s.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View>
+            )}
+          </TouchableOpacity>
+          {/* SOS button in top bar */}
+          <TouchableOpacity
+            style={[s.sosBtn, panicHolding && s.sosBtnHolding]}
+            onPressIn={handlePanicPressIn}
+            onPressOut={handlePanicPressOut}
+            disabled={sendingPanic}
+            testID="panic-btn">
+            {sendingPanic
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={s.sosBtnText}>{panicHolding ? "···" : "SOS"}</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/(app)/profile")} testID="home-profile-btn" style={s.avatar}>
+            <Ionicons name={isDriver ? "car-sport" : "person"} size={22} color={colors.cyan} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
-        {/* ── Driver balance card ── */}
+      {/* ─── FIXED WALLET CARD ─── */}
+      <View style={s.walletCardWrap}>
         {isDriver ? (
           <View style={s.balanceCard} testID="balance-card">
             <View style={s.balanceCardGlow} />
-
-            {/* Fare collected header */}
             <View style={s.fareHeader}>
               <View style={s.fareIconWrap}>
                 <Ionicons name="cash-outline" size={16} color={colors.cyan} />
@@ -332,8 +339,6 @@ export default function Home() {
                 </View>
               )}
             </View>
-
-            {/* Gross fare — what passengers paid */}
             {loading || !wallet ? (
               <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
             ) : (
@@ -342,8 +347,6 @@ export default function Home() {
                   {formatZAR(breakdown?.gross ?? wallet.today_total ?? 0)}
                 </Text>
                 <Text style={s.grossFareLabel}>Gross fare paid by passengers</Text>
-
-                {/* Platform fee line */}
                 {(breakdown?.fee ?? 0) > 0 && (
                   <View style={s.feeRow}>
                     <Ionicons name="remove-circle-outline" size={13} color={colors.red} />
@@ -351,11 +354,7 @@ export default function Home() {
                     <Text style={s.feeAmt}>−{formatZAR(breakdown!.fee)}</Text>
                   </View>
                 )}
-
-                {/* Divider */}
                 <View style={s.divider} />
-
-                {/* Bottom 3-column breakdown */}
                 <View style={s.bottomRow}>
                   <View style={s.bottomStat}>
                     <Text style={s.bottomStatLabel}>TOTAL BALANCE</Text>
@@ -376,8 +375,6 @@ export default function Home() {
                     </Text>
                   </View>
                 </View>
-
-                {/* Rating row */}
                 {(wallet.rating_count ?? 0) > 0 && (
                   <View style={s.ratingRow}>
                     <Ionicons name="star" size={12} color="#FFD60A" />
@@ -390,7 +387,6 @@ export default function Home() {
             )}
           </View>
         ) : (
-          /* ── Passenger balance card (unchanged) ── */
           <View style={s.balanceCard} testID="balance-card">
             <View style={s.balanceCardGlow} />
             <Text style={s.balanceLabel}>WALLET BALANCE · ZAR</Text>
@@ -401,6 +397,12 @@ export default function Home() {
             )}
           </View>
         )}
+      </View>
+
+      {/* ─── SCROLLABLE BODY ─── */}
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}>
 
         {/* SafeRide profile incomplete banner */}
         {safetyProfileComplete === false && (
@@ -457,20 +459,6 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
-
-      {/* SOS Panic button */}
-      <TouchableOpacity
-        style={[s.panicBtn, panicHolding && { transform: [{ scale: 0.92 }] }]}
-        onPressIn={handlePanicPressIn}
-        onPressOut={handlePanicPressOut}
-        disabled={sendingPanic}
-        testID="panic-btn">
-        {sendingPanic ? (
-          <ActivityIndicator color="#fff" size="small" />
-        ) : (
-          <Text style={s.panicBtnText}>{panicHolding ? "..." : "SOS"}</Text>
-        )}
-      </TouchableOpacity>
 
       {/* Pay Fuel modal */}
       <Modal visible={fuelModal} transparent animationType="slide" onRequestClose={() => setFuelModal(false)}>
@@ -742,7 +730,8 @@ const TxnRow: React.FC<{ t: Txn; onHide: (id: string) => void; colors: any }> = 
 
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
+  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12, backgroundColor: colors.bg },
+  walletCardWrap: { paddingHorizontal: 20, paddingBottom: 12, backgroundColor: colors.bg },
   hello: { color: colors.textMuted, fontSize: 14 },
   name: { color: colors.text, fontSize: 24, fontWeight: "800" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -750,9 +739,12 @@ const makeStyles = (colors: any) => StyleSheet.create({
   badge: { position: "absolute", top: -2, right: -2, backgroundColor: colors.red, borderRadius: 999, minWidth: 18, height: 18, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 2, borderColor: colors.bg },
   badgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan },
+  sosBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: colors.red, borderWidth: 2, borderColor: "rgba(255,60,60,0.4)" },
+  sosBtnHolding: { transform: [{ scale: 0.88 }], opacity: 0.75 },
+  sosBtnText: { color: "#fff", fontWeight: "900", fontSize: 11, letterSpacing: 1 },
 
   // Driver balance card
-  balanceCard: { backgroundColor: colors.bg2, borderColor: colors.cyan, borderWidth: 1, borderRadius: radius.lg, padding: 20, overflow: "hidden", marginBottom: 4 },
+  balanceCard: { backgroundColor: colors.bg2, borderColor: colors.cyan, borderWidth: 1, borderRadius: radius.lg, padding: 20, overflow: "hidden" },
   balanceCardGlow: { position: "absolute", top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: colors.cyan, opacity: 0.06 },
 
   // Fare header
@@ -830,6 +822,4 @@ const makeStyles = (colors: any) => StyleSheet.create({
   safetyBanner: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFD60A15", borderRadius: 10, borderWidth: 1, borderColor: "#FFD60A40", padding: 12, marginBottom: 16 },
   safetyBannerTitle: { color: "#FFD60A", fontWeight: "700", fontSize: 13 },
   safetyBannerSub: { color: "#FFD60Aaa", fontSize: 11, marginTop: 1 },
-  panicBtn: { position: "absolute", bottom: 32, right: 20, width: 60, height: 60, borderRadius: 30, backgroundColor: colors.red, alignItems: "center", justifyContent: "center", elevation: 8, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, borderWidth: 3, borderColor: colors.red + "60" },
-  panicBtnText: { color: "#fff", fontWeight: "900", fontSize: 13, letterSpacing: 1 },
 });
