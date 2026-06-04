@@ -146,7 +146,7 @@ export default function SafeRidePage() {
       knownSosIdsRef.current = activeIds;
       return;
     }
-    const hasNew = [...activeIds].some(id => !knownSosIdsRef.current!.has(id));
+    const hasNew = Array.from(activeIds).some(id => !knownSosIdsRef.current!.has(id));
     if (hasNew) playSosSiren();
     knownSosIdsRef.current = activeIds;
   }, [sosList]);
@@ -272,7 +272,7 @@ export default function SafeRidePage() {
                 const mapsUrl = (anchor.latest_lat ?? anchor.latitude)
                   ? `https://maps.google.com/?q=${anchor.latest_lat ?? anchor.latitude},${anchor.latest_lng ?? anchor.longitude}`
                   : null;
-                const types = [...new Set(cluster.map((s: any) => s.emergency_type as string))];
+                const types = Array.from(new Set(cluster.map((s: any) => s.emergency_type as string)));
                 const isExpanded = expandedCluster === ci;
                 return (
                   <div key={clusterKey} className="rounded-xl border-2 border-orange-500 bg-orange-950/30 shadow-[0_0_16px_rgba(249,115,22,0.2)] p-4">
