@@ -89,7 +89,7 @@ export default function SafeRidePage() {
   };
 
   return (
-    <AdminShell>
+    <AdminShell title="SafeRide Command Centre">
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">
