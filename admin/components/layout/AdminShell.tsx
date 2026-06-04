@@ -5,9 +5,9 @@ import { isAuthenticated } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 export function AdminShell({
-  title, children,
+  title, subtitle, children,
 }: {
-  title: string; children: React.ReactNode;
+  title: string; subtitle?: string; children: React.ReactNode;
 }) {
   const router = useRouter();
 
@@ -20,9 +20,13 @@ export function AdminShell({
       <Sidebar />
       <main className="flex-1 ml-[220px] p-6 overflow-auto">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-text text-2xl font-extrabold tracking-tight mb-6">
+          <h1 className="text-text text-2xl font-extrabold tracking-tight mb-1">
             {title}
           </h1>
+          {subtitle && (
+            <p className="text-textMuted text-sm mb-6">{subtitle}</p>
+          )}
+          {!subtitle && <div className="mb-6" />}
           {children}
         </div>
       </main>
