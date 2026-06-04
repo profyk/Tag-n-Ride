@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Spinner, Badge } from "@/components/ui";
 import { api, hasPermission } from "@/lib/api";
