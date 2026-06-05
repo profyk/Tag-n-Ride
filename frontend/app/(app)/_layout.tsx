@@ -81,12 +81,12 @@ function AppTabs() {
         }}
       />
       <Tabs.Screen
-        name="earnings"
+        name="trip-centre"
         options={{
-          title: "Earnings",
+          title: "Trip Centre",
           href: isDriver ? undefined : null,
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cash-outline" size={size} color={color} />
+            <Ionicons name="car-sport-outline" size={size} color={color} />
           ),
         }}
       />
@@ -120,6 +120,7 @@ function AppTabs() {
       />
 
       {/* Hidden screens */}
+      <Tabs.Screen name="earnings" options={{ href: null }} />
       <Tabs.Screen name="topup" options={{ href: null }} />
       <Tabs.Screen name="withdraw" options={{ href: null }} />
       <Tabs.Screen name="kyc" options={{ href: null }} />
@@ -130,7 +131,6 @@ function AppTabs() {
       <Tabs.Screen name="documents" options={{ href: null }} />
       <Tabs.Screen name="safety" options={{ href: null }} />
       <Tabs.Screen name="saferide-trip" options={{ href: null }} />
-      <Tabs.Screen name="trip-centre" options={{ href: null }} />
     </Tabs>
   );
 }
