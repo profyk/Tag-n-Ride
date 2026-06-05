@@ -3995,6 +3995,8 @@ async def create_new_tables():
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS cash_passengers INTEGER DEFAULT 0")
+                await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS taxi_capacity INTEGER DEFAULT 0")
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS trip_passengers (
                         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -11675,6 +11677,10 @@ class PanicIn(BaseModel):
 class TripShareIn(BaseModel):
     trip_id: str
 
+class TripDetailsIn(BaseModel):
+    cash_passengers: Optional[int] = None
+    taxi_capacity: Optional[int] = None
+
 class SosRequestIn(BaseModel):
     emergency_type: str  # 'police' or 'ambulance'
     latitude: Optional[float] = None
@@ -12484,6 +12490,31 @@ async def admin_charge_sos(sos_id: str, body: SosChargeIn, admin: dict = Depends
                 "sos_fee", req["user_id"])
     return {"ok": True, "deducted_from_wallet": deducted is not None}
 
+
+# ── PATCH /api/trips/{trip_id}/details ──
+@api.patch("/trips/{trip_id}/details")
+async def update_trip_details(trip_id: str, body: TripDetailsIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow("SELECT id FROM trips WHERE id=$1 AND driver_id=$2", trip_id, user["id"])
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        updates, vals = [], []
+        if body.cash_passengers is not None:
+            updates.append(f"cash_passengers=${len(vals)+1}")
+            vals.append(max(0, body.cash_passengers))
+        if body.taxi_capacity is not None:
+            updates.append(f"taxi_capacity=${len(vals)+1}")
+            vals.append(max(0, body.taxi_capacity))
+        if updates:
+            vals.append(trip_id)
+            await conn.execute(f"UPDATE trips SET {', '.join(updates)} WHERE id=${len(vals)}", *vals)
+        row = await conn.fetchrow("SELECT * FROM trips WHERE id=$1", trip_id)
+    t = dict(row)
+    t["started_at"] = iso(t.get("started_at"))
+    if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+    return t
 
 # ── POST /api/trips/share ──
 @api.post("/trips/share")

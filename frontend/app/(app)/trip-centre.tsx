@@ -68,6 +68,11 @@ export default function TripCentre() {
   const [lastLocUpdate, setLastLocUpdate] = useState<Date | null>(null);
   const [refreshingPassengers, setRefreshingPassengers] = useState(false);
 
+  // Taxi info fields
+  const [cashPassengers, setCashPassengers] = useState(0);
+  const [taxiCapacity, setTaxiCapacity] = useState(0);
+  const [savingDetails, setSavingDetails] = useState(false);
+
   // Redirect non-drivers immediately
   useEffect(() => {
     if (state.status === "authed" && state.user.role !== "driver") {
@@ -92,6 +97,10 @@ export default function TripCentre() {
       ]);
       setTrip(activeRes.trip || null);
       setPassengers(activeRes.passengers || []);
+      if (activeRes.trip) {
+        setCashPassengers(activeRes.trip.cash_passengers ?? 0);
+        setTaxiCapacity(activeRes.trip.taxi_capacity ?? 0);
+      }
       setHistory(histRes.slice(0, 10));
       setWallet(w);
       setAllTxns(txns);
@@ -184,6 +193,8 @@ export default function TripCentre() {
       const res = await api.tripsStart({ latitude: lat, longitude: lng });
       setTrip(res);
       setPassengers([]);
+      setCashPassengers(res.cash_passengers ?? 0);
+      setTaxiCapacity(res.taxi_capacity ?? 0);
     } catch (e: any) {
       Alert.alert("Failed to start", e?.message || "Could not start trip");
     } finally { setStarting(false); }
@@ -252,6 +263,8 @@ export default function TripCentre() {
       setPassengers([]);
       setRouteCoords([]);
       setCurrentLoc(null);
+      setCashPassengers(0);
+      setTaxiCapacity(0);
       setDoneModal(true);
       const histRes = await api.tripsHistory().catch(() => []);
       setHistory(histRes.slice(0, 10));
@@ -284,10 +297,35 @@ export default function TripCentre() {
       [
         `Reference: ${trip.trip_reference}`,
         `Vehicle: ${trip.vehicle_plate || "—"}`,
-        `Passengers: ${trip.total_passengers ?? passengers.length}`,
+        `App passengers: ${passengers.length}`,
+        `Cash passengers: ${cashPassengers}`,
+        `Total on board: ${passengers.length + cashPassengers}`,
+        `Taxi capacity: ${taxiCapacity || "—"}`,
         `Started: ${trip.started_at ? new Date(trip.started_at).toLocaleTimeString("en-ZA") : "—"}`,
       ].join("\n")
     );
+  };
+
+  const handleUpdateDetail = async (field: "cash_passengers" | "taxi_capacity", value: number) => {
+    if (!trip?.id) return;
+    setSavingDetails(true);
+    try {
+      await api.tripsUpdateDetails(trip.id, { [field]: value });
+    } catch (e: any) {
+      Alert.alert("Could not save", e?.message || "Try again");
+    } finally { setSavingDetails(false); }
+  };
+
+  const adjustCashPassengers = (delta: number) => {
+    const next = Math.max(0, cashPassengers + delta);
+    setCashPassengers(next);
+    handleUpdateDetail("cash_passengers", next);
+  };
+
+  const adjustTaxiCapacity = (delta: number) => {
+    const next = Math.max(0, taxiCapacity + delta);
+    setTaxiCapacity(next);
+    handleUpdateDetail("taxi_capacity", next);
   };
 
   if (state.status !== "authed") return null;
@@ -475,6 +513,67 @@ export default function TripCentre() {
               <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
             </TouchableOpacity>
 
+            {/* Taxi info — sitter count and cash passengers */}
+            <View style={s.taxiInfoCard}>
+              <View style={s.taxiInfoHeader}>
+                <Ionicons name="car-outline" size={14} color={colors.cyan} />
+                <Text style={s.taxiInfoTitle}>TAXI INFO</Text>
+                {savingDetails && <ActivityIndicator size="small" color={colors.cyan} style={{ marginLeft: "auto" }} />}
+              </View>
+
+              <View style={s.taxiInfoRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.taxiInfoLabel}>Taxi Sitters (Capacity)</Text>
+                  <Text style={s.taxiInfoSub}>How many seats in your taxi</Text>
+                </View>
+                <View style={s.stepper}>
+                  <TouchableOpacity style={s.stepperBtn} onPress={() => adjustTaxiCapacity(-1)} activeOpacity={0.7}>
+                    <Ionicons name="remove" size={16} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={s.stepperVal}>{taxiCapacity}</Text>
+                  <TouchableOpacity style={s.stepperBtn} onPress={() => adjustTaxiCapacity(1)} activeOpacity={0.7}>
+                    <Ionicons name="add" size={16} color={colors.text} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={[s.taxiInfoRow, { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.taxiInfoLabel}>Cash Passengers</Text>
+                  <Text style={s.taxiInfoSub}>Paid cash — not via app</Text>
+                </View>
+                <View style={s.stepper}>
+                  <TouchableOpacity style={s.stepperBtn} onPress={() => adjustCashPassengers(-1)} activeOpacity={0.7}>
+                    <Ionicons name="remove" size={16} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={s.stepperVal}>{cashPassengers}</Text>
+                  <TouchableOpacity style={s.stepperBtn} onPress={() => adjustCashPassengers(1)} activeOpacity={0.7}>
+                    <Ionicons name="add" size={16} color={colors.text} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* On-board summary */}
+              <View style={s.onBoardRow}>
+                <View style={s.onBoardStat}>
+                  <Text style={s.onBoardVal}>{passengers.length}</Text>
+                  <Text style={s.onBoardLabel}>App</Text>
+                </View>
+                <Text style={s.onBoardPlus}>+</Text>
+                <View style={s.onBoardStat}>
+                  <Text style={s.onBoardVal}>{cashPassengers}</Text>
+                  <Text style={s.onBoardLabel}>Cash</Text>
+                </View>
+                <Text style={s.onBoardPlus}>=</Text>
+                <View style={s.onBoardStat}>
+                  <Text style={[s.onBoardVal, { color: colors.cyan }]}>{passengers.length + cashPassengers}</Text>
+                  <Text style={s.onBoardLabel}>
+                    {taxiCapacity > 0 ? `/ ${taxiCapacity} seats` : "on board"}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
             {/* Passengers in this trip */}
             <View style={s.sectionHeader}>
               <Text style={s.sectionLabel}>PASSENGERS IN VEHICLE</Text>
@@ -538,8 +637,18 @@ export default function TripCentre() {
                   <Text style={[s.earningsVal, { color: colors.green, fontWeight: "900" }]}>{formatZAR(tripNet)}</Text>
                 </View>
                 <View style={s.earningsRow}>
-                  <Text style={s.earningsLabel}>Passengers</Text>
-                  <Text style={s.earningsVal}>{trip.total_passengers || passengers.length}</Text>
+                  <Text style={s.earningsLabel}>App passengers</Text>
+                  <Text style={s.earningsVal}>{passengers.length}</Text>
+                </View>
+                {cashPassengers > 0 && (
+                  <View style={s.earningsRow}>
+                    <Text style={s.earningsLabel}>Cash passengers</Text>
+                    <Text style={s.earningsVal}>{cashPassengers}</Text>
+                  </View>
+                )}
+                <View style={s.earningsRow}>
+                  <Text style={[s.earningsLabel, { color: colors.text }]}>Total on board</Text>
+                  <Text style={[s.earningsVal, { fontWeight: "800" }]}>{passengers.length + cashPassengers}</Text>
                 </View>
               </View>
             </View>
@@ -751,6 +860,21 @@ const makeStyles = (colors: any) => StyleSheet.create({
   passAmt: { color: colors.green, fontWeight: "800", fontSize: 14 },
   spBadge: { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 1, marginTop: 4 },
   spBadgeText: { fontSize: 9, fontWeight: "700" },
+
+  taxiInfoCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 14 },
+  taxiInfoHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
+  taxiInfoTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, flex: 1 },
+  taxiInfoRow: { flexDirection: "row", alignItems: "center" },
+  taxiInfoLabel: { color: colors.text, fontWeight: "600", fontSize: 14 },
+  taxiInfoSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 0 },
+  stepperBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  stepperVal: { color: colors.text, fontSize: 20, fontWeight: "800", minWidth: 44, textAlign: "center" },
+  onBoardRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 10 },
+  onBoardStat: { alignItems: "center" },
+  onBoardVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
+  onBoardLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "600", marginTop: 2 },
+  onBoardPlus: { color: colors.textDim, fontSize: 18, fontWeight: "300" },
 
   tripEarningsCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 14, marginTop: 4 },
 

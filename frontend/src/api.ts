@@ -619,6 +619,9 @@ export const api = {
 
   tripsGet: (id: string) => request<any>(`/api/trips/${id}`),
 
+  tripsUpdateDetails: (trip_id: string, body: { cash_passengers?: number; taxi_capacity?: number }) =>
+    request<any>(`/api/trips/${trip_id}/details`, { method: "PATCH", body: JSON.stringify(body) }),
+
   tripsShare: (body: { trip_id: string }) =>
     request<{ share_url: string; trip_reference: string }>("/api/trips/share", {
       method: "POST", body: JSON.stringify(body),
