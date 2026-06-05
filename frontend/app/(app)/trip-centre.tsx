@@ -67,6 +67,7 @@ export default function TripCentre() {
   const [currentLoc, setCurrentLoc] = useState<{ latitude: number; longitude: number; speed?: number } | null>(null);
   const [lastLocUpdate, setLastLocUpdate] = useState<Date | null>(null);
   const [refreshingPassengers, setRefreshingPassengers] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // Taxi info fields
   const [cashPassengers, setCashPassengers] = useState(0);
@@ -201,7 +202,8 @@ export default function TripCentre() {
   };
 
   const handleShareTrip = async () => {
-    if (!trip?.id) return;
+    if (!trip?.id || sharing) return;
+    setSharing(true);
     try {
       const res = await api.tripsShare({ trip_id: trip.id });
       const url = res.share_url;
@@ -212,7 +214,7 @@ export default function TripCentre() {
           {
             text: "Open Live Map",
             onPress: () => Linking.openURL(url).catch(() =>
-              Alert.alert("Could not open", "Copy this link: " + url)
+              Alert.alert("Could not open", "Copy this link:\n" + url)
             ),
           },
           {
@@ -220,8 +222,7 @@ export default function TripCentre() {
             onPress: async () => {
               try {
                 await Share.share({
-                  message: `Track my Tag n Ride trip live for safety:\n${url}\n\nMy route is recorded by Tag n Ride SafeRide.`,
-                  url,
+                  message: `Track my Tag n Ride trip live:\n${url}`,
                 });
               } catch {}
             },
@@ -231,13 +232,17 @@ export default function TripCentre() {
       );
     } catch (e: any) {
       Alert.alert("Could not generate link", e?.message || "Try again");
+    } finally {
+      setSharing(false);
     }
   };
 
   const handleEndTrip = () => {
+    const rev = Number(trip?.total_revenue || 0);
+    const earned = isNaN(rev) ? "0.00" : rev.toFixed(2);
     Alert.alert(
       "End Trip?",
-      `Passengers: ${passengers.length}\nEarned this trip: ${formatZAR(trip?.total_revenue || 0)}\n\nThis stops route tracking and closes the manifest.`,
+      `Passengers: ${passengers.length + cashPassengers}\nEarned this trip: R${earned}\n\nThis stops route tracking and closes the manifest.`,
       [
         { text: "Keep Going", style: "cancel" },
         { text: "End Trip", style: "destructive", onPress: doEndTrip },
@@ -252,9 +257,12 @@ export default function TripCentre() {
       let lat: number | undefined;
       let lng: number | undefined;
       try {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        lat = loc.coords.latitude;
-        lng = loc.coords.longitude;
+        const loc = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("gps_timeout")), 5000)),
+        ]);
+        lat = (loc as any).coords.latitude;
+        lng = (loc as any).coords.longitude;
       } catch {}
       const res = await api.tripsEnd({ trip_id: trip.id, latitude: lat, longitude: lng });
       stopTracking();
@@ -292,18 +300,26 @@ export default function TripCentre() {
 
   const handleShowInfo = () => {
     if (!trip) return;
-    Alert.alert(
-      "Trip Info",
-      [
-        `Reference: ${trip.trip_reference}`,
-        `Vehicle: ${trip.vehicle_plate || "—"}`,
-        `App passengers: ${passengers.length}`,
-        `Cash passengers: ${cashPassengers}`,
-        `Total on board: ${passengers.length + cashPassengers}`,
-        `Taxi capacity: ${taxiCapacity || "—"}`,
-        `Started: ${trip.started_at ? new Date(trip.started_at).toLocaleTimeString("en-ZA") : "—"}`,
-      ].join("\n")
-    );
+    try {
+      const d = trip.started_at ? new Date(trip.started_at) : null;
+      const startedStr = d && !isNaN(d.getTime())
+        ? `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`
+        : "—";
+      Alert.alert(
+        "Trip Info",
+        [
+          `Reference: ${trip.trip_reference || "—"}`,
+          `Vehicle: ${trip.vehicle_plate || "—"}`,
+          `App passengers: ${passengers.length}`,
+          `Cash passengers: ${cashPassengers}`,
+          `Total on board: ${passengers.length + cashPassengers}`,
+          `Taxi capacity: ${taxiCapacity || "—"}`,
+          `Started: ${startedStr}`,
+        ].join("\n")
+      );
+    } catch {
+      Alert.alert("Trip Info", `Reference: ${trip.trip_reference || "—"}`);
+    }
   };
 
   const handleUpdateDetail = async (field: "cash_passengers" | "taxi_capacity", value: number) => {
@@ -352,7 +368,7 @@ export default function TripCentre() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 100 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}>
 
         {/* Safety profile banner */}
@@ -504,13 +520,15 @@ export default function TripCentre() {
             )}
 
             {/* Share trip row */}
-            <TouchableOpacity style={s.shareRow} onPress={handleShareTrip} activeOpacity={0.8}>
-              <Ionicons name="share-outline" size={18} color={colors.cyan} />
+            <TouchableOpacity style={s.shareRow} onPress={handleShareTrip} activeOpacity={0.8} disabled={sharing}>
+              {sharing
+                ? <ActivityIndicator size="small" color={colors.cyan} />
+                : <Ionicons name="share-outline" size={18} color={colors.cyan} />}
               <View style={{ flex: 1, marginLeft: 10 }}>
                 <Text style={s.shareRowTitle}>Share My Route</Text>
                 <Text style={s.shareRowSub}>Let family track your location</Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+              {!sharing && <Ionicons name="chevron-forward" size={16} color={colors.textDim} />}
             </TouchableOpacity>
 
             {/* Taxi info — sitter count and cash passengers */}
@@ -655,8 +673,10 @@ export default function TripCentre() {
 
             {/* Trip action buttons */}
             <View style={s.actionRow}>
-              <TouchableOpacity style={s.actionBtn} onPress={handleShareTrip} activeOpacity={0.7}>
-                <Ionicons name="share-outline" size={18} color={colors.cyan} />
+              <TouchableOpacity style={s.actionBtn} onPress={handleShareTrip} activeOpacity={0.7} disabled={sharing}>
+                {sharing
+                  ? <ActivityIndicator size="small" color={colors.cyan} />
+                  : <Ionicons name="share-outline" size={18} color={colors.cyan} />}
                 <Text style={s.actionBtnText}>Share</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.actionBtn} onPress={handleRefreshPassengers} disabled={refreshingPassengers} activeOpacity={0.7}>
