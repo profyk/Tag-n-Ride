@@ -2,7 +2,7 @@ import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
   RefreshControl, ActivityIndicator, Alert, Share, Linking,
-  Animated, StyleSheet, Modal,
+  StyleSheet, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -66,12 +66,7 @@ export default function TripCentre() {
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
   const [currentLoc, setCurrentLoc] = useState<{ latitude: number; longitude: number; speed?: number } | null>(null);
   const [lastLocUpdate, setLastLocUpdate] = useState<Date | null>(null);
-
-  // Panic button hold
-  const panicProgress = useRef(new Animated.Value(0)).current;
-  const panicAnim = useRef<Animated.CompositeAnimation | null>(null);
-  const [panicSending, setPanicSending] = useState(false);
-  const [tickInterval, setTickInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  const [refreshingPassengers, setRefreshingPassengers] = useState(false);
 
   // Redirect non-drivers immediately
   useEffect(() => {
@@ -270,53 +265,29 @@ export default function TripCentre() {
     await handleStartTrip();
   };
 
-  const handlePanicStart = () => {
-    if (panicSending) return;
-    panicProgress.setValue(0);
-    panicAnim.current = Animated.timing(panicProgress, {
-      toValue: 1, duration: 3000, useNativeDriver: false,
-    });
-    panicAnim.current.start(async ({ finished }) => {
-      if (!finished) return;
-      panicProgress.setValue(0);
-      await triggerPanic();
-    });
-  };
-
-  const handlePanicEnd = () => {
-    if (panicAnim.current) { panicAnim.current.stop(); panicAnim.current = null; }
-    Animated.timing(panicProgress, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-  };
-
-  const triggerPanic = async () => {
-    setPanicSending(true);
+  const handleRefreshPassengers = async () => {
+    if (refreshingPassengers) return;
+    setRefreshingPassengers(true);
     try {
-      let lat: number | undefined;
-      let lng: number | undefined;
-      try {
-        const { status } = await Location.getForegroundPermissionsAsync();
-        if (status === "granted") {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-        }
-      } catch {}
-      const res = await api.safetyPanic({ latitude: lat, longitude: lng });
-      if (res.notifications_sent === 0) {
-        Alert.alert(
-          "No emergency contacts found",
-          "Please complete your SafeRide profile with emergency contacts.",
-          [
-            { text: "Set Up Now", onPress: () => router.push("/(app)/safety") },
-            { text: "Cancel", style: "cancel" },
-          ]
-        );
-      } else {
-        Alert.alert("SOS Sent", `Emergency alert sent to ${res.notifications_sent} contact(s).`);
-      }
+      const res = await api.tripsActive();
+      setPassengers(res.passengers || []);
+      if (res.trip) setTrip(res.trip);
     } catch (e: any) {
-      Alert.alert("SOS Failed", e?.message || "Could not send — call 10111 immediately.");
-    } finally { setPanicSending(false); }
+      Alert.alert("Refresh failed", e?.message || "Could not refresh");
+    } finally { setRefreshingPassengers(false); }
+  };
+
+  const handleShowInfo = () => {
+    if (!trip) return;
+    Alert.alert(
+      "Trip Info",
+      [
+        `Reference: ${trip.trip_reference}`,
+        `Vehicle: ${trip.vehicle_plate || "—"}`,
+        `Passengers: ${trip.total_passengers ?? passengers.length}`,
+        `Started: ${trip.started_at ? new Date(trip.started_at).toLocaleTimeString("en-ZA") : "—"}`,
+      ].join("\n")
+    );
   };
 
   if (state.status !== "authed") return null;
@@ -343,7 +314,7 @@ export default function TripCentre() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}>
 
         {/* Safety profile banner */}
@@ -575,26 +546,17 @@ export default function TripCentre() {
 
             {/* Trip action buttons */}
             <View style={s.actionRow}>
-              <TouchableOpacity style={s.actionBtn} onPress={handleShareTrip}>
+              <TouchableOpacity style={s.actionBtn} onPress={handleShareTrip} activeOpacity={0.7}>
                 <Ionicons name="share-outline" size={18} color={colors.cyan} />
                 <Text style={s.actionBtnText}>Share</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.actionBtn} onPress={async () => {
-                try {
-                  const res = await api.tripsActive();
-                  setPassengers(res.passengers || []);
-                  if (res.trip) setTrip(res.trip);
-                } catch {}
-              }}>
-                <Ionicons name="people-outline" size={18} color={colors.cyan} />
+              <TouchableOpacity style={s.actionBtn} onPress={handleRefreshPassengers} disabled={refreshingPassengers} activeOpacity={0.7}>
+                {refreshingPassengers
+                  ? <ActivityIndicator size="small" color={colors.cyan} />
+                  : <Ionicons name="refresh-outline" size={18} color={colors.cyan} />}
                 <Text style={s.actionBtnText}>Refresh</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.actionBtn} onPress={() => {
-                Alert.alert(
-                  "Trip Info",
-                  `Reference: ${trip.trip_reference}\nVehicle: ${trip.vehicle_plate || "—"}\nPassengers: ${trip.total_passengers || passengers.length}`,
-                );
-              }}>
+              <TouchableOpacity style={s.actionBtn} onPress={handleShowInfo} activeOpacity={0.7}>
                 <Ionicons name="information-circle-outline" size={18} color={colors.cyan} />
                 <Text style={s.actionBtnText}>Info</Text>
               </TouchableOpacity>
@@ -678,25 +640,6 @@ export default function TripCentre() {
           </>
         )}
       </ScrollView>
-
-      {/* Panic button - fixed bottom right */}
-      <View style={s.panicWrap} pointerEvents="box-none">
-        <Animated.View style={[s.panicRing, {
-          borderColor: colors.red,
-          borderWidth: panicProgress.interpolate({ inputRange: [0, 1], outputRange: [0, 3] }),
-          transform: [{ scale: panicProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 1.2] }) }],
-        }]} pointerEvents="none" />
-        <TouchableOpacity
-          style={[s.panicBtn, panicSending && { opacity: 0.6 }]}
-          onPressIn={handlePanicStart}
-          onPressOut={handlePanicEnd}
-          disabled={panicSending}
-          testID="panic-btn">
-          {panicSending
-            ? <ActivityIndicator color="#fff" size="small" />
-            : <Text style={s.panicText}>SOS</Text>}
-        </TouchableOpacity>
-      </View>
 
       {/* Trip complete modal */}
       <Modal visible={doneModal} transparent animationType="slide" onRequestClose={() => {}}>
@@ -826,11 +769,6 @@ const makeStyles = (colors: any) => StyleSheet.create({
   statusBadge: { borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, marginTop: 4 },
   statusBadgeText: { fontSize: 10, fontWeight: "700" },
   histExpanded: { width: "100%", marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, gap: 4 },
-
-  panicWrap: { position: "absolute", bottom: 24, right: 20, alignItems: "center", justifyContent: "center" },
-  panicRing: { position: "absolute", width: 72, height: 72, borderRadius: 36 },
-  panicBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.red, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: colors.red, shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
-  panicText: { color: "#fff", fontWeight: "900", fontSize: 13, letterSpacing: 1 },
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48, borderTopWidth: 1, borderColor: colors.green + "40" },
