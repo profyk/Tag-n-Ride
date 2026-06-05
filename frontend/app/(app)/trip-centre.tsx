@@ -13,16 +13,8 @@ import { useTheme } from "../../src/ThemeContext";
 import { api, Wallet, Txn } from "../../src/api";
 import { formatZAR, formatDate, radius } from "../../src/theme";
 
-// Safe map import — react-native-maps needs native build
-let MapView: any = null;
-let Marker: any = null;
-let Polyline: any = null;
-try {
-  const RNMaps = require("react-native-maps");
-  MapView = RNMaps.default;
-  Marker = RNMaps.Marker;
-  Polyline = RNMaps.Polyline;
-} catch (_) {}
+// Platform-specific: .native.ts exports real maps, .web.ts exports null stubs
+import { MapView, Marker, Polyline } from "../../src/MapComponents";
 
 function todayStr() {
   return new Date().toDateString();
