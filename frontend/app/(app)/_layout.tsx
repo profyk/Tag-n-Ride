@@ -120,7 +120,6 @@ function AppTabs() {
       />
 
       {/* Hidden screens */}
-      <Tabs.Screen name="earnings" options={{ href: null }} />
       <Tabs.Screen name="topup" options={{ href: null }} />
       <Tabs.Screen name="withdraw" options={{ href: null }} />
       <Tabs.Screen name="kyc" options={{ href: null }} />
