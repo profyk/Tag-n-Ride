@@ -77,6 +77,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [safetyProfileComplete, setSafetyProfileComplete] = useState<boolean | null>(null);
   const [sendingPanic, setSendingPanic] = useState(false);
+  const [passengerTrip, setPassengerTrip] = useState<any>(null);
 
   // SOS state
   const [sosModal, setSosModal] = useState(false);
@@ -114,6 +115,11 @@ export default function Home() {
       setAllTxns(t);
       setTxns(t.filter((tx: Txn) => !hidden.includes(tx.id)).slice(0, 5));
       if (sp !== null) setSafetyProfileComplete(!!sp?.profile_complete);
+      // Passenger: check if in active trip
+      if (state.status === "authed" && state.user.role === "passenger") {
+        const pt = await api.tripsPassengerCurrent().catch(() => null);
+        setPassengerTrip(pt?.trip || null);
+      }
     } catch {}
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -573,6 +579,29 @@ export default function Home() {
           </TouchableOpacity>
         )}
 
+        {/* Passenger: you are in a SafeRide trip */}
+        {!isDriver && passengerTrip && (
+          <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#00E5FF10", borderWidth: 1.5, borderColor: "#00E5FF40", borderRadius: 12, padding: 14, marginBottom: 16, gap: 10 }} testID="passenger-trip-banner">
+            <Ionicons name="shield-checkmark-outline" size={20} color="#00E5FF" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: "#00E5FF", fontWeight: "700", fontSize: 13 }}>You are in a SafeRide trip</Text>
+              {passengerTrip.vehicle_plate ? <Text style={{ color: "#00E5FFaa", fontSize: 11, marginTop: 1 }}>Vehicle: {passengerTrip.vehicle_plate}</Text> : null}
+            </View>
+            <TouchableOpacity
+              style={{ backgroundColor: "#00E5FF20", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: "#00E5FF50" }}
+              onPress={async () => {
+                if (!passengerTrip?.id) return;
+                try {
+                  const res = await api.tripsShare({ trip_id: passengerTrip.id });
+                  const { Share: RNShare } = require("react-native");
+                  await RNShare.share({ message: `I am in a Tag n Ride trip right now.\nTrack my journey for my safety:\n${res.share_url}\nVehicle: ${passengerTrip.vehicle_plate || "—"}` });
+                } catch {}
+              }}>
+              <Text style={{ color: "#00E5FF", fontWeight: "700", fontSize: 12 }}>SHARE</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Quick actions */}
         <Text style={s.section}>QUICK ACTIONS</Text>
         {isDriver ? (
@@ -580,7 +609,7 @@ export default function Home() {
             <View style={s.qaRow}>
               <QA icon="qr-code" label="My QR" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-myqr" />
               <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
-              <QA icon="shield-outline" label="SafeRide" tone="green" colors={colors} onPress={() => router.push("/(app)/saferide-trip")} testID="qa-saferide" />
+              <QA icon="car-sport-outline" label="Trip Centre" tone="cyan" colors={colors} onPress={() => router.push("/(app)/trip-centre")} testID="qa-tripcentre" />
             </View>
             <View style={[s.qaRow, { marginTop: 12 }]}>
               <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />

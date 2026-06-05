@@ -423,9 +423,11 @@ const APP_VERSION = "1.0.0";export default function Profile() {
           <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
         </TouchableOpacity>
 
-        <Row icon="navigate-outline" label="SafeRide Trip Tracker"
-          sub="View and manage your active SafeRide trip"
-          onPress={() => router.push("/(app)/saferide-trip")} testID="row-saferide-trip" colors={colors} />
+        {isDriver && (
+          <Row icon="car-outline" label="Trip Centre"
+            sub="Start and manage SafeRide trips"
+            onPress={() => router.push("/(app)/trip-centre")} testID="row-tripcentre" colors={colors} />
+        )}
 
         <Row icon="folder-outline" label="My Documents"
           onPress={() => router.push("/(app)/documents")} testID="row-documents" colors={colors} />

@@ -619,6 +619,15 @@ export const api = {
 
   tripsGet: (id: string) => request<any>(`/api/trips/${id}`),
 
+  tripsShare: (body: { trip_id: string }) =>
+    request<{ share_url: string; trip_reference: string }>("/api/trips/share", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+
+  tripsTrack: (ref: string) => request<any>(`/api/trips/track/${ref}`),
+
+  tripsPassengerCurrent: () => request<{ trip: any | null }>("/api/trips/passenger-current"),
+
   adminDriverLocations: () => request<any[]>("/api/trips/driver-locations"),
 
   adminIncidents: () => request<any[]>("/api/admin/incidents"),

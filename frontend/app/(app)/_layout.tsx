@@ -130,6 +130,7 @@ function AppTabs() {
       <Tabs.Screen name="documents" options={{ href: null }} />
       <Tabs.Screen name="safety" options={{ href: null }} />
       <Tabs.Screen name="saferide-trip" options={{ href: null }} />
+      <Tabs.Screen name="trip-centre" options={{ href: null }} />
     </Tabs>
   );
 }

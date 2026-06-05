@@ -38,7 +38,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Tag n Ride needs your location to track your trip route and keep you safe."
+          "locationAlwaysAndWhenInUsePermission": "Tag n Ride needs your location to track your trip route and keep you safe.",
+          "locationWhenInUsePermission": "Tag n Ride needs your location to track your trip route and keep passengers safe."
         }
       ],
       [

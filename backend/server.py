@@ -11672,6 +11672,9 @@ class PanicIn(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+class TripShareIn(BaseModel):
+    trip_id: str
+
 class SosRequestIn(BaseModel):
     emergency_type: str  # 'police' or 'ambulance'
     latitude: Optional[float] = None
@@ -11791,10 +11794,15 @@ async def trip_start(body: TripStartIn, user: dict = Depends(get_current_user)):
     if user["role"] != "driver":
         raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE trips SET status='completed', ended_at=NOW() WHERE driver_id=$1 AND status='active'",
+        existing = await conn.fetchrow(
+            "SELECT * FROM trips WHERE driver_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1",
             user["id"]
         )
+        if existing:
+            t = dict(existing)
+            t["started_at"] = iso(t.get("started_at"))
+            if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+            return t
         drv = await conn.fetchrow("SELECT vehicle_plate FROM drivers WHERE user_id=$1", user["id"])
         u_row = await conn.fetchrow("SELECT full_name, phone_number FROM users WHERE id=$1", user["id"])
         trip_date = datetime.now(timezone.utc).strftime('%Y%m%d')
@@ -11865,10 +11873,26 @@ async def trip_end(body: TripEndIn, user: dict = Depends(get_current_user)):
         )
         row = await conn.fetchrow("SELECT * FROM trips WHERE id=$1", body.trip_id)
     t = dict(row)
-    t["started_at"] = iso(t.get("started_at"))
-    t["ended_at"] = iso(t.get("ended_at"))
-    if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
-    return {"trip": t}
+    started = t.get("started_at")
+    ended = t.get("ended_at")
+    duration_minutes = 0
+    if started and ended:
+        delta = ended - started
+        duration_minutes = max(0, int(delta.total_seconds() / 60))
+    t["started_at"] = iso(started)
+    t["ended_at"] = iso(ended)
+    gross = float(t.get("total_revenue") or 0)
+    fee = round(gross * 0.03, 2)
+    net = round(gross - fee, 2)
+    t["total_revenue"] = gross
+    return {
+        "trip": t,
+        "duration_minutes": duration_minutes,
+        "total_passengers": int(t.get("total_passengers") or 0),
+        "gross_earnings": gross,
+        "platform_fee": fee,
+        "net_earnings": net,
+    }
 
 # ── POST /api/trips/location ──
 @api.post("/trips/location")
@@ -12460,6 +12484,73 @@ async def admin_charge_sos(sos_id: str, body: SosChargeIn, admin: dict = Depends
                 "sos_fee", req["user_id"])
     return {"ok": True, "deducted_from_wallet": deducted is not None}
 
+
+# ── POST /api/trips/share ──
+@api.post("/trips/share")
+async def trip_share(body: TripShareIn, user: dict = Depends(get_current_user)):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Drivers only")
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow("SELECT trip_reference FROM trips WHERE id=$1 AND driver_id=$2", body.trip_id, user["id"])
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+    return {
+        "share_url": f"https://tagnride.com/track/{trip['trip_reference']}",
+        "trip_reference": trip["trip_reference"],
+    }
+
+# ── GET /api/trips/track/{trip_reference} ── PUBLIC no auth
+@api.get("/trips/track/{trip_reference}")
+async def trip_track_public(trip_reference: str):
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow("SELECT * FROM trips WHERE trip_reference=$1", trip_reference)
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        pcount = await conn.fetchval("SELECT COUNT(*) FROM trip_passengers WHERE trip_id=$1", trip["id"])
+        loc = await conn.fetchrow(
+            "SELECT latitude, longitude, recorded_at FROM gps_locations WHERE trip_id=$1 ORDER BY recorded_at DESC LIMIT 1",
+            trip["id"]
+        )
+    t = dict(trip)
+    driver_full = t.get("driver_name") or ""
+    parts = driver_full.split()
+    if parts:
+        first = parts[0]
+        last = parts[-1] if len(parts) > 1 else ""
+        masked_name = f"{first} {last[0]}***" if last else first
+    else:
+        masked_name = "Driver"
+    return {
+        "trip_reference": t["trip_reference"],
+        "vehicle_plate": t.get("vehicle_plate") or "",
+        "driver_name": masked_name,
+        "status": t.get("status") or "active",
+        "started_at": iso(t.get("started_at")),
+        "passenger_count": int(pcount or 0),
+        "last_latitude": float(loc["latitude"]) if loc and loc.get("latitude") is not None else None,
+        "last_longitude": float(loc["longitude"]) if loc and loc.get("longitude") is not None else None,
+        "last_location_update": iso(loc["recorded_at"]) if loc else None,
+    }
+
+# ── GET /api/trips/passenger-current ──
+@api.get("/trips/passenger-current")
+async def trip_passenger_current(user: dict = Depends(get_current_user)):
+    if user["role"] == "driver":
+        raise HTTPException(status_code=403, detail="Passengers only")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT t.* FROM trips t "
+            "JOIN trip_passengers tp ON tp.trip_id=t.id "
+            "WHERE tp.passenger_id=$1 AND t.status='active' AND tp.alighted=false "
+            "ORDER BY tp.boarded_at DESC LIMIT 1",
+            user["id"]
+        )
+        if not row:
+            return {"trip": None}
+        t = dict(row)
+        t["started_at"] = iso(t.get("started_at"))
+        if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
+    return {"trip": t}
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line

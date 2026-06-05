@@ -110,6 +110,7 @@ const NAV_GROUPS: NavGroup[] = [
     color: "text-red-400",
     items: [
       { label: "SafeRide Command", href: "/admin/saferide",            icon: Shield,        permission: "view_audit" },
+      { label: "Live Trips",       href: "/admin/trips",               icon: Car,           permission: "view_analytics" },
       { label: "Incidents",        href: "/admin/saferide/incidents",  icon: AlertTriangle, permission: "view_audit" },
     ],
   },
