@@ -18,6 +18,7 @@ export default function TrackPage() {
     try {
       const res = await fetch(`${API}/api/trips/track/${encodeURIComponent(ref)}`);
       if (res.status === 404) { setNotFound(true); setLoading(false); return; }
+      if (!res.ok) { setNotFound(true); setLoading(false); return; }
       const data = await res.json();
       setTrip(data);
     } catch { setNotFound(true); }
@@ -30,95 +31,128 @@ export default function TrackPage() {
     return () => clearInterval(interval);
   }, [ref]);
 
-  const mapUrl = trip?.last_latitude && trip?.last_longitude
-    ? `https://maps.google.com/maps?q=${trip.last_latitude},${trip.last_longitude}&z=15&output=embed`
+  const hasLocation = trip?.last_latitude != null && trip?.last_longitude != null;
+  const mapsOpenUrl = hasLocation
+    ? `https://maps.google.com/?q=${trip.last_latitude},${trip.last_longitude}`
+    : null;
+  const staticMapUrl = hasLocation
+    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${trip.last_latitude},${trip.last_longitude}&zoom=15&size=600x300&markers=${trip.last_latitude},${trip.last_longitude},red-pushpin`
     : null;
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#0a0a0a", color: "#fff", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", backgroundColor: "#0a0a0a", color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
       {/* Header */}
-      <div style={{ backgroundColor: "#111", borderBottom: "1px solid #222", padding: "16px 24px", display: "flex", alignItems: "center", gap: 14 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#00E5FF20", border: "1px solid #00E5FF50", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+      <div style={{ backgroundColor: "#0f1217", borderBottom: "1px solid #1e2530", padding: "14px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,229,255,0.12)", border: "1.5px solid rgba(0,229,255,0.35)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
           🛡️
         </div>
         <div>
-          <div style={{ color: "#00E5FF", fontWeight: 800, fontSize: 18 }}>TAG N RIDE SafeRide</div>
-          <div style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Family trip tracking · powered by SafeRide</div>
+          <div style={{ color: "#00E5FF", fontWeight: 800, fontSize: 17, letterSpacing: 0.3 }}>TAG N RIDE SafeRide</div>
+          <div style={{ color: "#555", fontSize: 11, marginTop: 1 }}>Live trip tracking · powered by SafeRide</div>
         </div>
       </div>
 
-      <div style={{ maxWidth: 600, margin: "0 auto", padding: "24px 16px" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "20px 16px 40px" }}>
         {loading && (
-          <div style={{ textAlign: "center", color: "#888", padding: "60px 0" }}>
-            <div style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
-            <div>Loading trip…</div>
+          <div style={{ textAlign: "center", color: "#555", padding: "60px 0" }}>
+            <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
+            <div style={{ fontSize: 14 }}>Loading trip…</div>
           </div>
         )}
 
         {!loading && notFound && (
           <div style={{ textAlign: "center", padding: "60px 0" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
+            <div style={{ fontSize: 44, marginBottom: 14 }}>🔍</div>
             <div style={{ color: "#fff", fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Trip not found</div>
-            <div style={{ color: "#888", fontSize: 14 }}>This link may have expired or is invalid.</div>
+            <div style={{ color: "#555", fontSize: 13 }}>This link may have expired or is invalid.</div>
           </div>
         )}
 
         {!loading && trip && (
           <>
-            <div style={{ backgroundColor: "#111", border: "1px solid #222", borderRadius: 16, padding: "16px 20px", marginBottom: 16 }}>
-              <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 1.2, marginBottom: 12 }}>YOUR FAMILY MEMBER IS ON A SAFERIDE TRIP</div>
+            {/* Status banner */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              backgroundColor: trip.status === "active" ? "rgba(74,222,128,0.08)" : "rgba(100,100,100,0.08)",
+              border: `1px solid ${trip.status === "active" ? "rgba(74,222,128,0.25)" : "rgba(100,100,100,0.2)"}`,
+              borderRadius: 12, padding: "12px 16px", marginBottom: 16,
+            }}>
+              <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: trip.status === "active" ? "#4ade80" : "#666", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ color: trip.status === "active" ? "#4ade80" : "#888", fontWeight: 700, fontSize: 13 }}>
+                  {trip.status === "active" ? "SAFERIDE ACTIVE — Your family member is on a trip" : "TRIP COMPLETED"}
+                </div>
+                {trip.started_at && (
+                  <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>
+                    Started {new Date(trip.started_at).toLocaleString("en-ZA")}
+                  </div>
+                )}
+              </div>
+            </div>
 
-              <InfoRow label="Vehicle" value={trip.vehicle_plate || "—"} />
-              <InfoRow label="Driver" value={trip.driver_name || "—"} />
-              <InfoRow label="Started" value={trip.started_at ? new Date(trip.started_at).toLocaleString("en-ZA") : "—"} />
-              <InfoRow
-                label="Status"
-                value={trip.status === "active" ? "ACTIVE" : "COMPLETED"}
-                valueColor={trip.status === "active" ? "#00E5FF" : "#888"}
-              />
-              <InfoRow label="Passengers in vehicle" value={String(trip.passenger_count ?? 0)} />
+            {/* Trip info card */}
+            <div style={{ backgroundColor: "#0f1217", border: "1px solid #1e2530", borderRadius: 14, padding: "16px 18px", marginBottom: 16 }}>
+              <Row label="Vehicle" value={trip.vehicle_plate || "—"} mono />
+              <Row label="Driver" value={trip.driver_name || "—"} />
+              <Row label="Passengers in vehicle" value={String(trip.passenger_count ?? 0)} />
               {trip.last_location_update && (
-                <InfoRow label="Last location update" value={new Date(trip.last_location_update).toLocaleTimeString("en-ZA")} />
+                <Row label="Location last updated" value={new Date(trip.last_location_update).toLocaleTimeString("en-ZA")} last />
               )}
             </div>
 
-            {mapUrl && (
-              <div style={{ backgroundColor: "#111", border: "1px solid #222", borderRadius: 16, overflow: "hidden", marginBottom: 16 }}>
-                <iframe
-                  src={mapUrl}
-                  width="100%"
-                  height="300"
-                  style={{ border: "none", display: "block" }}
-                  loading="lazy"
-                  title="Trip location"
-                />
+            {/* Map section */}
+            {hasLocation ? (
+              <div style={{ backgroundColor: "#0f1217", border: "1px solid #1e2530", borderRadius: 14, overflow: "hidden", marginBottom: 16 }}>
+                {/* Static map image via OpenStreetMap */}
+                {staticMapUrl && (
+                  <img
+                    src={staticMapUrl}
+                    alt="Trip location map"
+                    style={{ width: "100%", display: "block", maxHeight: 220, objectFit: "cover" }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                )}
+                <div style={{ padding: "12px 16px" }}>
+                  <div style={{ color: "#888", fontSize: 11, marginBottom: 8 }}>
+                    📍 Last known location
+                    <span style={{ color: "#444", marginLeft: 8, fontFamily: "monospace", fontSize: 10 }}>
+                      {trip.last_latitude?.toFixed(5)}, {trip.last_longitude?.toFixed(5)}
+                    </span>
+                  </div>
+                  <a
+                    href={mapsOpenUrl!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      backgroundColor: "#00E5FF", color: "#000",
+                      fontWeight: 700, fontSize: 13, textDecoration: "none",
+                      borderRadius: 8, padding: "9px 16px",
+                    }}>
+                    🗺️ Open in Google Maps
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div style={{ backgroundColor: "#0f1217", border: "1px solid #1e2530", borderRadius: 14, padding: "20px 18px", marginBottom: 16, textAlign: "center" }}>
+                <div style={{ color: "#444", fontSize: 13 }}>No GPS location available yet</div>
+                <div style={{ color: "#333", fontSize: 11, marginTop: 4 }}>Location will appear here once the driver starts moving</div>
               </div>
             )}
 
-            {!mapUrl && trip.last_latitude && (
-              <div style={{ backgroundColor: "#111", border: "1px solid #222", borderRadius: 16, padding: "16px 20px", marginBottom: 16, textAlign: "center" }}>
-                <div style={{ color: "#00E5FF", fontSize: 13 }}>📍 Last known location</div>
-                <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>{trip.last_latitude}, {trip.last_longitude}</div>
-                <a
-                  href={`https://maps.google.com/?q=${trip.last_latitude},${trip.last_longitude}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "inline-block", marginTop: 10, color: "#00E5FF", fontSize: 13, textDecoration: "none", border: "1px solid #00E5FF40", borderRadius: 8, padding: "6px 14px" }}>
-                  Open in Google Maps
-                </a>
-              </div>
-            )}
-
-            <div style={{ backgroundColor: "#111", border: "1px solid #1a2e1a", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-              <div style={{ color: "#4ade80", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>🛡️ This trip is being tracked by Tag n Ride SafeRide</div>
-              <div style={{ color: "#888", fontSize: 12, lineHeight: 1.6 }}>
-                In case of emergency call <strong style={{ color: "#ff4444" }}>10111</strong><br />
-                For Tag n Ride support: <strong>support@tagnride.com</strong>
+            {/* Safety note */}
+            <div style={{ backgroundColor: "#0a1a0f", border: "1px solid rgba(74,222,128,0.15)", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ color: "#4ade80", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>🛡️ This trip is tracked by Tag n Ride SafeRide</div>
+              <div style={{ color: "#666", fontSize: 12, lineHeight: 1.7 }}>
+                In case of emergency call <strong style={{ color: "#ff5555" }}>10111</strong> (Police) or <strong style={{ color: "#ff5555" }}>10177</strong> (Ambulance)<br />
+                Tag n Ride support: <strong style={{ color: "#888" }}>support@tagnride.com</strong>
               </div>
             </div>
 
             {trip.status === "active" && (
-              <div style={{ color: "#555", fontSize: 11, textAlign: "center" }}>This page refreshes automatically every 30 seconds</div>
+              <div style={{ color: "#333", fontSize: 11, textAlign: "center" }}>
+                🔄 This page refreshes automatically every 30 seconds
+              </div>
             )}
           </>
         )}
@@ -127,11 +161,15 @@ export default function TrackPage() {
   );
 }
 
-function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+function Row({ label, value, mono, last }: { label: string; value: string; mono?: boolean; last?: boolean }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, marginBottom: 10, borderBottom: "1px solid #1e1e1e" }}>
-      <span style={{ color: "#888", fontSize: 12 }}>{label}</span>
-      <span style={{ color: valueColor || "#fff", fontWeight: 600, fontSize: 14 }}>{value}</span>
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      paddingBottom: last ? 0 : 10, marginBottom: last ? 0 : 10,
+      borderBottom: last ? "none" : "1px solid #1a1f2a",
+    }}>
+      <span style={{ color: "#555", fontSize: 12 }}>{label}</span>
+      <span style={{ color: "#fff", fontWeight: 600, fontSize: 14, fontFamily: mono ? "monospace" : "inherit" }}>{value}</span>
     </div>
   );
 }

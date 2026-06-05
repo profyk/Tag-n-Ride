@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, Share,
+  RefreshControl, ActivityIndicator, Alert, Share, Linking,
   Animated, StyleSheet, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -198,12 +198,33 @@ export default function TripCentre() {
     if (!trip?.id) return;
     try {
       const res = await api.tripsShare({ trip_id: trip.id });
-      await Share.share({
-        message: `Track my Tag n Ride trip live for safety:\n${res.share_url}\n\nMy route is recorded by Tag n Ride SafeRide.`,
-        url: res.share_url,
-      });
+      const url = res.share_url;
+      Alert.alert(
+        "Share My Route",
+        "Let family track your trip live for safety.",
+        [
+          {
+            text: "Open Live Map",
+            onPress: () => Linking.openURL(url).catch(() =>
+              Alert.alert("Could not open", "Copy this link: " + url)
+            ),
+          },
+          {
+            text: "Share Link",
+            onPress: async () => {
+              try {
+                await Share.share({
+                  message: `Track my Tag n Ride trip live for safety:\n${url}\n\nMy route is recorded by Tag n Ride SafeRide.`,
+                  url,
+                });
+              } catch {}
+            },
+          },
+          { text: "Cancel", style: "cancel" },
+        ]
+      );
     } catch (e: any) {
-      if (e?.message !== "User did not share") Alert.alert("Could not share", e?.message || "Try again");
+      Alert.alert("Could not generate link", e?.message || "Try again");
     }
   };
 

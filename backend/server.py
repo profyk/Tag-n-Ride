@@ -12495,7 +12495,7 @@ async def trip_share(body: TripShareIn, user: dict = Depends(get_current_user)):
         if not trip:
             raise HTTPException(status_code=404, detail="Trip not found")
     return {
-        "share_url": f"https://tagnride.com/track/{trip['trip_reference']}",
+        "share_url": f"https://tag-n-ride.vercel.app/track/{trip['trip_reference']}",
         "trip_reference": trip["trip_reference"],
     }
 
