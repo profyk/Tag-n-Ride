@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, Share, Linking,
+  RefreshControl, ActivityIndicator, Alert, Share,
   StyleSheet, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -206,32 +206,14 @@ export default function TripCentre() {
     setSharing(true);
     try {
       const res = await api.tripsShare({ trip_id: trip.id });
-      const url = res.share_url;
-      Alert.alert(
-        "Share My Route",
-        "Let family track your trip live for safety.",
-        [
-          {
-            text: "Open Live Map",
-            onPress: () => Linking.openURL(url).catch(() =>
-              Alert.alert("Could not open", "Copy this link:\n" + url)
-            ),
-          },
-          {
-            text: "Share Link",
-            onPress: async () => {
-              try {
-                await Share.share({
-                  message: `Track my Tag n Ride trip live:\n${url}`,
-                });
-              } catch {}
-            },
-          },
-          { text: "Cancel", style: "cancel" },
-        ]
-      );
+      await Share.share({
+        message: `Track my Tag n Ride trip live 📍\n${res.share_url}`,
+        url: res.share_url,
+      });
     } catch (e: any) {
-      Alert.alert("Could not generate link", e?.message || "Try again");
+      if ((e as any)?.message !== "User did not share") {
+        Alert.alert("Could not generate link", e?.message || "Try again");
+      }
     } finally {
       setSharing(false);
     }

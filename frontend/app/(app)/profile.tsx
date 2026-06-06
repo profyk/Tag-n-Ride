@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Image, Alert, TextInput, Modal, ActivityIndicator,
-  Platform, Linking,
+  Platform, Linking, Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -60,6 +60,9 @@ const APP_VERSION = "1.0.0";export default function Profile() {
   const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
   const [safetyProfileComplete, setSafetyProfileComplete] = useState<boolean | null>(null);
 
+  const [passengerTrip, setPassengerTrip] = useState<any | null>(null);
+  const [sharingLocation, setSharingLocation] = useState(false);
+
   useEffect(() => {
     if (state.status === "authed") {
       if (state.user.role === "driver") {
@@ -68,6 +71,9 @@ const APP_VERSION = "1.0.0";export default function Profile() {
       }
       if (state.user.role === "driver" || state.user.role === "owner") {
         loadKycStatus();
+      }
+      if (state.user.role === "passenger") {
+        api.tripsPassengerCurrent().then(r => setPassengerTrip(r?.trip ?? null)).catch(() => {});
       }
       api.safetyProfile().then(p => setSafetyProfileComplete(!!p?.profile_complete)).catch(() => {});
     }
@@ -101,6 +107,24 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         if (selfie?.url) setSelfieUrl(selfie.url);
       }
     } catch { setKycStatus("not_submitted"); }
+  };
+
+  const handleShareLocation = async () => {
+    if (!passengerTrip?.id || sharingLocation) return;
+    setSharingLocation(true);
+    try {
+      const res = await api.tripsShare({ trip_id: passengerTrip.id });
+      await Share.share({
+        message: `I am in a Tag n Ride trip right now.\nTrack my journey for my safety 📍\n${res.share_url}${passengerTrip.vehicle_plate ? `\nVehicle: ${passengerTrip.vehicle_plate}` : ""}`,
+        url: res.share_url,
+      });
+    } catch (e: any) {
+      if ((e as any)?.message !== "User did not share") {
+        Alert.alert("Could not generate link", e?.message || "Try again");
+      }
+    } finally {
+      setSharingLocation(false);
+    }
   };
 
   const savePlate = async () => {
@@ -422,6 +446,32 @@ const APP_VERSION = "1.0.0";export default function Profile() {
           )}
           <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
         </TouchableOpacity>
+
+        {isPassenger && passengerTrip && (
+          <TouchableOpacity
+            style={{
+              flexDirection: "row", alignItems: "center",
+              backgroundColor: colors.bg2, borderRadius: 10,
+              borderWidth: 1.5, borderColor: colors.cyan + "40",
+              padding: 16, gap: 12, marginBottom: 10,
+            }}
+            onPress={handleShareLocation}
+            disabled={sharingLocation}
+            activeOpacity={0.7}>
+            {sharingLocation
+              ? <ActivityIndicator size="small" color={colors.cyan} />
+              : <Ionicons name="location-outline" size={20} color={colors.cyan} />}
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: "600", fontSize: 15 }}>Share Live Location</Text>
+              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                {passengerTrip.vehicle_plate
+                  ? `Vehicle ${passengerTrip.vehicle_plate} · Tap to send tracking link`
+                  : "Tap to send tracking link to family"}
+              </Text>
+            </View>
+            {!sharingLocation && <Ionicons name="share-outline" size={18} color={colors.cyan} />}
+          </TouchableOpacity>
+        )}
 
         {isDriver && (
           <Row icon="car-outline" label="Trip Centre"
