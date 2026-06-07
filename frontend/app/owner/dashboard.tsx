@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useRouter } from "expo-router";
 import { api, DriverTransfer } from "../../src/api";
-import { colors, formatZAR, formatDate, radius } from "../../src/theme";
+import { formatZAR, formatDate, radius, useColors, darkColors as colors } from "../../src/theme";
 import { Button } from "../../src/ui";
 
 type Driver = {
@@ -54,6 +54,7 @@ function MiniBar({ progress, color }: { progress: number; color: string }) {
 export default function OwnerDashboard() {
   const router = useRouter();
   const { state, signOut } = useAuth();
+  const colors = useColors();
   const [data, setData] = useState<any>(null);
   const [outstanding, setOutstanding] = useState<any>(null);
   const [cashupHistory, setCashupHistory] = useState<any>(null);

@@ -1,5 +1,7 @@
-export function formatZAR(amount: number): string {
-  return `R ${amount.toLocaleString("en-ZA", {
+export function formatZAR(amount: number | string | undefined | null): string {
+  const v = typeof amount === "string" ? parseFloat(amount) : (amount ?? 0);
+  if (!isFinite(v) || isNaN(v)) return "R 0.00";
+  return `R ${v.toLocaleString("en-ZA", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

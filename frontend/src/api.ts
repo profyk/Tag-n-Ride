@@ -52,6 +52,7 @@ export const api = {
     business_name?: string;
     id_number?: string;
     email?: string;
+    password?: string;
   }) =>
     request<{ token: string; user: User }>("/api/auth/register", {
       method: "POST",
@@ -64,8 +65,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  ownerLogin: (body: { email: string; pin: string }) =>
-    request<{ token: string; user: User }>("/api/auth/login", {
+  ownerLogin: (body: { email: string; password: string }) =>
+    request<{ token: string; user: User }>("/api/auth/owner-login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  ownerChangePassword: (body: { current_password: string; new_password: string }) =>
+    request<{ ok: boolean }>("/api/owner/change-password", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -689,7 +696,7 @@ export type PayoutSettings = {
 
 export type User = {
   id: string;
-  phone_number: string;
+  phone_number?: string;   // optional — owners identify by email
   full_name: string;
   surname?: string;
   id_number?: string;

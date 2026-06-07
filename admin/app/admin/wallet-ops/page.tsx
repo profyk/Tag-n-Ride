@@ -144,7 +144,7 @@ export default function WalletOpsPage() {
         w.full_name, w.phone_number, w.role,
         formatZAR(w.balance),
         w.is_frozen ? "Frozen" : "Active",
-        w.freeze_reason || "",
+        w.frozen_reason || "",
         formatDate(w.updated_at),
       ]),
     ];
@@ -313,12 +313,12 @@ export default function WalletOpsPage() {
                     {w.is_frozen ? (
                       <div>
                         <Badge label="frozen" tone="red" />
-                        {w.freeze_reason && (
+                        {w.frozen_reason && (
                           <p
                             className="text-[10px] text-textMuted mt-0.5 max-w-[150px] truncate"
-                            title={w.freeze_reason}
+                            title={w.frozen_reason}
                           >
-                            {w.freeze_reason}
+                            {w.frozen_reason}
                           </p>
                         )}
                       </div>

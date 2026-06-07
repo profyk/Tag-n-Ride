@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../src/api";
-import { colors, formatZAR, formatDate, radius } from "../../src/theme";
+import { formatZAR, formatDate, radius, darkColors as colors } from "../../src/theme";
 
 type FleetTxn = {
   id: string;

@@ -256,7 +256,7 @@ export type WalletEntry = {
   is_active: boolean;
   balance: number;
   is_frozen: boolean;
-  freeze_reason?: string;
+  frozen_reason?: string;
   updated_at: string;
 };
 

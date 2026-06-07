@@ -70,6 +70,11 @@ JWT_ALG        = "HS256"
 ACCESS_TTL_MIN = 60 * 24 * 7  # 7 days
 PLATFORM_FEE_PERCENT = 3.0
 
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT", "").lower() in ("production", "prod") or \
+             os.getenv("ENV", "").lower() in ("production", "prod")
+TRACK_BASE_URL = os.getenv("TRACK_BASE_URL", "https://tag-n-ride.vercel.app")
+
 pool: asyncpg.Pool = None
 
 logging.basicConfig(level=logging.INFO,
@@ -364,16 +369,44 @@ async def lifespan(app: FastAPI):
     if pool:
         await pool.close()
 
-app = FastAPI(title="Tag n Ride API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Tag n Ride API",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=None if PRODUCTION else "/docs",
+    redoc_url=None if PRODUCTION else "/redoc",
+    openapi_url=None if PRODUCTION else "/openapi.json",
+)
 api = APIRouter(prefix="/api")
 
+_cors_origins = ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Danger-Token", "X-Request-ID"],
     expose_headers=["Content-Disposition"],
+    allow_credentials=bool(ALLOWED_ORIGINS),
 )
+
+from fastapi import Response as FastAPIResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class DBHealthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if pool is None and not request.url.path.startswith("/health"):
+            return FastAPIResponse(
+                content='{"detail":"Service temporarily unavailable — database not connected"}',
+                status_code=503,
+                media_type="application/json",
+            )
+        return await call_next(request)
+
+app.add_middleware(DBHealthMiddleware)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "db": pool is not None}
 
 # ── Helpers ──────────────────────────────────────────────────
 def hash_pin(pin: str) -> str:
@@ -545,6 +578,7 @@ async def _do_withdraw(user, amount, bank_name, account_number, account_name, pa
             log.error(f"[AUTO-PAYOUT] Failed for withdrawal {req_id}: {e}")
             async with pool.acquire() as conn:
                 await conn.execute("UPDATE withdrawal_requests SET status='payout_failed' WHERE id=$1", req_id)
+                await conn.execute("UPDATE transactions SET status='failed' WHERE id=$1", txn_id)
 
     return {"balance": new_balance, "withdrawal": req, "transaction": txn, "pending_approval": not auto_approve}
 
@@ -624,7 +658,8 @@ async def _do_pay_fuel(user, amount, bank_name, account_number, account_name):
 
 # ── Models ───────────────────────────────────────────────────
 class RegisterIn(BaseModel):
-    phone_number: str = Field(min_length=7, max_length=20)
+    # phone_number is optional for owners (they identify by email)
+    phone_number: Optional[str] = Field(default=None, min_length=7, max_length=20)
     full_name: str = Field(min_length=2, max_length=100)
     surname: str = Field(min_length=2, max_length=100)
     pin: str = Field(min_length=4, max_length=4)
@@ -633,6 +668,8 @@ class RegisterIn(BaseModel):
     business_name: Optional[str] = None
     id_number: Optional[str] = Field(default=None, min_length=5, max_length=30)
     email: Optional[str] = Field(default=None, max_length=255)
+    # Owner login password (bcrypt) — required for role=owner
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
     @field_validator("pin")
     @classmethod
@@ -643,6 +680,7 @@ class RegisterIn(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def normalize_phone(cls, v):
+        if v is None: return v
         v = v.strip().replace(" ", "")
         if not (v.startswith("+") or v.isdigit()): raise ValueError("Invalid phone number")
         return v
@@ -668,6 +706,19 @@ class DriverProfileIn(BaseModel):
 class LoginIn(BaseModel):
     phone_number: str
     pin: str
+
+class OwnerLoginIn(BaseModel):
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v):
+        return v.strip().lower()
+
+class OwnerChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 class TopUpIn(BaseModel):
     amount: float = Field(gt=0, le=1_000_000)
@@ -780,22 +831,39 @@ async def health():
 # ── Auth ─────────────────────────────────────────────────────
 @api.post("/auth/register")
 async def register(body: RegisterIn):
+    # Owners must provide email; drivers/passengers must provide phone_number
+    if body.role == "owner":
+        if not body.email:
+            raise HTTPException(status_code=400, detail="Email is required for owner accounts")
+        if not body.password:
+            raise HTTPException(status_code=400, detail="Password is required for owner accounts")
+    else:
+        if not body.phone_number:
+            raise HTTPException(status_code=400, detail="Phone number is required")
+
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT id FROM users WHERE phone_number=$1", body.phone_number
-        )
-        if existing:
-            raise HTTPException(status_code=400, detail="Phone number already registered")
+        # Duplicate check
+        if body.phone_number:
+            existing = await conn.fetchrow("SELECT id FROM users WHERE phone_number=$1", body.phone_number)
+            if existing:
+                raise HTTPException(status_code=400, detail="Phone number already registered")
+        if body.email and body.role == "owner":
+            existing = await conn.fetchrow("SELECT id FROM users WHERE email=$1", body.email.strip().lower())
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already registered")
+
         user_id = str(uuid.uuid4())
+        email_stored = body.email.strip().lower() if body.email else None
+        pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode() if body.password else None
+
         async with conn.transaction():
             await conn.execute(
-                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-                user_id, body.phone_number, body.full_name, body.surname, body.id_number, body.email, body.role, hash_pin(body.pin)
+                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash,password_hash) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+                user_id, body.phone_number, body.full_name, body.surname,
+                body.id_number, email_stored, body.role, hash_pin(body.pin), pw_hash
             )
-            await conn.execute(
-                "INSERT INTO wallets (id,user_id) VALUES ($1,$2)",
-                str(uuid.uuid4()), user_id
-            )
+            await conn.execute("INSERT INTO wallets (id,user_id) VALUES ($1,$2)", str(uuid.uuid4()), user_id)
             if body.role == "driver":
                 await conn.execute(
                     "INSERT INTO drivers (id,user_id,qr_code,vehicle_plate) VALUES ($1,$2,$3,$4)",
@@ -815,8 +883,14 @@ async def register(body: RegisterIn):
     token = create_access_token(user_id, body.role)
     return {
         "token": token,
-        "user": {"id": user_id, "phone_number": body.phone_number,
-                 "full_name": body.full_name, "surname": body.surname, "role": body.role}
+        "user": {
+            "id": user_id,
+            "phone_number": body.phone_number,
+            "full_name": body.full_name,
+            "surname": body.surname,
+            "email": email_stored,
+            "role": body.role,
+        }
     }
 
 @api.post("/auth/login")
@@ -839,6 +913,46 @@ async def login(body: LoginIn, request: Request):
         "token": token,
         "user": {"id": user["id"], "phone_number": user["phone_number"],
                  "full_name": user["full_name"], "role": user["role"]}
+    }
+
+@api.post("/auth/owner-login")
+async def owner_login(body: OwnerLoginIn, request: Request):
+    """Email + password login for fleet owners."""
+    key = body.email.lower().strip()
+    _login_limiter.check(key)
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id,email,full_name,role,password_hash,pin_hash,is_active FROM users "
+            "WHERE email=$1 AND role='owner'",
+            key
+        )
+    if not user:
+        _login_limiter.record_failure(key)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user["is_active"]:
+        raise HTTPException(status_code=403, detail="Account disabled")
+    # Verify password
+    pw_hash = user["password_hash"]
+    if not pw_hash:
+        _login_limiter.record_failure(key)
+        raise HTTPException(status_code=401, detail="Password not set — contact support to reset your account")
+    try:
+        valid = bcrypt.checkpw(body.password.encode(), pw_hash.encode())
+    except Exception:
+        valid = False
+    if not valid:
+        _login_limiter.record_failure(key)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    _login_limiter.clear(key)
+    token = create_access_token(user["id"], user["role"])
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "role": user["role"],
+        }
     }
 
 @api.post("/auth/admin-login")
@@ -2664,6 +2778,24 @@ async def owner_get_bank(user: dict = Depends(require_owner)):
     return {"bank_name": row["bank_name"], "account_number": row["account_number"],
             "account_name": row["account_name"], "cashup_method": row["cashup_method"] or "wallet"}
 
+@api.post("/owner/change-password")
+async def owner_change_password(body: OwnerChangePasswordIn, user: dict = Depends(require_owner)):
+    """Owner changes their login password. Requires current password for verification."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT password_hash FROM users WHERE id=$1", user["id"])
+    if not row or not row["password_hash"]:
+        raise HTTPException(status_code=400, detail="No password set on this account")
+    try:
+        valid = bcrypt.checkpw(body.current_password.encode(), row["password_hash"].encode())
+    except Exception:
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", new_hash, user["id"])
+    return {"ok": True}
+
 class OwnerPayoutIn(BaseModel):
     amount: float = Field(gt=0, le=1_000_000)
 
@@ -3997,6 +4129,9 @@ async def create_new_tables():
                 """)
                 await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS cash_passengers INTEGER DEFAULT 0")
                 await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS taxi_capacity INTEGER DEFAULT 0")
+                await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS last_latitude NUMERIC")
+                await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS last_longitude NUMERIC")
+                await conn.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS last_location_update TIMESTAMPTZ")
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS trip_passengers (
                         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -4025,6 +4160,12 @@ async def create_new_tables():
                         recorded_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                # Indexes for common queries
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_gps_locations_trip_id ON gps_locations(trip_id, recorded_at DESC)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_gps_locations_user_id ON gps_locations(user_id, recorded_at DESC)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_trip_passengers_passenger_id ON trip_passengers(passenger_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_trip_passengers_trip_id ON trip_passengers(trip_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_trips_driver_status ON trips(driver_id, status)")
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS incidents (
                         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -11916,6 +12057,13 @@ async def trip_location(body: TripLocationIn, user: dict = Depends(get_current_u
             str(uuid.uuid4()), user["id"], body.trip_id,
             body.latitude, body.longitude, body.speed or 0, body.heading or 0
         )
+        # Keep trips table updated with the latest position so admin map view is always fresh
+        if body.trip_id:
+            await conn.execute(
+                "UPDATE trips SET last_latitude=$1, last_longitude=$2, last_location_update=NOW() "
+                "WHERE id=$3 AND driver_id=$4 AND status='active'",
+                body.latitude, body.longitude, body.trip_id, user["id"]
+            )
     return {"ok": True}
 
 # ── GET /api/trips/history ──
@@ -11947,22 +12095,35 @@ async def driver_locations_map(admin: dict = Depends(require_admin)):
         active_trips = await conn.fetch("SELECT * FROM trips WHERE status='active'")
         result = []
         for trip in active_trips:
+            # Prefer trip-specific GPS row (correct trip context)
             loc = await conn.fetchrow(
                 "SELECT latitude,longitude,speed,recorded_at FROM gps_locations "
-                "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1",
-                trip["driver_id"]
+                "WHERE trip_id=$1 ORDER BY recorded_at DESC LIMIT 1",
+                trip["id"]
             )
+            # Fall back to trips.last_latitude which we now keep updated
+            if not loc and trip.get("last_latitude") is not None:
+                lat = float(trip["last_latitude"])
+                lng = float(trip["last_longitude"])
+                speed = 0.0
+                last_update = iso(trip.get("last_location_update"))
+            else:
+                lat = float(loc["latitude"]) if loc and loc.get("latitude") is not None else None
+                lng = float(loc["longitude"]) if loc and loc.get("longitude") is not None else None
+                speed = float(loc["speed"]) if loc and loc.get("speed") is not None else 0.0
+                last_update = iso(loc["recorded_at"]) if loc else None
             pcount = await conn.fetchval("SELECT COUNT(*) FROM trip_passengers WHERE trip_id=$1", trip["id"])
             result.append({
                 "driver_id": trip["driver_id"],
                 "driver_name": trip["driver_name"],
                 "vehicle_plate": trip["vehicle_plate"],
-                "latitude": float(loc["latitude"]) if loc and loc.get("latitude") is not None else None,
-                "longitude": float(loc["longitude"]) if loc and loc.get("longitude") is not None else None,
-                "speed": float(loc["speed"]) if loc and loc.get("speed") is not None else 0,
+                "latitude": lat,
+                "longitude": lng,
+                "speed": speed,
                 "trip_id": trip["id"],
+                "trip_reference": trip["trip_reference"],
                 "passenger_count": int(pcount or 0),
-                "last_update": iso(loc["recorded_at"]) if loc else None,
+                "last_update": last_update,
             })
     return result
 
@@ -12519,14 +12680,26 @@ async def update_trip_details(trip_id: str, body: TripDetailsIn, user: dict = De
 # ── POST /api/trips/share ──
 @api.post("/trips/share")
 async def trip_share(body: TripShareIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
-        trip = await conn.fetchrow("SELECT trip_reference FROM trips WHERE id=$1 AND driver_id=$2", body.trip_id, user["id"])
+        if user["role"] == "driver":
+            # Driver can share any of their own trips
+            trip = await conn.fetchrow(
+                "SELECT trip_reference FROM trips WHERE id=$1 AND driver_id=$2",
+                body.trip_id, user["id"]
+            )
+        else:
+            # Passengers can share a trip they are in
+            row = await conn.fetchrow(
+                "SELECT t.trip_reference FROM trips t "
+                "JOIN trip_passengers tp ON tp.trip_id=t.id "
+                "WHERE t.id=$1 AND tp.passenger_id=$2 LIMIT 1",
+                body.trip_id, user["id"]
+            )
+            trip = row
         if not trip:
-            raise HTTPException(status_code=404, detail="Trip not found")
+            raise HTTPException(status_code=404, detail="Trip not found or access denied")
     return {
-        "share_url": f"https://tag-n-ride.vercel.app/track/{trip['trip_reference']}",
+        "share_url": f"{TRACK_BASE_URL}/track/{trip['trip_reference']}",
         "trip_reference": trip["trip_reference"],
     }
 
@@ -12538,8 +12711,10 @@ async def trip_track_public(trip_reference: str):
         if not trip:
             raise HTTPException(status_code=404, detail="Trip not found")
         pcount = await conn.fetchval("SELECT COUNT(*) FROM trip_passengers WHERE trip_id=$1", trip["id"])
+        # Primary: latest GPS ping for this trip
         loc = await conn.fetchrow(
-            "SELECT latitude, longitude, recorded_at FROM gps_locations WHERE trip_id=$1 ORDER BY recorded_at DESC LIMIT 1",
+            "SELECT latitude, longitude, recorded_at FROM gps_locations "
+            "WHERE trip_id=$1 ORDER BY recorded_at DESC LIMIT 1",
             trip["id"]
         )
     t = dict(trip)
@@ -12551,16 +12726,32 @@ async def trip_track_public(trip_reference: str):
         masked_name = f"{first} {last[0]}***" if last else first
     else:
         masked_name = "Driver"
+
+    # Resolve coordinates: gps_locations first, then trips.last_latitude fallback
+    if loc and loc.get("latitude") is not None:
+        last_lat = float(loc["latitude"])
+        last_lng = float(loc["longitude"])
+        last_update = iso(loc["recorded_at"])
+    elif t.get("last_latitude") is not None:
+        last_lat = float(t["last_latitude"])
+        last_lng = float(t["last_longitude"])
+        last_update = iso(t.get("last_location_update"))
+    else:
+        last_lat = None
+        last_lng = None
+        last_update = None
+
     return {
         "trip_reference": t["trip_reference"],
         "vehicle_plate": t.get("vehicle_plate") or "",
         "driver_name": masked_name,
         "status": t.get("status") or "active",
         "started_at": iso(t.get("started_at")),
+        "ended_at": iso(t.get("ended_at")),
         "passenger_count": int(pcount or 0),
-        "last_latitude": float(loc["latitude"]) if loc and loc.get("latitude") is not None else None,
-        "last_longitude": float(loc["longitude"]) if loc and loc.get("longitude") is not None else None,
-        "last_location_update": iso(loc["recorded_at"]) if loc else None,
+        "last_latitude": last_lat,
+        "last_longitude": last_lng,
+        "last_location_update": last_update,
     }
 
 # ── GET /api/trips/passenger-current ──

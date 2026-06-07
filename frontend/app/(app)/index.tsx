@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, TextInput, Modal, StyleSheet,
+  RefreshControl, ActivityIndicator, Alert, TextInput, Modal, StyleSheet, Share,
 } from "react-native";
 import * as Location from "expo-location";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -593,9 +593,15 @@ export default function Home() {
                 if (!passengerTrip?.id) return;
                 try {
                   const res = await api.tripsShare({ trip_id: passengerTrip.id });
-                  const { Share: RNShare } = require("react-native");
-                  await RNShare.share({ message: `I am in a Tag n Ride trip right now.\nTrack my journey for my safety:\n${res.share_url}\nVehicle: ${passengerTrip.vehicle_plate || "—"}` });
-                } catch {}
+                  await Share.share({
+                    message: `I am in a Tag n Ride trip right now.\nTrack my journey for my safety:\n${res.share_url}${passengerTrip.vehicle_plate ? `\nVehicle: ${passengerTrip.vehicle_plate}` : ""}`,
+                    url: res.share_url,
+                  });
+                } catch (e: any) {
+                  if (e?.message !== "User did not share") {
+                    Alert.alert("Could not share", e?.message || "Please try again.");
+                  }
+                }
               }}>
               <Text style={{ color: "#00E5FF", fontWeight: "700", fontSize: 12 }}>SHARE</Text>
             </TouchableOpacity>

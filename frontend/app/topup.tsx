@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Linking, TextInput,
+  ActivityIndicator, Linking, TextInput, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -36,7 +36,7 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
       const res = await api.topupInitiate(amt);
       setBreakdown(res); setPaymentId(res.payment_id); setStep("breakdown");
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert(e?.message || "Could not initiate top-up.");
+      Alert.alert("Top-Up Failed", e?.message || "Could not initiate top-up. Please try again.");
     } finally { setLoading(false); }
   };
 
@@ -71,10 +71,10 @@ type Step = "amount" | "breakdown" | "processing" | "success" | "failed";export 
         if (pollRef.current) clearInterval(pollRef.current);
         setVerified(res); setStep("success");
       } else {
-        if (Platform.OS === "web") window.alert("Payment not confirmed yet. Please wait.");
+        Alert.alert("Not Confirmed Yet", "Payment not confirmed yet. Please wait a moment and try again.");
       }
     } catch (e: any) {
-      if (Platform.OS === "web") window.alert(e?.message || "Could not verify payment.");
+      Alert.alert("Verification Failed", e?.message || "Could not verify payment. Please try again.");
     } finally { setLoading(false); }
   };
 

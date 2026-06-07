@@ -4,8 +4,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
+import { useTheme } from "../../src/ThemeContext";
 import { api } from "../../src/api";
-import { colors, formatZAR, radius } from "../../src/theme";
+import { formatZAR, radius } from "../../src/theme";
 import { Button } from "../../src/ui";
 
 const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank", "African Bank", "Investec", "Other"];
@@ -13,6 +14,7 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
 export default function OwnerProfile() {
   const { state, signOut } = useAuth();
   const router = useRouter();
+  const { colors } = useTheme();
   const [bankData, setBankData] = useState<any>(null);
   const [bankModal, setBankModal] = useState(false);
   const [bankName, setBankName] = useState("");
@@ -26,6 +28,16 @@ export default function OwnerProfile() {
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
   const [subscription, setSubscription] = useState<any>(null);
+
+  // Change password
+  const [pwModal, setPwModal] = useState(false);
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [changingPw, setChangingPw] = useState(false);
 
   if (state.status !== "authed") return null;
   const user = state.user;
@@ -109,7 +121,30 @@ export default function OwnerProfile() {
     } finally {
       setSavingMethod(false);
     }
-  };return (
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPw) { Alert.alert("Required", "Enter your current password."); return; }
+    if (newPw.length < 8) { Alert.alert("Too short", "New password must be at least 8 characters."); return; }
+    if (newPw !== confirmPw) { Alert.alert("Mismatch", "New passwords do not match."); return; }
+    if (newPw === currentPw) { Alert.alert("Invalid", "New password must be different from current."); return; }
+    setChangingPw(true);
+    try {
+      await api.ownerChangePassword({ current_password: currentPw, new_password: newPw });
+      setPwModal(false);
+      setCurrentPw(""); setNewPw(""); setConfirmPw("");
+      setShowCurrentPw(false); setShowNewPw(false); setShowConfirmPw(false);
+      Alert.alert("Password Changed ✓", "Your login password has been updated successfully.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not change password. Please try again.");
+    } finally {
+      setChangingPw(false);
+    }
+  };
+
+  const styles = makeStyles(colors);
+
+  return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
         <Text style={styles.title}>Profile</Text>
@@ -119,7 +154,7 @@ export default function OwnerProfile() {
             <Ionicons name="business" size={36} color={colors.cyan} />
           </View>
           <Text style={styles.name}>{user.full_name}</Text>
-          <Text style={styles.phone}>{user.phone_number}</Text>
+          <Text style={styles.phone}>{user.email || user.phone_number || ""}</Text>
           <View style={styles.roleBadge}>
             <Text style={styles.roleText}>FLEET OWNER</Text>
           </View>
@@ -253,12 +288,25 @@ export default function OwnerProfile() {
         </TouchableOpacity>
 
         <Text style={[styles.section, { marginTop: 24 }]}>ACCOUNT</Text>
+
+        {/* Change Password */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => { setCurrentPw(""); setNewPw(""); setConfirmPw(""); setPwModal(true); }}>
+          <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
+            <Ionicons name="key-outline" size={20} color={colors.cyan} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>Change Password</Text>
+            <Text style={styles.menuSub}>Update your login password</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {[
-          { icon: "car-sport-outline", color: colors.cyanDim, iconColor: colors.cyan, title: "Driver Mode", sub: "Activate to receive passenger payments" },
-          { icon: "lock-closed-outline", color: colors.greenDim, iconColor: colors.green, title: "Change PIN", sub: "Update your 4-digit security PIN" },
-          { icon: "shield-checkmark-outline", color: "#A064FF20", iconColor: "#A064FF", title: "Identity Verification", sub: "KYC status and documents" },
+          { icon: "car-sport-outline", color: colors.cyanDim, iconColor: colors.cyan, title: "Driver Mode", sub: "Activate to receive passenger payments", route: "/owner/driver-mode" },
+          { icon: "lock-closed-outline", color: colors.greenDim, iconColor: colors.green, title: "Change Security PIN", sub: "Update your 4-digit in-app PIN", route: "/(app)/profile" },
+          { icon: "shield-checkmark-outline", color: "#A064FF20", iconColor: "#A064FF", title: "Identity Verification", sub: "KYC status and documents", route: "/(app)/kyc" },
         ].map((item, i) => (
-          <TouchableOpacity key={i} style={styles.menuItem}>
+          <TouchableOpacity key={i} style={styles.menuItem} onPress={() => router.push(item.route as any)}>
             <View style={[styles.menuIcon, { backgroundColor: item.color }]}>
               <Ionicons name={item.icon as any} size={20} color={item.iconColor} />
             </View>
@@ -273,7 +321,7 @@ export default function OwnerProfile() {
         <TouchableOpacity style={styles.signOutBtn}
           onPress={() => Alert.alert("Sign out", "Are you sure?", [
             { text: "Cancel", style: "cancel" },
-            { text: "Sign out", style: "destructive", onPress: signOut },
+            { text: "Sign out", style: "destructive", onPress: async () => { await signOut(); router.replace("/(auth)/welcome"); } },
           ])}>
           <Ionicons name="log-out-outline" size={20} color={colors.red} />
           <Text style={styles.signOutText}>Sign Out</Text>
@@ -351,10 +399,90 @@ export default function OwnerProfile() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Change Password modal ── */}
+      <Modal visible={pwModal} transparent animationType="slide" onRequestClose={() => setPwModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={[styles.modalIconWrap, { backgroundColor: colors.cyanDim }]}>
+              <Ionicons name="key-outline" size={26} color={colors.cyan} />
+            </View>
+            <Text style={styles.modalTitle}>Change Password</Text>
+            <Text style={styles.modalSub}>Your login password (not the 4-digit PIN)</Text>
+
+            {/* Current password */}
+            <Text style={styles.inputLabel}>CURRENT PASSWORD</Text>
+            <View style={styles.pwRow}>
+              <TextInput
+                style={[styles.modalInput, { flex: 1, marginBottom: 0 }]}
+                value={currentPw}
+                onChangeText={setCurrentPw}
+                placeholder="Current password"
+                placeholderTextColor={colors.textDim}
+                secureTextEntry={!showCurrentPw}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity onPress={() => setShowCurrentPw(v => !v)} style={styles.eyeBtn}>
+                <Ionicons name={showCurrentPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* New password */}
+            <Text style={[styles.inputLabel, { marginTop: 14 }]}>NEW PASSWORD</Text>
+            <View style={styles.pwRow}>
+              <TextInput
+                style={[styles.modalInput, { flex: 1, marginBottom: 0 }]}
+                value={newPw}
+                onChangeText={setNewPw}
+                placeholder="At least 8 characters"
+                placeholderTextColor={colors.textDim}
+                secureTextEntry={!showNewPw}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity onPress={() => setShowNewPw(v => !v)} style={styles.eyeBtn}>
+                <Ionicons name={showNewPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Confirm new password */}
+            <Text style={[styles.inputLabel, { marginTop: 14 }]}>CONFIRM NEW PASSWORD</Text>
+            <View style={[styles.pwRow, { marginBottom: 4 }]}>
+              <TextInput
+                style={[styles.modalInput, {
+                  flex: 1, marginBottom: 0,
+                  borderColor: confirmPw && newPw !== confirmPw ? colors.red : colors.border,
+                }]}
+                value={confirmPw}
+                onChangeText={setConfirmPw}
+                placeholder="Repeat new password"
+                placeholderTextColor={colors.textDim}
+                secureTextEntry={!showConfirmPw}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity onPress={() => setShowConfirmPw(v => !v)} style={styles.eyeBtn}>
+                <Ionicons name={showConfirmPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {confirmPw.length > 0 && newPw !== confirmPw && (
+              <Text style={{ color: colors.red, fontSize: 11, marginBottom: 8 }}>Passwords do not match</Text>
+            )}
+
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+              <View style={{ flex: 1 }}>
+                <Button label="Cancel" variant="secondary" onPress={() => setPwModal(false)} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button label="Update" onPress={handleChangePassword} loading={changingPw} />
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-const styles = StyleSheet.create({
+const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   title: { color: colors.text, fontSize: 24, fontWeight: "800", marginBottom: 24 },
   avatarSection: { alignItems: "center", marginBottom: 32 },
@@ -422,4 +550,8 @@ const styles = StyleSheet.create({
   bankChipActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
   bankChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
   bankChipTextActive: { color: colors.cyan },
+  // Change password modal
+  modalIconWrap: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 12, borderWidth: 1, borderColor: colors.border },
+  pwRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
+  eyeBtn: { width: 48, height: 50, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
 });

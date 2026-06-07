@@ -172,8 +172,8 @@ function DriverQR() {
     } catch {}
   };
 
-  const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><circle cx="30" cy="30" r="30" fill="#00D4FF"/><text x="50%" y="56%" text-anchor="middle" font-family="Arial Black,Arial" font-weight="900" font-size="16" fill="#05050A" dy=".1em">TNR</text></svg>`;
-  const logoUri = `data:image/svg+xml;base64,${typeof btoa !== "undefined" ? btoa(logoSvg) : Buffer.from(logoSvg).toString("base64")}`;
+  // Pre-encoded base64 of the TNR SVG logo — avoids btoa/Buffer unavailability in React Native
+  const logoUri = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MCA2MCI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMzAiIGZpbGw9IiMwMEQ0RkYiLz48dGV4dCB4PSI1MCUiIHk9IjU2JSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIEJsYWNrLEFyaWFsIiBmb250LXdlaWdodD0iOTAwIiBmb250LXNpemU9IjE2IiBmaWxsPSIjMDUwNTBBIiBkeT0iLjFlbSI+VE5SPC90ZXh0Pjwvc3ZnPg==";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]} testID="driver-qr-screen">

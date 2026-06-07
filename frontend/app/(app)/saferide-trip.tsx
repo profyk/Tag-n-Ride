@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator,
+  Alert, ActivityIndicator, Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -22,6 +22,7 @@ export default function SafeRideTripScreen() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [trip, setTrip] = useState<any>(null);
   const [passengers, setPassengers] = useState<any[]>([]);
   const locationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -99,10 +100,28 @@ export default function SafeRideTripScreen() {
     } finally { setStarting(false); }
   };
 
+  const handleShareTrip = async () => {
+    if (!trip?.id || sharing) return;
+    setSharing(true);
+    try {
+      const res = await api.tripsShare({ trip_id: trip.id });
+      await Share.share({
+        message: `Track my Tag n Ride trip live 📍\n${res.share_url}`,
+        url: res.share_url,
+      });
+    } catch (e: any) {
+      if (e?.message !== "User did not share") {
+        Alert.alert("Could not generate link", e?.message || "Try again");
+      }
+    } finally {
+      setSharing(false);
+    }
+  };
+
   const handleEndTrip = () => {
     Alert.alert(
       "End Trip?",
-      "This will stop tracking and close the passenger manifest.",
+      "This will stop GPS tracking and close the passenger manifest.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "End Trip", style: "destructive", onPress: doEndTrip },
@@ -145,12 +164,11 @@ export default function SafeRideTripScreen() {
           <Text style={s.backText}>Back</Text>
         </TouchableOpacity>
 
-        <Text style={s.title}>SafeRide Trip Tracker</Text>
+        <Text style={s.title}>SafeRide Trip</Text>
 
         {loading ? (
           <ActivityIndicator color={colors.cyan} style={{ marginTop: 40 }} />
         ) : !trip ? (
-          /* ── No active trip ── */
           <View style={s.emptyWrap}>
             <View style={s.emptyIcon}>
               <Ionicons name="shield-outline" size={48} color={colors.cyan} />
@@ -170,7 +188,6 @@ export default function SafeRideTripScreen() {
             </View>
           </View>
         ) : (
-          /* ── Active trip ── */
           <>
             {/* Active banner */}
             <View style={s.activeBanner}>
@@ -179,29 +196,48 @@ export default function SafeRideTripScreen() {
               <Text style={s.activeBannerRef}>{trip.trip_reference}</Text>
             </View>
 
-            {/* Trip summary card */}
+            {/* Trip summary */}
             <View style={s.tripCard}>
               <TripRow label="STARTED" value={startedTime} colors={colors} />
               <TripRow label="PASSENGERS" value={String(trip.total_passengers || passengers.length)} colors={colors} accent={colors.cyan} />
               {trip.vehicle_plate ? <TripRow label="VEHICLE" value={trip.vehicle_plate} colors={colors} /> : null}
               {trip.total_revenue > 0 ? (
-                <TripRow label="REVENUE" value={`R${(trip.total_revenue || 0).toFixed(2)}`} colors={colors} accent={colors.green} />
+                <TripRow label="REVENUE" value={`R${(trip.total_revenue || 0).toFixed(2)}`} colors={colors} accent={colors.green} last />
               ) : null}
             </View>
 
-            {/* GPS note */}
+            {/* GPS status */}
             <View style={s.gpsRow}>
-              <Ionicons name="location-outline" size={14} color={colors.green} />
-              <Text style={s.gpsText}>GPS location updating every 30 seconds</Text>
+              <Ionicons name="locate-outline" size={14} color={colors.green} />
+              <Text style={s.gpsText}>GPS updating every 30 seconds</Text>
             </View>
 
-            {/* Passenger list */}
-            <Text style={s.section}>PASSENGERS IN THIS TRIP</Text>
+            {/* Share button */}
+            <TouchableOpacity
+              style={s.shareBtn}
+              onPress={handleShareTrip}
+              disabled={sharing}
+              activeOpacity={0.8}
+              testID="share-trip-btn">
+              {sharing ? (
+                <ActivityIndicator size="small" color={colors.cyan} />
+              ) : (
+                <Ionicons name="share-outline" size={18} color={colors.cyan} />
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={s.shareBtnTitle}>Share Live Location</Text>
+                <Text style={s.shareBtnSub}>Let family track this trip in real time</Text>
+              </View>
+              {!sharing && <Ionicons name="chevron-forward" size={16} color={colors.textDim} />}
+            </TouchableOpacity>
+
+            {/* Passengers */}
+            <Text style={s.section}>PASSENGERS</Text>
             {passengers.length === 0 ? (
               <View style={s.noPass}>
                 <Ionicons name="people-outline" size={32} color={colors.textDim} />
                 <Text style={s.noPassTitle}>No passengers yet</Text>
-                <Text style={s.noPassSub}>Passengers who pay you will appear here</Text>
+                <Text style={s.noPassSub}>Passengers who pay you appear here automatically</Text>
               </View>
             ) : (
               passengers.map((p, i) => (
@@ -238,7 +274,7 @@ export default function SafeRideTripScreen() {
               <Text style={s.refreshText}>Refresh passengers</Text>
             </TouchableOpacity>
 
-            {/* End trip button */}
+            {/* End trip */}
             <TouchableOpacity
               style={[s.endBtn, ending && { opacity: 0.6 }]}
               onPress={handleEndTrip}
@@ -260,9 +296,9 @@ export default function SafeRideTripScreen() {
   );
 }
 
-function TripRow({ label, value, colors, accent }: { label: string; value: string; colors: any; accent?: string }) {
+function TripRow({ label, value, colors, accent, last }: { label: string; value: string; colors: any; accent?: string; last?: boolean }) {
   return (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: last ? 0 : 1, borderBottomColor: colors.border }}>
       <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1 }}>{label}</Text>
       <Text style={{ color: accent || colors.text, fontSize: 14, fontWeight: "700" }}>{value}</Text>
     </View>
@@ -283,8 +319,11 @@ const makeStyles = (colors: any) => StyleSheet.create({
   activeBannerText: { color: colors.green, fontWeight: "800", fontSize: 12, letterSpacing: 1 },
   activeBannerRef: { color: colors.green + "aa", fontSize: 12, fontWeight: "600", marginLeft: "auto" },
   tripCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 14 },
-  gpsRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 20 },
+  gpsRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
   gpsText: { color: colors.textMuted, fontSize: 12 },
+  shareBtn: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.cyan + "40", padding: 14, marginBottom: 20 },
+  shareBtnTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  shareBtnSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   section: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 12 },
   noPass: { alignItems: "center", padding: 32, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
   noPassTitle: { color: colors.text, fontWeight: "700", marginTop: 10, fontSize: 15 },

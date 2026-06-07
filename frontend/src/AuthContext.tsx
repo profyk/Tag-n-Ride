@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = useCallback(
-    async (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string }) => {
+    async (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string }) => {
       const r = await api.register(body);
       await tokenStore.set(r.token);
       setState({ status: "authed", user: r.user });
