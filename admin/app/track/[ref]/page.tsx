@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 
 const API = "https://tag-n-ride-production.up.railway.app";
 const POLL_INTERVAL = 30;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 function timeAgo(isoStr: string | null | undefined): string {
   if (!isoStr) return "—";
@@ -12,13 +14,86 @@ function timeAgo(isoStr: string | null | undefined): string {
   if (diff < 10) return "just now";
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m ago`;
 }
 
 function formatTime(isoStr: string | null | undefined): string {
   if (!isoStr) return "—";
   return new Date(isoStr).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" });
 }
+
+function useDuration(startedAt: string | null | undefined): string {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const start = new Date(startedAt).getTime();
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+  if (!startedAt) return "—";
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// ── styles (inline to avoid any CSS conflicts) ────────────────────────────────
+
+const C = {
+  bg:       "#070A0F",
+  bg2:      "#0D1117",
+  bg3:      "#111820",
+  border:   "#1a2030",
+  border2:  "#222c40",
+  cyan:     "#00E5FF",
+  cyanDim:  "rgba(0,229,255,0.08)",
+  green:    "#4ade80",
+  greenDim: "rgba(74,222,128,0.08)",
+  red:      "#ff5555",
+  yellow:   "#fbbf24",
+  text:     "#f0f4ff",
+  textMut:  "#64748b",
+  textDim:  "#334155",
+};
+
+// ── sub-components ────────────────────────────────────────────────────────────
+
+function Row({ label, value, mono, last, accent }: {
+  label: string; value: string; mono?: boolean; last?: boolean; accent?: string;
+}) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      paddingBottom: last ? 0 : 12, marginBottom: last ? 0 : 12,
+      borderBottom: last ? "none" : `1px solid ${C.border}`,
+    }}>
+      <span style={{ color: C.textMut, fontSize: 12 }}>{label}</span>
+      <span style={{
+        color: accent || C.text, fontWeight: 600, fontSize: 13,
+        fontFamily: mono ? "monospace" : "inherit",
+      }}>{value}</span>
+    </div>
+  );
+}
+
+function Pill({ color, bg, label }: { color: string; bg: string; label: string }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      backgroundColor: bg, color, fontWeight: 700, fontSize: 11,
+      borderRadius: 999, padding: "4px 10px",
+      border: `1px solid ${color}40`,
+    }}>
+      {label}
+    </span>
+  );
+}
+
+// ── main page ─────────────────────────────────────────────────────────────────
 
 export default function TrackPage() {
   const params = useParams();
@@ -29,25 +104,24 @@ export default function TrackPage() {
   const [notFound, setNotFound] = useState(false);
   const [countdown, setCountdown] = useState(POLL_INTERVAL);
   const [refreshing, setRefreshing] = useState(false);
-  const [ticker, setTicker] = useState(0);
+  const [shared, setShared] = useState(false);
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cdRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (!ref) return;
     if (silent) setRefreshing(true);
+    else setLoading(true);
     try {
       const res = await fetch(`${API}/api/trips/track/${encodeURIComponent(ref)}`);
-      if (res.status === 404) { setNotFound(true); setLoading(false); setRefreshing(false); return; }
-      if (!res.ok) { setNotFound(true); setLoading(false); setRefreshing(false); return; }
+      if (!res.ok) { setNotFound(true); return; }
       const data = await res.json();
       setTrip(data);
       setNotFound(false);
-      // Stop polling once trip is completed
       if (data.status !== "active") {
-        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-        if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        if (cdRef.current) { clearInterval(cdRef.current); cdRef.current = null; }
       }
     } catch {
       setNotFound(true);
@@ -56,120 +130,188 @@ export default function TrackPage() {
       setRefreshing(false);
       setCountdown(POLL_INTERVAL);
     }
-  };
-
-  // "X ago" live updates
-  useEffect(() => {
-    const t = setInterval(() => setTicker(v => v + 1), 15000);
-    return () => clearInterval(t);
-  }, []);
+  }, [ref]);
 
   useEffect(() => {
     if (!ref) return;
     load();
-    intervalRef.current = setInterval(() => load(true), POLL_INTERVAL * 1000);
-    countdownRef.current = setInterval(() => {
-      setCountdown(c => (c <= 1 ? POLL_INTERVAL : c - 1));
-    }, 1000);
+    pollRef.current = setInterval(() => load(true), POLL_INTERVAL * 1000);
+    cdRef.current = setInterval(() => setCountdown(c => c <= 1 ? POLL_INTERVAL : c - 1), 1000);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (cdRef.current) clearInterval(cdRef.current);
     };
-  }, [ref]);
+  }, [load]);
 
+  const duration = useDuration(trip?.started_at);
   const hasLocation = trip?.last_latitude != null && trip?.last_longitude != null;
-  const mapsUrl = hasLocation
-    ? `https://maps.google.com/?q=${trip.last_latitude},${trip.last_longitude}`
-    : null;
-  const staticMapUrl = hasLocation
-    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${trip.last_latitude},${trip.last_longitude}&zoom=15&size=600x300&markers=${trip.last_latitude},${trip.last_longitude},red-pushpin`
-    : null;
-
   const isActive = trip?.status === "active";
 
-  return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#070A0F", color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+  const googleMapsUrl = hasLocation
+    ? `https://maps.google.com/?q=${trip.last_latitude},${trip.last_longitude}`
+    : null;
+  const appleMapsUrl = hasLocation
+    ? `https://maps.apple.com/?ll=${trip.last_latitude},${trip.last_longitude}&z=15`
+    : null;
+  const staticMapUrl = hasLocation
+    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${trip.last_latitude},${trip.last_longitude}&zoom=15&size=600x280&markers=${trip.last_latitude},${trip.last_longitude},red-pushpin`
+    : null;
 
-      {/* Header */}
-      <div style={{ backgroundColor: "#0D1117", borderBottom: "1px solid #1a2030", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+  const shareLink = typeof window !== "undefined" ? window.location.href : "";
+
+  const handleShare = async () => {
+    const plate = trip?.vehicle_plate ? ` (${trip.vehicle_plate})` : "";
+    const text = `🛡️ Live tracking — Tag n Ride SafeRide${plate}\n\n${shareLink}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: "SafeRide Live Tracking", text, url: shareLink }); }
+      catch { /* cancelled */ }
+    } else {
+      navigator.clipboard.writeText(text);
+      setShared(true);
+      setTimeout(() => setShared(false), 2000);
+    }
+  };
+
+  // ── render helpers ────────────────────────────────────────────────────────
+
+  const pageStyle: React.CSSProperties = {
+    minHeight: "100vh",
+    backgroundColor: C.bg,
+    color: C.text,
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    WebkitFontSmoothing: "antialiased",
+  };
+
+  const cardStyle = (accent?: string): React.CSSProperties => ({
+    backgroundColor: C.bg2,
+    border: `1px solid ${accent || C.border}`,
+    borderRadius: 16,
+    padding: "16px 18px",
+    marginBottom: 12,
+  });
+
+  return (
+    <div style={pageStyle}>
+
+      {/* ── Header ── */}
+      <div style={{
+        backgroundColor: C.bg2, borderBottom: `1px solid ${C.border}`,
+        padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+        position: "sticky", top: 0, zIndex: 10,
+        backdropFilter: "blur(12px)",
+      }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,229,255,0.12)", border: "1.5px solid rgba(0,229,255,0.35)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
-            🛡️
-          </div>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: `linear-gradient(135deg, ${C.cyanDim}, rgba(0,229,255,0.04))`,
+            border: `1.5px solid ${C.cyan}40`,
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
+          }}>🛡️</div>
           <div>
-            <div style={{ color: "#00E5FF", fontWeight: 800, fontSize: 17, letterSpacing: 0.3 }}>TAG N RIDE SafeRide</div>
-            <div style={{ color: "#444", fontSize: 11, marginTop: 1 }}>Live trip tracking</div>
+            <div style={{ color: C.cyan, fontWeight: 900, fontSize: 16, letterSpacing: 0.3 }}>
+              SafeRide
+            </div>
+            <div style={{ color: C.textDim, fontSize: 11, marginTop: 1 }}>Tag n Ride · Live Tracking</div>
           </div>
         </div>
-        {/* Live badge or completed */}
+
         {trip && (
           <div style={{
             display: "flex", alignItems: "center", gap: 6,
             padding: "6px 12px", borderRadius: 999,
-            backgroundColor: isActive ? "rgba(74,222,128,0.1)" : "rgba(100,100,100,0.1)",
-            border: `1px solid ${isActive ? "rgba(74,222,128,0.3)" : "rgba(100,100,100,0.2)"}`,
+            backgroundColor: isActive ? C.greenDim : "rgba(100,100,100,0.1)",
+            border: `1px solid ${isActive ? C.green + "40" : "#33333340"}`,
           }}>
-            <div style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: isActive ? "#4ade80" : "#555", flexShrink: 0 }} />
-            <span style={{ color: isActive ? "#4ade80" : "#666", fontWeight: 700, fontSize: 12 }}>
-              {isActive ? "LIVE" : "COMPLETED"}
+            <div style={{
+              width: 7, height: 7, borderRadius: 4,
+              backgroundColor: isActive ? C.green : "#555",
+              animation: isActive ? "pulse 2s infinite" : "none",
+            }} />
+            <span style={{ color: isActive ? C.green : "#666", fontWeight: 700, fontSize: 12 }}>
+              {isActive ? "LIVE" : "ENDED"}
             </span>
           </div>
         )}
       </div>
 
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: "20px 16px 60px" }}>
+      {/* pulse keyframe injected once */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
 
-        {/* Loading */}
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "20px 16px 80px" }}>
+
+        {/* ── Loading ── */}
         {loading && (
-          <div style={{ textAlign: "center", color: "#444", padding: "80px 0" }}>
-            <div style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
-            <div style={{ fontSize: 14 }}>Loading trip…</div>
+          <div style={{ textAlign: "center", padding: "80px 0" }}>
+            <div style={{
+              width: 40, height: 40, border: `3px solid ${C.border}`,
+              borderTop: `3px solid ${C.cyan}`, borderRadius: "50%",
+              animation: "spin 1s linear infinite", margin: "0 auto 16px",
+            }} />
+            <div style={{ color: C.textMut, fontSize: 14 }}>Loading trip…</div>
           </div>
         )}
 
-        {/* Not found */}
+        {/* ── Not found ── */}
         {!loading && notFound && (
           <div style={{ textAlign: "center", padding: "80px 0" }}>
-            <div style={{ fontSize: 44, marginBottom: 16 }}>🔍</div>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Trip not found</div>
-            <div style={{ color: "#444", fontSize: 13 }}>This tracking link may have expired or is invalid.</div>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🔍</div>
+            <div style={{ color: C.text, fontWeight: 800, fontSize: 22, marginBottom: 8 }}>Trip not found</div>
+            <div style={{ color: C.textMut, fontSize: 13, lineHeight: 1.7 }}>
+              This tracking link may have expired or is invalid.<br />
+              Active tracking links are valid for the duration of the trip.
+            </div>
           </div>
         )}
 
-        {/* Trip data */}
+        {/* ── Trip data ── */}
         {!loading && trip && (
           <>
             {/* Status card */}
             <div style={{
-              display: "flex", alignItems: "flex-start", gap: 12,
-              backgroundColor: isActive ? "rgba(74,222,128,0.06)" : "rgba(100,100,100,0.06)",
-              border: `1px solid ${isActive ? "rgba(74,222,128,0.2)" : "rgba(100,100,100,0.15)"}`,
-              borderRadius: 14, padding: "14px 16px", marginBottom: 16,
+              ...cardStyle(isActive ? C.green + "30" : C.border),
+              background: isActive ? `linear-gradient(135deg, rgba(74,222,128,0.05), ${C.bg2})` : C.bg2,
             }}>
-              <div style={{ fontSize: 24, marginTop: 1 }}>{isActive ? "🚌" : "✅"}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: isActive ? "#4ade80" : "#aaa", fontWeight: 700, fontSize: 14 }}>
-                  {isActive ? "Trip is active — your family member is on the road" : "This trip has been completed"}
-                </div>
-                {trip.started_at && (
-                  <div style={{ color: "#555", fontSize: 12, marginTop: 4 }}>
-                    Started at {formatTime(trip.started_at)}
-                    {trip.ended_at && ` · Ended at ${formatTime(trip.ended_at)}`}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 32 }}>{isActive ? "🚌" : "✅"}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: isActive ? C.green : "#aaa", fontWeight: 800, fontSize: 15 }}>
+                    {isActive
+                      ? "Your person is on the road"
+                      : "Trip has been completed safely"}
                   </div>
-                )}
+                  <div style={{ color: C.textMut, fontSize: 12, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    {trip.started_at && (
+                      <span>Started {formatTime(trip.started_at)}</span>
+                    )}
+                    {trip.ended_at && (
+                      <span>Ended {formatTime(trip.ended_at)}</span>
+                    )}
+                    {isActive && trip.started_at && (
+                      <span style={{ color: C.cyan, fontWeight: 700 }}>⏱ {duration}</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Vehicle & driver info */}
-            <div style={{ backgroundColor: "#0D1117", border: "1px solid #1a2030", borderRadius: 14, padding: "16px 18px", marginBottom: 16 }}>
-              <InfoRow label="Vehicle" value={trip.vehicle_plate || "—"} mono />
-              <InfoRow label="Driver" value={trip.driver_name || "—"} />
-              <InfoRow label="Passengers in vehicle" value={String(trip.passenger_count ?? 0)} />
-              {trip.last_location_update && (
-                <InfoRow
+            {/* Vehicle + driver */}
+            <div style={cardStyle()}>
+              <Row label="Vehicle" value={trip.vehicle_plate || "Not recorded"} mono accent={C.cyan} />
+              <Row label="Driver" value={trip.driver_name || "—"} />
+              <Row label="Passengers in vehicle" value={String(trip.passenger_count ?? 0)} />
+              {hasLocation && (
+                <Row
                   label="Location updated"
-                  value={`${timeAgo(trip.last_location_update)}`}
-                  valueColor={isActive ? "#4ade80" : "#666"}
+                  value={timeAgo(trip.last_location_update)}
+                  accent={isActive ? C.green : C.textMut}
                   last
                 />
               )}
@@ -177,61 +319,142 @@ export default function TrackPage() {
 
             {/* Map / Location */}
             {hasLocation ? (
-              <div style={{ backgroundColor: "#0D1117", border: "1px solid #1a2030", borderRadius: 14, overflow: "hidden", marginBottom: 16 }}>
+              <div style={{ ...cardStyle(), padding: 0, overflow: "hidden" }}>
                 {staticMapUrl && (
-                  <img
-                    src={staticMapUrl}
-                    alt="Trip location"
-                    style={{ width: "100%", display: "block", maxHeight: 240, objectFit: "cover" }}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                )}
-                <div style={{ padding: "14px 16px" }}>
-                  <div style={{ color: "#555", fontSize: 11, marginBottom: 10, fontFamily: "monospace" }}>
-                    📍 {trip.last_latitude?.toFixed(5)}, {trip.last_longitude?.toFixed(5)}
-                    {trip.last_location_update && (
-                      <span style={{ color: "#333", marginLeft: 8 }}>· {timeAgo(trip.last_location_update)}</span>
+                  <div style={{ position: "relative" }}>
+                    <img
+                      src={staticMapUrl}
+                      alt="Trip location map"
+                      style={{ width: "100%", display: "block", maxHeight: 260, objectFit: "cover" }}
+                      onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                    />
+                    {isActive && (
+                      <div style={{
+                        position: "absolute", top: 10, right: 10,
+                        backgroundColor: C.bg2 + "ee", border: `1px solid ${C.green}40`,
+                        borderRadius: 8, padding: "4px 10px",
+                        color: C.green, fontSize: 11, fontWeight: 700,
+                        display: "flex", alignItems: "center", gap: 5,
+                      }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.green, animation: "pulse 2s infinite" }} />
+                        LIVE
+                      </div>
                     )}
                   </div>
-                  <a
-                    href={mapsUrl!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 8,
-                      backgroundColor: "#00E5FF", color: "#000",
-                      fontWeight: 800, fontSize: 14, textDecoration: "none",
-                      borderRadius: 10, padding: "10px 20px",
-                    }}>
-                    🗺️ Open in Google Maps
-                  </a>
+                )}
+                <div style={{ padding: "14px 18px" }}>
+                  <div style={{ color: C.textDim, fontSize: 11, fontFamily: "monospace", marginBottom: 12 }}>
+                    📍 {trip.last_latitude?.toFixed(5)}, {trip.last_longitude?.toFixed(5)}
+                    <span style={{ marginLeft: 8, color: C.textDim }}>· {timeAgo(trip.last_location_update)}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <a href={googleMapsUrl!} target="_blank" rel="noopener noreferrer" style={{
+                      display: "inline-flex", alignItems: "center", gap: 7,
+                      backgroundColor: C.cyan, color: "#000",
+                      fontWeight: 800, fontSize: 13, textDecoration: "none",
+                      borderRadius: 10, padding: "10px 18px",
+                    }}>🗺️ Google Maps</a>
+                    <a href={appleMapsUrl!} target="_blank" rel="noopener noreferrer" style={{
+                      display: "inline-flex", alignItems: "center", gap: 7,
+                      backgroundColor: C.bg3, color: C.text,
+                      border: `1px solid ${C.border2}`,
+                      fontWeight: 700, fontSize: 13, textDecoration: "none",
+                      borderRadius: 10, padding: "10px 18px",
+                    }}> Maps</a>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div style={{ backgroundColor: "#0D1117", border: "1px solid #1a2030", borderRadius: 14, padding: "24px 18px", marginBottom: 16, textAlign: "center" }}>
-                <div style={{ fontSize: 24, marginBottom: 8 }}>📡</div>
-                <div style={{ color: "#555", fontSize: 14, fontWeight: 600 }}>Waiting for location</div>
-                <div style={{ color: "#333", fontSize: 12, marginTop: 6 }}>GPS location will appear here as the driver moves</div>
+              <div style={{ ...cardStyle(), textAlign: "center", padding: "28px 18px" }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>📡</div>
+                <div style={{ color: C.textMut, fontWeight: 700, fontSize: 14 }}>Waiting for GPS location</div>
+                <div style={{ color: C.textDim, fontSize: 12, marginTop: 6 }}>
+                  Location will appear once the driver's device sends a GPS ping
+                </div>
               </div>
             )}
 
-            {/* Safety note */}
-            <div style={{ backgroundColor: "rgba(10,26,15,0.8)", border: "1px solid rgba(74,222,128,0.12)", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-              <div style={{ color: "#4ade80", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>🛡️ Tracked by Tag n Ride SafeRide</div>
-              <div style={{ color: "#555", fontSize: 12, lineHeight: 1.8 }}>
-                Emergency: <strong style={{ color: "#ff5555" }}>10111</strong> Police · <strong style={{ color: "#ff5555" }}>10177</strong> Ambulance<br />
-                Support: <strong style={{ color: "#666" }}>support@tagnride.com</strong>
+            {/* Share this link */}
+            {isActive && (
+              <div style={cardStyle()}>
+                <div style={{ color: C.text, fontWeight: 700, fontSize: 13, marginBottom: 10 }}>
+                  📤 Share this tracking link
+                </div>
+                <div style={{
+                  backgroundColor: C.bg3, border: `1px solid ${C.border2}`,
+                  borderRadius: 10, padding: "10px 12px",
+                  color: C.textMut, fontSize: 11, fontFamily: "monospace",
+                  wordBreak: "break-all", marginBottom: 12,
+                }}>
+                  {shareLink}
+                </div>
+                <button
+                  onClick={handleShare}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 8,
+                    backgroundColor: shared ? C.green + "20" : C.cyanDim,
+                    color: shared ? C.green : C.cyan,
+                    border: `1px solid ${shared ? C.green + "40" : C.cyan + "40"}`,
+                    borderRadius: 10, padding: "10px 18px",
+                    fontWeight: 700, fontSize: 13, cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}>
+                  {shared ? "✓ Copied!" : "Copy & Share"}
+                </button>
+              </div>
+            )}
+
+            {/* Emergency & safety */}
+            <div style={{
+              ...cardStyle(C.red + "20"),
+              background: `linear-gradient(135deg, rgba(255,85,85,0.04), ${C.bg2})`,
+            }}>
+              <div style={{ color: C.red, fontWeight: 800, fontSize: 13, marginBottom: 10 }}>
+                🚨 Emergency Numbers (South Africa)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {[
+                  { label: "Police",      number: "10111" },
+                  { label: "Ambulance",   number: "10177" },
+                  { label: "Crime Line",  number: "08600 10111" },
+                  { label: "ER24",        number: "084 124" },
+                ].map(e => (
+                  <a key={e.label} href={`tel:${e.number.replace(/\s/g, "")}`} style={{
+                    display: "flex", flexDirection: "column",
+                    backgroundColor: C.bg3, border: `1px solid ${C.border2}`,
+                    borderRadius: 10, padding: "10px 12px", textDecoration: "none",
+                  }}>
+                    <span style={{ color: C.textMut, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{e.label}</span>
+                    <span style={{ color: C.red, fontWeight: 900, fontSize: 16, fontFamily: "monospace", marginTop: 3 }}>{e.number}</span>
+                  </a>
+                ))}
+              </div>
+              <div style={{ marginTop: 12, color: C.textDim, fontSize: 11, lineHeight: 1.6 }}>
+                Tag n Ride Support: <a href="mailto:support@tagnride.co.za" style={{ color: C.textMut, textDecoration: "underline" }}>support@tagnride.co.za</a>
               </div>
             </div>
 
-            {/* Auto-refresh footer (active trips only) */}
+            {/* SafeRide footer */}
+            <div style={{ ...cardStyle(), background: `linear-gradient(135deg, rgba(0,229,255,0.03), ${C.bg2})` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 22 }}>🛡️</span>
+                <div>
+                  <div style={{ color: C.cyan, fontWeight: 800, fontSize: 13 }}>Powered by Tag n Ride SafeRide</div>
+                  <div style={{ color: C.textDim, fontSize: 11, marginTop: 2 }}>
+                    Your safety is our priority. This link updates every {POLL_INTERVAL} seconds.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Auto-refresh footer */}
             {isActive && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <div style={{ textAlign: "center", marginTop: 8 }}>
                 {refreshing ? (
-                  <span style={{ color: "#4ade80", fontSize: 12, fontWeight: 600 }}>↻ Refreshing…</span>
+                  <span style={{ color: C.cyan, fontSize: 12, fontWeight: 600 }}>↻ Updating location…</span>
                 ) : (
-                  <span style={{ color: "#333", fontSize: 12 }}>
-                    Next update in <span style={{ color: "#555", fontWeight: 700 }}>{countdown}s</span>
+                  <span style={{ color: C.textDim, fontSize: 12 }}>
+                    Next update in <span style={{ color: C.textMut, fontWeight: 700 }}>{countdown}s</span>
                   </span>
                 )}
               </div>
@@ -239,24 +462,6 @@ export default function TrackPage() {
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value, mono, last, valueColor }: {
-  label: string; value: string; mono?: boolean; last?: boolean; valueColor?: string;
-}) {
-  return (
-    <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      paddingBottom: last ? 0 : 12, marginBottom: last ? 0 : 12,
-      borderBottom: last ? "none" : "1px solid #141c28",
-    }}>
-      <span style={{ color: "#444", fontSize: 12 }}>{label}</span>
-      <span style={{
-        color: valueColor || "#fff", fontWeight: 600, fontSize: 14,
-        fontFamily: mono ? "monospace" : "inherit",
-      }}>{value}</span>
     </div>
   );
 }
