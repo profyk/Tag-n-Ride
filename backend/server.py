@@ -73,7 +73,7 @@ PLATFORM_FEE_PERCENT = 3.0
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT", "").lower() in ("production", "prod") or \
              os.getenv("ENV", "").lower() in ("production", "prod")
-TRACK_BASE_URL = os.getenv("TRACK_BASE_URL", "https://tag-n-ride-production.up.railway.app")
+TRACK_BASE_URL = os.getenv("TRACK_BASE_URL", "https://tag-n-ride-admin.vercel.app")
 
 pool: asyncpg.Pool = None
 
