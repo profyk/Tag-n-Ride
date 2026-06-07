@@ -6,6 +6,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import { api } from "../../src/api";
 import { formatZAR, radius } from "../../src/theme";
 import { useTheme } from "../../src/ThemeContext";
@@ -14,6 +16,76 @@ const MONTHS = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",
 ];
+
+export function buildPassengerStatementPDF(d: any, reference: string): string {
+  const genDate = new Date().toLocaleDateString("en-ZA");
+  const tripsHtml = d.trips.length > 0
+    ? `<div class="section">
+  <div class="section-title">Trips (${d.trips.length})</div>
+  ${d.trips.map((t: any) =>
+    `<div class="trip-row"><span>${t.driver || "Driver"} &nbsp;·&nbsp; ${(t.date || "").slice(0, 10)}</span><span class="red">R ${parseFloat(t.amount).toFixed(2)}</span></div>`
+  ).join("")}
+</div>` : "";
+  const topupsHtml = d.topups.length > 0
+    ? `<div class="section">
+  <div class="section-title">Top-Ups (${d.topups.length})</div>
+  ${d.topups.map((t: any) =>
+    `<div class="trip-row"><span>Wallet Top-Up &nbsp;·&nbsp; ${(t.date || "").slice(0, 10)}</span><span class="green">+R ${parseFloat(t.amount).toFixed(2)}</span></div>`
+  ).join("")}
+</div>` : "";
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; padding: 32px; }
+  .header { text-align: center; padding-bottom: 20px; border-bottom: 3px solid #00D4FF; margin-bottom: 24px; }
+  .brand { font-size: 28px; font-weight: 900; color: #00D4FF; letter-spacing: 2px; }
+  .doc-title { font-size: 14px; font-weight: 700; color: #444; margin-top: 6px; letter-spacing: 1px; }
+  .doc-meta { color: #888; font-size: 11px; margin-top: 6px; }
+  .section { background: #f5f5f5; border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+  .section-title { font-size: 11px; font-weight: 800; letter-spacing: 1.2px; color: #888; text-transform: uppercase; margin-bottom: 10px; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #e5e5e5; }
+  .row:last-child { border-bottom: none; }
+  .label { color: #555; }
+  .value { font-weight: 700; }
+  .green { color: #22c55e; }
+  .red { color: #e53e3e; }
+  .trip-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #e5e5e5; font-size: 11px; }
+  .trip-row:last-child { border-bottom: none; }
+  .footer { text-align: center; color: #aaa; font-size: 10px; border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 8px; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand">TAG N RIDE</div>
+  <div class="doc-title">PASSENGER EXPENSE STATEMENT</div>
+  <div class="doc-meta">${d.period_start} to ${d.period_end} &nbsp;·&nbsp; Generated ${genDate}</div>
+  ${reference ? `<div class="doc-meta">Ref: ${reference}</div>` : ""}
+</div>
+<div class="section">
+  <div class="section-title">Passenger Information</div>
+  <div class="row"><span class="label">Name</span><span class="value">${d.passenger_name ?? ""}</span></div>
+  <div class="row"><span class="label">Statement Period</span><span class="value">${d.period_start} to ${d.period_end}</span></div>
+</div>
+<div class="section">
+  <div class="section-title">Summary</div>
+  <div class="row"><span class="label">Total Rides</span><span class="value">${d.summary.total_trips}</span></div>
+  <div class="row"><span class="label">Total Spent on Rides</span><span class="value red">R ${Number(d.summary.total_spent).toFixed(2)}</span></div>
+  <div class="row"><span class="label">Total Wallet Top-Ups</span><span class="value green">R ${Number(d.summary.total_topups).toFixed(2)}</span></div>
+  <div class="row"><span class="label">Average Trip Cost</span><span class="value">R ${Number(d.summary.average_trip).toFixed(2)}</span></div>
+</div>
+${tripsHtml}
+${topupsHtml}
+<div class="footer">
+  <strong>Tag n Ride Pty Ltd</strong><br />
+  Pretoria, Gauteng, South Africa &nbsp;·&nbsp; support@tagnride.com<br />
+  This document is issued by Tag n Ride Pty Ltd for personal record keeping.
+</div>
+</body>
+</html>`;
+}
 
 function Row({ label, value, bold, green, colors, s }: any) {
   return (
@@ -45,6 +117,7 @@ export default function PassengerStatementScreen() {
   const [pricing, setPricing]         = useState<{ enabled: boolean; price: number } | null>(null);
   const [walletBalance, setWalletBalance] = useState(0);
   const [loadingPricing, setLoadingPricing] = useState(true);
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   const loadPricing = useCallback(async () => {
     setLoadingPricing(true);
@@ -120,6 +193,25 @@ export default function PassengerStatementScreen() {
         },
       ]
     );
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!data) return;
+    setDownloadingPDF(true);
+    try {
+      const html = buildPassengerStatementPDF(data, stmtRef);
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      const safePeriod = `${data.period_start}-${data.period_end}`.replace(/[^a-zA-Z0-9-]/g, "-");
+      await Sharing.shareAsync(uri, {
+        mimeType: "application/pdf",
+        dialogTitle: `TagNRide-Expense-Statement-${safePeriod}.pdf`,
+        UTI: "com.adobe.pdf",
+      });
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not generate PDF.");
+    } finally {
+      setDownloadingPDF(false);
+    }
   };
 
   const s = makeStyles(colors);
@@ -260,9 +352,31 @@ export default function PassengerStatementScreen() {
               </View>
             )}
 
-            <TouchableOpacity style={s.newBtn} onPress={() => { setData(null); loadPricing(); }}>
-              <Text style={s.newBtnText}>Generate Another Statement</Text>
-            </TouchableOpacity>
+            <View style={{ gap: 10, marginTop: 24 }}>
+              <TouchableOpacity
+                style={[s.dlBtn, downloadingPDF && { opacity: 0.6 }]}
+                onPress={handleDownloadPDF}
+                disabled={downloadingPDF}
+              >
+                {downloadingPDF
+                  ? <ActivityIndicator color={colors.bg} />
+                  : <>
+                      <Ionicons name="download-outline" size={18} color={colors.bg} />
+                      <Text style={s.dlBtnText}>Download PDF</Text>
+                    </>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.dlBtn, { backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border }]}
+                onPress={() => router.push("/(app)/documents")}
+              >
+                <Ionicons name="folder-outline" size={18} color={colors.cyan} />
+                <Text style={[s.dlBtnText, { color: colors.cyan }]}>View in My Documents</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.newBtn} onPress={() => { setData(null); loadPricing(); }}>
+                <Text style={s.newBtnText}>Generate Another Statement</Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
       </ScrollView>

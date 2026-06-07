@@ -104,6 +104,7 @@ export default function Home() {
   const [payOutModal, setPayOutModal] = useState(false);
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
+  const [trackMeLoading, setTrackMeLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -418,6 +419,31 @@ export default function Home() {
     }
   };
 
+  const handleTrackMe = async () => {
+    if (!passengerTrip) {
+      Alert.alert(
+        "Not in a trip yet",
+        "Track Me is available once you're in an active taxi ride.\n\nPay your fare and board a taxi — a live tracking link will be ready for you to share with family.",
+        [{ text: "Got it" }]
+      );
+      return;
+    }
+    setTrackMeLoading(true);
+    try {
+      const res = await api.tripsShare({ trip_id: passengerTrip.id });
+      await Share.share({
+        message: `🛡️ I'm in a Tag n Ride taxi right now. Track me live for my safety:\n\n${res.share_url}${passengerTrip.vehicle_plate ? `\n\nVehicle: ${passengerTrip.vehicle_plate}` : ""}\n\nThis link updates every 30 seconds with my real-time location.`,
+        url: res.share_url,
+      });
+    } catch (e: any) {
+      if (e?.message !== "User did not share") {
+        Alert.alert("Could not share", e?.message || "Please try again.");
+      }
+    } finally {
+      setTrackMeLoading(false);
+    }
+  };
+
   const s = makeStyles(colors);
   const breakdown = isDriver && wallet ? computeTodayBreakdown(allTxns, wallet.today_gross, wallet.today_platform_fee) : null;
 
@@ -624,11 +650,50 @@ export default function Home() {
             </View>
           </>
         ) : (
-          <View style={s.qaRow}>
-            <QA icon="scan" label="Scan & Pay" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-scan" />
-            <QA icon="add-circle-outline" label="Top Up" tone="green" colors={colors} onPress={() => router.push("/topup")} testID="qa-topup" />
-            <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
-          </View>
+          <>
+            <View style={s.qaRow}>
+              <QA icon="scan" label="Scan & Pay" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-scan" />
+              <QA icon="add-circle-outline" label="Top Up" tone="green" colors={colors} onPress={() => router.push("/topup")} testID="qa-topup" />
+              <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+            </View>
+            {/* Track Me — safety quick action */}
+            <TouchableOpacity
+              testID="qa-trackme"
+              onPress={handleTrackMe}
+              activeOpacity={0.85}
+              disabled={trackMeLoading}
+              style={[
+                s.trackMeBtn,
+                passengerTrip
+                  ? { borderColor: "#00E5FF50", backgroundColor: "rgba(0,229,255,0.05)" }
+                  : { borderColor: colors.border, backgroundColor: colors.bg2 },
+              ]}>
+              <View style={[
+                s.trackMeIconWrap,
+                { backgroundColor: passengerTrip ? "rgba(0,229,255,0.14)" : "rgba(128,128,128,0.1)" },
+              ]}>
+                {trackMeLoading
+                  ? <ActivityIndicator size="small" color="#00E5FF" />
+                  : <Ionicons name="navigate" size={22} color={passengerTrip ? "#00E5FF" : colors.textMuted} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: passengerTrip ? "#00E5FF" : colors.text, fontWeight: "700", fontSize: 14 }}>
+                  Track Me
+                </Text>
+                <Text style={{ color: passengerTrip ? "#00E5FF90" : colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                  {passengerTrip ? "Send live location link to family" : "Share your location when in a taxi"}
+                </Text>
+              </View>
+              {passengerTrip ? (
+                <View style={s.trackMeLiveBadge}>
+                  <View style={s.trackMeLiveDot} />
+                  <Text style={s.trackMeLiveText}>LIVE</Text>
+                </View>
+              ) : (
+                <Ionicons name="share-social-outline" size={18} color={colors.textDim} />
+              )}
+            </TouchableOpacity>
+          </>
         )}
 
         {/* Recent transactions */}
@@ -1086,4 +1151,9 @@ const makeStyles = (colors: any) => StyleSheet.create({
   safetyBanner: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFD60A15", borderRadius: 10, borderWidth: 1, borderColor: "#FFD60A40", padding: 12, marginBottom: 16 },
   safetyBannerTitle: { color: "#FFD60A", fontWeight: "700", fontSize: 13 },
   safetyBannerSub: { color: "#FFD60Aaa", fontSize: 11, marginTop: 1 },
+  trackMeBtn: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 12, paddingVertical: 16, paddingHorizontal: 18, borderRadius: radius.md, borderWidth: 1.5 },
+  trackMeIconWrap: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
+  trackMeLiveBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(74,222,128,0.12)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(74,222,128,0.25)" },
+  trackMeLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#4ade80" },
+  trackMeLiveText: { color: "#4ade80", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
 });

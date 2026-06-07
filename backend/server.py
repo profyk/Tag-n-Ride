@@ -10809,6 +10809,18 @@ async def owner_request_statement(body: StatementRequestIn, user: dict = Depends
                 VALUES ($1,$2,$3,'owner',$4,$5,$6,'paid',$7,$8)
             """, stmt_id, ref, user["id"], body.period_start, body.period_end,
                 price, txn_id, _json.dumps(stmt_data))
+            await conn.execute(
+                """INSERT INTO user_documents
+                   (id,user_id,document_type,title,description,period_label,amount,reference_number,source,is_read,metadata)
+                   VALUES (gen_random_uuid()::text,$1,'statement',$2,$3,$4,$5,$6,'app',false,$7::jsonb)""",
+                user["id"],
+                f"Fleet Statement – {body.period_start[:7]}",
+                f"Your fleet earnings breakdown for {body.period_start} to {body.period_end}.",
+                f"{body.period_start} to {body.period_end}",
+                price,
+                ref,
+                _json.dumps({"statement_id": stmt_id, "statement_type": "owner"})
+            )
     return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
 
 @api.get("/owner/statement/{statement_id}")
@@ -10897,6 +10909,18 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
                 VALUES ($1,$2,$3,'passenger',$4,$5,$6,'paid',$7,$8)
             """, stmt_id, ref, user["id"], body.period_start, body.period_end,
                 price, txn_id, _json.dumps(stmt_data))
+            await conn.execute(
+                """INSERT INTO user_documents
+                   (id,user_id,document_type,title,description,period_label,amount,reference_number,source,is_read,metadata)
+                   VALUES (gen_random_uuid()::text,$1,'statement',$2,$3,$4,$5,$6,'app',false,$7::jsonb)""",
+                user["id"],
+                f"Expense Statement – {body.period_start[:7]}",
+                f"Your ride expense breakdown for {body.period_start} to {body.period_end}.",
+                f"{body.period_start} to {body.period_end}",
+                price,
+                ref,
+                _json.dumps({"statement_id": stmt_id, "statement_type": "passenger"})
+            )
     return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
 
 @api.get("/passenger/statement/{statement_id}")

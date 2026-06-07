@@ -15,6 +15,7 @@ import { formatDate, radius } from "../../src/theme";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { buildStatementPDF, buildFormalPayslipPDF } from "./payslip";
+import { buildPassengerStatementPDF } from "./statement";
 
 type FilterTab = "all" | "payslips" | "statements" | "financial" | "identity" | "notices";
 
@@ -156,17 +157,30 @@ export default function DocumentsScreen() {
     setDownloading(doc.id);
     try {
       const meta = doc.metadata || {};
-      // Fall back to doc.id if metadata.payslip_id wasn't stored by backend
-      const payslipId = meta.payslip_id ?? doc.id;
-      const data = await api.payslipGet(payslipId);
-      const isPayslip = (data.document_type ?? doc.document_type) === "payslip";
-      const html = isPayslip ? buildFormalPayslipPDF(data) : buildStatementPDF(data);
+      let html = "";
+      let fileName = "TagNRide-Document.pdf";
+
+      if (meta.statement_type === "passenger") {
+        // Passenger expense statement
+        const res = await api.getPassengerStatement(meta.statement_id ?? doc.id);
+        const stmtData = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
+        html = buildPassengerStatementPDF(stmtData, res.reference);
+        const safePeriod = (doc.period_label || res.reference || "Statement").replace(/[^a-zA-Z0-9]/g, "-");
+        fileName = `TagNRide-Expense-Statement-${safePeriod}.pdf`;
+      } else {
+        // Driver earnings statement or formal payslip
+        const payslipId = meta.payslip_id ?? doc.id;
+        const data = await api.payslipGet(payslipId);
+        const isPayslip = (data.document_type ?? doc.document_type) === "payslip";
+        html = isPayslip ? buildFormalPayslipPDF(data) : buildStatementPDF(data);
+        const safePeriod = (data.period_label || "Doc").replace(/[^a-zA-Z0-9]/g, "-");
+        const safeName = (data.driver_name || "Driver").replace(/[^a-zA-Z0-9]/g, "-");
+        fileName = isPayslip
+          ? `TagNRide-Payslip-${safePeriod}-${safeName}.pdf`
+          : `TagNRide-Statement-${safePeriod}.pdf`;
+      }
+
       const { uri } = await Print.printToFileAsync({ html, base64: false });
-      const safePeriod = (data.period_label || "Doc").replace(/[^a-zA-Z0-9]/g, "-");
-      const safeName = (data.driver_name || "Driver").replace(/[^a-zA-Z0-9]/g, "-");
-      const fileName = isPayslip
-        ? `TagNRide-Payslip-${safePeriod}-${safeName}.pdf`
-        : `TagNRide-Statement-${safePeriod}.pdf`;
       await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: fileName, UTI: "com.adobe.pdf" });
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Could not generate PDF.");
@@ -179,7 +193,7 @@ export default function DocumentsScreen() {
   const TABS: { key: FilterTab; label: string; driver?: boolean }[] = [
     { key: "all", label: "All" },
     { key: "payslips", label: "Payslips", driver: true },
-    { key: "statements", label: "Statements", driver: true },
+    { key: "statements", label: "Statements" },
     { key: "financial", label: "Financial" },
     { key: "identity", label: "Identity" },
     { key: "notices", label: "Notices" },

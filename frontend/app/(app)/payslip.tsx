@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator,
+  Alert, ActivityIndicator, Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -496,6 +496,17 @@ export default function PayslipScreen() {
     } finally { setDownloadingId(null); }
   };
 
+  const handleShare = async (item: any) => {
+    if (item.document_type === "payslip" && item.reference_number) {
+      const url = `https://tagnride.com/verify?ref=${encodeURIComponent(item.reference_number)}`;
+      try {
+        await Share.share({ message: `View my payslip: ${url}`, url });
+      } catch {}
+    } else {
+      handleDownload(item);
+    }
+  };
+
   const handleDelete = (id: string, label: string) => {
     Alert.alert(
       "Remove Document?",
@@ -798,8 +809,7 @@ export default function PayslipScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[s.actionBtn, { backgroundColor: colors.bg, borderColor: colors.border }]}
-                    onPress={() => handleDownload(item)}
-                    disabled={downloadingId === item.id}
+                    onPress={() => handleShare(item)}
                   >
                     <Ionicons name="share-outline" size={14} color={colors.textMuted} />
                     <Text style={[s.actionBtnText, { color: colors.textMuted }]}>Share</Text>
