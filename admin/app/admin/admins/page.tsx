@@ -2,9 +2,8 @@
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select, Card } from "@/components/ui";
-import { api, AdminUser } from "@/lib/api";
+import { api, AdminUser, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
-import { isSuperAdmin } from "@/lib/api";
 import { PlusCircle, Trash2, ShieldOff, ShieldCheck, LogOut, Edit2, Key, Clock, Activity } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";

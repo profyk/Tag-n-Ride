@@ -10,9 +10,9 @@ import {
   AlertTriangle, TrendingUp, Activity, Settings,
   UserCheck, Users2, Truck, Scale, MapPin, BookOpen,
   Terminal, Sun, Moon, FlaskConical, RefreshCw,
-  DollarSign, Lock, RotateCcw, PieChart, Banknote,
+  DollarSign, RotateCcw, PieChart, Banknote,
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
-  Zap, Globe, Star, ToggleRight, Key, MessageCircle,
+  Zap, Globe, Star, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu,
 } from "lucide-react";
@@ -174,16 +174,12 @@ const HR_NAV: NavItem[] = [
 ];
 
 const SUPERADMIN_NAV: NavItem[] = [
-  { label: "Admin Accounts", href: "/admin/admins",        icon: Shield },
-  { label: "Roles & Perms",  href: "/admin/roles",         icon: Lock },
-  { label: "Sessions",       href: "/admin/sessions",      icon: Monitor },
-  { label: "Settings",       href: "/admin/settings",      icon: Settings },
-  { label: "System Console", href: "/admin/console",       icon: Terminal },
-  { label: "Database",       href: "/admin/database",      icon: Database },
-  { label: "Superadmin",     href: "/admin/superadmin",    icon: ShieldCheck },
-  { label: "Test Users",     href: "/admin/test-users",    icon: FlaskConical },
-  { label: "Feature Flags",  href: "/admin/feature-flags", icon: ToggleRight },
-  { label: "API Keys",       href: "/admin/api-keys",      icon: Key },
+  { label: "Admin Accounts",      href: "/admin/admins",     icon: Shield },
+  { label: "Settings & Security", href: "/admin/settings",   icon: Settings },
+  { label: "System Console",      href: "/admin/console",    icon: Terminal },
+  { label: "Database",            href: "/admin/database",   icon: Database },
+  { label: "Superadmin",          href: "/admin/superadmin", icon: ShieldCheck },
+  { label: "Test Users",          href: "/admin/test-users", icon: FlaskConical },
 ];
 
 // ── ThemeToggle ───────────────────────────────────────────────────────────────
