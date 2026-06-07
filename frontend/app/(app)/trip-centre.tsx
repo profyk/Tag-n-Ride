@@ -2,7 +2,7 @@ import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity,
   RefreshControl, ActivityIndicator, Alert, Share,
-  StyleSheet, Modal,
+  StyleSheet, Modal, Clipboard,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,12 +13,9 @@ import { useTheme } from "../../src/ThemeContext";
 import { api, Wallet, Txn } from "../../src/api";
 import { formatZAR, formatDate, radius } from "../../src/theme";
 
-// Platform-specific: .native.ts exports real maps, .web.ts exports null stubs
 import { MapView, Marker, Polyline } from "../../src/MapComponents";
 
-function todayStr() {
-  return new Date().toDateString();
-}
+function todayStr() { return new Date().toDateString(); }
 
 function computeTodayBreakdown(txns: Txn[], walletGross?: number, walletFee?: number) {
   const payments = txns.filter(
@@ -40,6 +37,17 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+function liveDuration(startedAt: string | null | undefined): string {
+  if (!startedAt) return "—";
+  const seconds = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+  if (seconds < 0) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function TripCentre() {
   const router = useRouter();
   const { state } = useAuth();
@@ -58,33 +66,39 @@ export default function TripCentre() {
   const [doneModal, setDoneModal] = useState(false);
   const [tripSummary, setTripSummary] = useState<any>(null);
   const [expandedTrip, setExpandedTrip] = useState<string | null>(null);
-  const [ticker, setTicker] = useState(0);
+
+  // New modals
+  const [infoModal, setInfoModal] = useState(false);
+  const [endConfirmModal, setEndConfirmModal] = useState(false);
+
+  // Live timer
+  const [tick, setTick] = useState(0);
 
   // GPS tracking
   const locationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const passengerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
   const [currentLoc, setCurrentLoc] = useState<{ latitude: number; longitude: number; speed?: number } | null>(null);
   const [lastLocUpdate, setLastLocUpdate] = useState<Date | null>(null);
   const [refreshingPassengers, setRefreshingPassengers] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  // Taxi info fields
+  // Taxi info
   const [cashPassengers, setCashPassengers] = useState(0);
   const [taxiCapacity, setTaxiCapacity] = useState(0);
   const [savingDetails, setSavingDetails] = useState(false);
 
-  // Redirect non-drivers immediately
   useEffect(() => {
     if (state.status === "authed" && state.user.role !== "driver") {
       router.replace("/(app)/");
     }
   }, [state.status]);
 
-  // Tick for "X ago" live update
+  // Live timer tick
   useEffect(() => {
-    const t = setInterval(() => setTicker(v => v + 1), 30000);
-    return () => clearInterval(t);
+    timerRef.current = setInterval(() => setTick(v => v + 1), 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
   const load = useCallback(async () => {
@@ -112,15 +126,14 @@ export default function TripCentre() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Start GPS tracking when trip becomes active
   useEffect(() => {
     if (trip?.id) {
       startTracking(trip.id);
-      // Refresh passengers every 60s
       passengerTimerRef.current = setInterval(async () => {
         try {
           const res = await api.tripsActive();
           setPassengers(res.passengers || []);
+          if (res.trip) setTrip((prev: any) => ({ ...prev, total_revenue: res.trip.total_revenue, total_passengers: res.trip.total_passengers }));
         } catch {}
       }, 60000);
     } else {
@@ -176,8 +189,7 @@ export default function TripCentre() {
               if (res.status === "granted") {
                 try {
                   const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                  lat = loc.coords.latitude;
-                  lng = loc.coords.longitude;
+                  lat = loc.coords.latitude; lng = loc.coords.longitude;
                   setCurrentLoc({ latitude: lat, longitude: lng });
                   setRouteCoords([{ latitude: lat, longitude: lng }]);
                 } catch {}
@@ -197,7 +209,7 @@ export default function TripCentre() {
       setCashPassengers(res.cash_passengers ?? 0);
       setTaxiCapacity(res.taxi_capacity ?? 0);
     } catch (e: any) {
-      Alert.alert("Failed to start", e?.message || "Could not start trip");
+      Alert.alert("Failed to start", e?.message || "Could not start trip. Please try again.");
     } finally { setStarting(false); }
   };
 
@@ -211,40 +223,34 @@ export default function TripCentre() {
         url: res.share_url,
       });
     } catch (e: any) {
-      if ((e as any)?.message !== "User did not share") {
+      if (e?.message !== "User did not share") {
         Alert.alert("Could not generate link", e?.message || "Try again");
       }
-    } finally {
-      setSharing(false);
-    }
+    } finally { setSharing(false); }
   };
 
-  const handleEndTrip = () => {
-    const rev = Number(trip?.total_revenue || 0);
-    const earned = isNaN(rev) ? "0.00" : rev.toFixed(2);
-    Alert.alert(
-      "End Trip?",
-      `Passengers: ${passengers.length + cashPassengers}\nEarned this trip: R${earned}\n\nThis stops route tracking and closes the manifest.`,
-      [
-        { text: "Keep Going", style: "cancel" },
-        { text: "End Trip", style: "destructive", onPress: doEndTrip },
-      ]
-    );
+  // ── Replaced Alert.alert confirmation with proper modal ──
+  const handleEndTripPress = () => {
+    setEndConfirmModal(true);
   };
 
   const doEndTrip = async () => {
     if (!trip?.id) return;
+    setEndConfirmModal(false);
     setEnding(true);
     try {
       let lat: number | undefined;
       let lng: number | undefined;
+      // Best-effort GPS — 4s timeout, never blocks ending
       try {
-        const loc = await Promise.race([
+        const loc = await Promise.race<any>([
           Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("gps_timeout")), 5000)),
+          new Promise(resolve => setTimeout(resolve, 4000)),
         ]);
-        lat = (loc as any).coords.latitude;
-        lng = (loc as any).coords.longitude;
+        if (loc?.coords) {
+          lat = loc.coords.latitude;
+          lng = loc.coords.longitude;
+        }
       } catch {}
       const res = await api.tripsEnd({ trip_id: trip.id, latitude: lat, longitude: lng });
       stopTracking();
@@ -256,10 +262,9 @@ export default function TripCentre() {
       setCashPassengers(0);
       setTaxiCapacity(0);
       setDoneModal(true);
-      const histRes = await api.tripsHistory().catch(() => []);
-      setHistory(histRes.slice(0, 10));
+      api.tripsHistory().then(h => setHistory(h.slice(0, 10))).catch(() => {});
     } catch (e: any) {
-      Alert.alert("Failed to end", e?.message || "Could not end trip");
+      Alert.alert("Could not end trip", e?.message || "Please try again. If the problem persists, restart the app.");
     } finally { setEnding(false); }
   };
 
@@ -280,38 +285,18 @@ export default function TripCentre() {
     } finally { setRefreshingPassengers(false); }
   };
 
-  const handleShowInfo = () => {
-    if (!trip) return;
-    try {
-      const d = trip.started_at ? new Date(trip.started_at) : null;
-      const startedStr = d && !isNaN(d.getTime())
-        ? `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`
-        : "—";
-      Alert.alert(
-        "Trip Info",
-        [
-          `Reference: ${trip.trip_reference || "—"}`,
-          `Vehicle: ${trip.vehicle_plate || "—"}`,
-          `App passengers: ${passengers.length}`,
-          `Cash passengers: ${cashPassengers}`,
-          `Total on board: ${passengers.length + cashPassengers}`,
-          `Taxi capacity: ${taxiCapacity || "—"}`,
-          `Started: ${startedStr}`,
-        ].join("\n")
-      );
-    } catch {
-      Alert.alert("Trip Info", `Reference: ${trip.trip_reference || "—"}`);
-    }
+  const handleCopyRef = () => {
+    if (!trip?.trip_reference) return;
+    Clipboard.setString(trip.trip_reference);
+    Alert.alert("Copied", "Trip reference copied to clipboard.");
   };
 
   const handleUpdateDetail = async (field: "cash_passengers" | "taxi_capacity", value: number) => {
     if (!trip?.id) return;
     setSavingDetails(true);
-    try {
-      await api.tripsUpdateDetails(trip.id, { [field]: value });
-    } catch (e: any) {
-      Alert.alert("Could not save", e?.message || "Try again");
-    } finally { setSavingDetails(false); }
+    try { await api.tripsUpdateDetails(trip.id, { [field]: value }); }
+    catch (e: any) { Alert.alert("Could not save", e?.message || "Try again"); }
+    finally { setSavingDetails(false); }
   };
 
   const adjustCashPassengers = (delta: number) => {
@@ -329,43 +314,48 @@ export default function TripCentre() {
   if (state.status !== "authed") return null;
   const s = makeStyles(colors);
   const bd = wallet ? computeTodayBreakdown(allTxns, wallet.today_gross, wallet.today_platform_fee) : null;
-  const gross = trip?.total_revenue || 0;
+  const gross = Number(trip?.total_revenue || 0);
   const tripFee = Math.round(gross * 0.03 * 100) / 100;
   const tripNet = Math.round((gross - tripFee) * 100) / 100;
+  const duration = trip?.started_at ? liveDuration(trip.started_at) : "—";
+
+  // Seat fill percentage
+  const totalOnBoard = passengers.length + cashPassengers;
+  const fillPct = taxiCapacity > 0 ? Math.min(100, Math.round((totalOnBoard / taxiCapacity) * 100)) : 0;
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={s.iconBtn}>
           <Ionicons name="arrow-back" size={20} color={colors.cyan} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.title}>Trip Centre</Text>
           <Text style={s.subtitle}>Manage your trips and passenger safety</Text>
         </View>
-        <TouchableOpacity onPress={() => { setRefreshing(true); load(); }} style={s.refreshBtn}>
-          <Ionicons name="refresh-outline" size={20} color={colors.textMuted} />
+        <TouchableOpacity onPress={() => { setRefreshing(true); load(); }} style={s.iconBtn}>
+          <Ionicons name={refreshing ? "sync" : "refresh-outline"} size={20} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.cyan} />}>
 
-        {/* Safety profile banner */}
+        {/* SafeRide profile banner */}
         {safetyComplete === false && (
           <TouchableOpacity style={s.safetyBanner} onPress={() => router.push("/(app)/safety")} activeOpacity={0.85}>
             <Ionicons name="warning" size={18} color="#FF8C00" />
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={s.safetyBannerTitle}>Your SafeRide emergency profile is incomplete</Text>
-              <Text style={s.safetyBannerSub}>Tap to set up your emergency contacts</Text>
+              <Text style={s.safetyBannerTitle}>SafeRide profile incomplete</Text>
+              <Text style={s.safetyBannerSub}>Set up emergency contacts — tap to complete</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color="#FF8C00" />
           </TouchableOpacity>
         )}
 
-        {/* Today earnings summary */}
+        {/* Today earnings card */}
         <View style={s.earningsCard}>
           <View style={s.earningsGlow} />
           <View style={s.earningsHeader}>
@@ -393,87 +383,107 @@ export default function TripCentre() {
                 <Text style={[s.earningsLabel, { fontWeight: "800", color: colors.text }]}>NET EARNINGS</Text>
                 <Text style={[s.earningsVal, { fontSize: 22, color: colors.cyan, fontWeight: "900" }]}>{formatZAR(bd?.net ?? 0)}</Text>
               </View>
-              <View style={s.earningsFooter}>
-                {(wallet.rating_count ?? 0) > 0 && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Ionicons name="star" size={11} color="#FFD60A" />
-                    <Text style={s.ratingText}>{wallet.rating_avg?.toFixed(1)} · {wallet.rating_count} review{(wallet.rating_count ?? 0) !== 1 ? "s" : ""}</Text>
-                  </View>
-                )}
-              </View>
+              {(wallet.rating_count ?? 0) > 0 && (
+                <View style={[s.earningsRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                  <Ionicons name="star" size={11} color="#FFD60A" />
+                  <Text style={s.ratingText}>{wallet.rating_avg?.toFixed(1)} rating · {wallet.rating_count} review{(wallet.rating_count ?? 0) !== 1 ? "s" : ""}</Text>
+                </View>
+              )}
             </>
           )}
         </View>
 
-        {/* Active trip section */}
+        {/* ─── Active trip or no trip ─── */}
         {loading ? (
           <ActivityIndicator color={colors.cyan} style={{ marginTop: 32 }} />
         ) : !trip ? (
-          /* ─ No active trip ─ */
+          /* ── No active trip ── */
           <View style={s.noTripCard}>
             <View style={s.noTripIcon}>
-              <Ionicons name="shield-checkmark" size={40} color={colors.green} />
+              <Ionicons name="shield-checkmark" size={44} color={colors.green} />
             </View>
             <Text style={s.noTripTitle}>No Active Trip</Text>
             <Text style={s.noTripSub}>Start a SafeRide trip to protect your passengers and automatically track who is in your vehicle.</Text>
+
+            {/* Start trip CTA */}
             <TouchableOpacity
               style={[s.startBtn, starting && { opacity: 0.6 }]}
               onPress={handleStartTrip}
               disabled={starting}
               testID="start-trip-btn">
-              {starting
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <>
-                    <Ionicons name="shield-checkmark-outline" size={20} color="#fff" />
-                    <Text style={s.startBtnText}>Start SafeRide Trip</Text>
-                  </>}
+              {starting ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="shield-checkmark-outline" size={22} color="#fff" />
+                  <Text style={s.startBtnText}>Start SafeRide Trip</Text>
+                </>
+              )}
             </TouchableOpacity>
+
+            {/* Feature bullets */}
             <View style={{ gap: 10, marginTop: 16, alignSelf: "stretch" }}>
               {[
                 { icon: "shield-outline" as const, text: "Passengers auto-linked when they pay you" },
-                { icon: "navigate-outline" as const, text: "Your route recorded for safety" },
+                { icon: "navigate-outline" as const, text: "Your GPS route recorded for safety" },
                 { icon: "people-outline" as const, text: "Emergency contacts reachable in accidents" },
+                { icon: "share-outline" as const, text: "Share live tracking link with family" },
               ].map(item => (
-                <View key={item.text} style={s.infoRow}>
-                  <Ionicons name={item.icon} size={16} color={colors.textMuted} />
-                  <Text style={s.infoRowText}>{item.text}</Text>
+                <View key={item.text} style={s.featureRow}>
+                  <View style={s.featureDot}>
+                    <Ionicons name={item.icon} size={14} color={colors.cyan} />
+                  </View>
+                  <Text style={s.featureText}>{item.text}</Text>
                 </View>
               ))}
             </View>
           </View>
         ) : (
-          /* ─ Active trip ─ */
+          /* ── Active trip ── */
           <View style={[s.activeTripSection, { borderLeftColor: colors.green }]}>
 
-            {/* Active banner */}
-            <View style={s.activeBanner}>
+            {/* Active banner — tap to copy reference */}
+            <TouchableOpacity style={s.activeBanner} onPress={handleCopyRef} activeOpacity={0.7}>
               <View style={s.activeDot} />
               <Text style={s.activeBannerText}>SAFERIDE ACTIVE</Text>
+              <View style={{ flex: 1 }} />
               <Text style={s.activeBannerRef}>{trip.trip_reference}</Text>
+              <Ionicons name="copy-outline" size={12} color={colors.cyan} style={{ marginLeft: 6 }} />
+            </TouchableOpacity>
+
+            {/* Live timer + started */}
+            <View style={s.timerRow} key={tick}>
+              <View style={s.timerBlock}>
+                <Text style={s.timerVal}>{duration}</Text>
+                <Text style={s.timerLabel}>DURATION</Text>
+              </View>
+              <View style={s.timerDivider} />
+              <View style={s.timerBlock}>
+                <Text style={s.timerVal}>
+                  {trip.started_at ? new Date(trip.started_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "—"}
+                </Text>
+                <Text style={s.timerLabel}>STARTED</Text>
+              </View>
+              <View style={s.timerDivider} />
+              <View style={s.timerBlock}>
+                <Text style={[s.timerVal, { color: colors.green }]}>{formatZAR(gross)}</Text>
+                <Text style={s.timerLabel}>EARNED</Text>
+              </View>
             </View>
 
-            {trip.started_at && (
-              <Text style={s.startedText} key={ticker}>
-                Started: {timeAgo(trip.started_at)}
-              </Text>
-            )}
-
-            {/* Map or fallback */}
+            {/* Map or GPS fallback */}
             {MapView ? (
               <View style={s.mapWrap}>
                 <MapView
                   style={s.map}
-                  region={currentLoc ? {
-                    latitude: currentLoc.latitude,
-                    longitude: currentLoc.longitude,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                  } : undefined}
+                  region={currentLoc ? { latitude: currentLoc.latitude, longitude: currentLoc.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 } : undefined}
                   showsUserLocation={false}
                   showsMyLocationButton={false}>
-                  {currentLoc && <Marker coordinate={currentLoc} title="You">
-                    <View style={s.carMarker}><Ionicons name="car-sport" size={16} color={colors.cyan} /></View>
-                  </Marker>}
+                  {currentLoc && (
+                    <Marker coordinate={currentLoc} title="You">
+                      <View style={s.carMarker}><Ionicons name="car-sport" size={16} color={colors.cyan} /></View>
+                    </Marker>
+                  )}
                   {routeCoords.length > 1 && <Polyline coordinates={routeCoords} strokeColor={colors.cyan} strokeWidth={3} />}
                   {passengers.map((p, i) => p.boarding_lat && p.boarding_lng && (
                     <Marker key={p.id || i} coordinate={{ latitude: p.boarding_lat, longitude: p.boarding_lng }}>
@@ -484,36 +494,32 @@ export default function TripCentre() {
               </View>
             ) : (
               <View style={s.mapFallback}>
-                <Ionicons name="location-outline" size={20} color={colors.cyan} />
+                <Ionicons name="location-outline" size={18} color={currentLoc ? colors.green : colors.textMuted} />
                 {currentLoc ? (
-                  <>
-                    <Text style={s.mapFallbackCoord}>
-                      {currentLoc.latitude.toFixed(5)}, {currentLoc.longitude.toFixed(5)}
+                  <View style={{ alignItems: "center" }}>
+                    <Text style={s.mapFallbackCoord}>{currentLoc.latitude.toFixed(5)}, {currentLoc.longitude.toFixed(5)}</Text>
+                    <Text style={s.mapFallbackSub}>
+                      {(currentLoc.speed ?? 0) > 0 ? `${Math.round((currentLoc.speed ?? 0) * 3.6)} km/h · ` : ""}
+                      {lastLocUpdate ? `Updated ${timeAgo(lastLocUpdate.toISOString())}` : ""}
                     </Text>
-                    {(currentLoc.speed ?? 0) > 0 && (
-                      <Text style={s.mapFallbackSub}>{Math.round((currentLoc.speed ?? 0) * 3.6)} km/h</Text>
-                    )}
-                    {lastLocUpdate && <Text style={s.mapFallbackSub}>Updated {timeAgo(lastLocUpdate.toISOString())}</Text>}
-                  </>
+                  </View>
                 ) : (
-                  <Text style={s.mapFallbackSub}>GPS tracking active — location updates every 30s</Text>
+                  <Text style={s.mapFallbackSub}>GPS tracking active · updates every 30s</Text>
                 )}
               </View>
             )}
 
-            {/* Share trip row */}
+            {/* Share row */}
             <TouchableOpacity style={s.shareRow} onPress={handleShareTrip} activeOpacity={0.8} disabled={sharing}>
-              {sharing
-                ? <ActivityIndicator size="small" color={colors.cyan} />
-                : <Ionicons name="share-outline" size={18} color={colors.cyan} />}
+              {sharing ? <ActivityIndicator size="small" color={colors.cyan} /> : <Ionicons name="share-outline" size={18} color={colors.cyan} />}
               <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={s.shareRowTitle}>Share My Route</Text>
-                <Text style={s.shareRowSub}>Let family track your location</Text>
+                <Text style={s.shareRowTitle}>Share Live Tracking Link</Text>
+                <Text style={s.shareRowSub}>Send to family — they can follow your route in real time</Text>
               </View>
               {!sharing && <Ionicons name="chevron-forward" size={16} color={colors.textDim} />}
             </TouchableOpacity>
 
-            {/* Taxi info — sitter count and cash passengers */}
+            {/* Taxi info — capacity + cash passengers */}
             <View style={s.taxiInfoCard}>
               <View style={s.taxiInfoHeader}>
                 <Ionicons name="car-outline" size={14} color={colors.cyan} />
@@ -523,14 +529,14 @@ export default function TripCentre() {
 
               <View style={s.taxiInfoRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.taxiInfoLabel}>Taxi Sitters (Capacity)</Text>
-                  <Text style={s.taxiInfoSub}>How many seats in your taxi</Text>
+                  <Text style={s.taxiInfoLabel}>Taxi Capacity</Text>
+                  <Text style={s.taxiInfoSub}>Total seats in your taxi</Text>
                 </View>
                 <View style={s.stepper}>
                   <TouchableOpacity style={s.stepperBtn} onPress={() => adjustTaxiCapacity(-1)} activeOpacity={0.7}>
                     <Ionicons name="remove" size={16} color={colors.text} />
                   </TouchableOpacity>
-                  <Text style={s.stepperVal}>{taxiCapacity}</Text>
+                  <Text style={s.stepperVal}>{taxiCapacity || "—"}</Text>
                   <TouchableOpacity style={s.stepperBtn} onPress={() => adjustTaxiCapacity(1)} activeOpacity={0.7}>
                     <Ionicons name="add" size={16} color={colors.text} />
                   </TouchableOpacity>
@@ -553,7 +559,7 @@ export default function TripCentre() {
                 </View>
               </View>
 
-              {/* On-board summary */}
+              {/* On-board summary + fill bar */}
               <View style={s.onBoardRow}>
                 <View style={s.onBoardStat}>
                   <Text style={s.onBoardVal}>{passengers.length}</Text>
@@ -566,27 +572,47 @@ export default function TripCentre() {
                 </View>
                 <Text style={s.onBoardPlus}>=</Text>
                 <View style={s.onBoardStat}>
-                  <Text style={[s.onBoardVal, { color: colors.cyan }]}>{passengers.length + cashPassengers}</Text>
-                  <Text style={s.onBoardLabel}>
-                    {taxiCapacity > 0 ? `/ ${taxiCapacity} seats` : "on board"}
+                  <Text style={[s.onBoardVal, { color: fillPct >= 100 ? colors.red : fillPct >= 80 ? "#FFD60A" : colors.cyan }]}>
+                    {totalOnBoard}
                   </Text>
+                  <Text style={s.onBoardLabel}>{taxiCapacity > 0 ? `/ ${taxiCapacity}` : "on board"}</Text>
                 </View>
               </View>
+
+              {/* Capacity fill bar */}
+              {taxiCapacity > 0 && (
+                <View style={{ marginTop: 10 }}>
+                  <View style={s.fillBarBg}>
+                    <View style={[s.fillBarFill, {
+                      width: `${fillPct}%` as any,
+                      backgroundColor: fillPct >= 100 ? colors.red : fillPct >= 80 ? "#FFD60A" : colors.green,
+                    }]} />
+                  </View>
+                  <Text style={{ color: colors.textDim, fontSize: 10, marginTop: 3, textAlign: "right" }}>
+                    {fillPct}% full
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* Passengers in this trip */}
+            {/* Passengers in trip */}
             <View style={s.sectionHeader}>
               <Text style={s.sectionLabel}>PASSENGERS IN VEHICLE</Text>
               <View style={s.countBadge}>
                 <Text style={s.countBadgeText}>{passengers.length}</Text>
               </View>
+              <TouchableOpacity onPress={handleRefreshPassengers} style={{ marginLeft: "auto" }} disabled={refreshingPassengers}>
+                {refreshingPassengers
+                  ? <ActivityIndicator size="small" color={colors.cyan} />
+                  : <Ionicons name="refresh-outline" size={16} color={colors.textMuted} />}
+              </TouchableOpacity>
             </View>
 
             {passengers.length === 0 ? (
               <View style={s.noPassCard}>
                 <Ionicons name="people-outline" size={28} color={colors.textDim} />
                 <Text style={s.noPassTitle}>Waiting for passengers</Text>
-                <Text style={s.noPassSub}>Share your QR code to receive payments — they appear here automatically</Text>
+                <Text style={s.noPassSub}>Passengers who scan your QR and pay appear here automatically</Text>
               </View>
             ) : (
               passengers.map((p, i) => (
@@ -598,7 +624,7 @@ export default function TripCentre() {
                     <Text style={s.passName}>{p.passenger_name || "Passenger"}</Text>
                     {p.boarded_at && (
                       <Text style={s.passMeta}>
-                        {new Date(p.boarded_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}
+                        Boarded {new Date(p.boarded_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}
                       </Text>
                     )}
                   </View>
@@ -612,7 +638,7 @@ export default function TripCentre() {
                         ? <Ionicons name="shield-checkmark" size={10} color={colors.green} />
                         : <Ionicons name="warning-outline" size={10} color="#FFD60A" />}
                       <Text style={[s.spBadgeText, { color: p.safety_profile_complete ? colors.green : "#FFD60A" }]}>
-                        {p.safety_profile_complete ? "Safe" : "No emergency info"}
+                        {p.safety_profile_complete ? "SafeRide" : "No profile"}
                       </Text>
                     </View>
                   </View>
@@ -622,83 +648,72 @@ export default function TripCentre() {
 
             {/* This trip earnings */}
             <View style={s.tripEarningsCard}>
-              <Text style={s.sectionLabel}>THIS TRIP</Text>
+              <Text style={s.sectionLabel}>THIS TRIP EARNINGS</Text>
               <View style={{ gap: 6, marginTop: 10 }}>
-                <View style={s.earningsRow}>
-                  <Text style={s.earningsLabel}>Gross</Text>
-                  <Text style={s.earningsVal}>{formatZAR(gross)}</Text>
-                </View>
-                <View style={s.earningsRow}>
-                  <Text style={s.earningsLabel}>Fee 3%</Text>
-                  <Text style={[s.earningsVal, { color: colors.red }]}>−{formatZAR(tripFee)}</Text>
-                </View>
-                <View style={[s.earningsRow, { paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.border }]}>
-                  <Text style={[s.earningsLabel, { fontWeight: "800", color: colors.text }]}>NET THIS TRIP</Text>
-                  <Text style={[s.earningsVal, { color: colors.green, fontWeight: "900" }]}>{formatZAR(tripNet)}</Text>
-                </View>
-                <View style={s.earningsRow}>
-                  <Text style={s.earningsLabel}>App passengers</Text>
-                  <Text style={s.earningsVal}>{passengers.length}</Text>
-                </View>
-                {cashPassengers > 0 && (
-                  <View style={s.earningsRow}>
-                    <Text style={s.earningsLabel}>Cash passengers</Text>
-                    <Text style={s.earningsVal}>{cashPassengers}</Text>
-                  </View>
-                )}
-                <View style={s.earningsRow}>
-                  <Text style={[s.earningsLabel, { color: colors.text }]}>Total on board</Text>
-                  <Text style={[s.earningsVal, { fontWeight: "800" }]}>{passengers.length + cashPassengers}</Text>
-                </View>
+                <ERow label="Gross" value={formatZAR(gross)} colors={colors} />
+                <ERow label="Platform fee 3%" value={`−${formatZAR(tripFee)}`} valueColor={colors.red} colors={colors} />
+                <ERow label="NET THIS TRIP" value={formatZAR(tripNet)} valueColor={colors.green} bold last colors={colors} />
+                <ERow label="App passengers" value={String(passengers.length)} colors={colors} />
+                {cashPassengers > 0 && <ERow label="Cash passengers" value={String(cashPassengers)} colors={colors} />}
+                <ERow label="Total on board" value={String(totalOnBoard)} bold colors={colors} />
               </View>
             </View>
 
-            {/* Trip action buttons */}
+            {/* ── ACTION BUTTONS ── */}
             <View style={s.actionRow}>
               <TouchableOpacity style={s.actionBtn} onPress={handleShareTrip} activeOpacity={0.7} disabled={sharing}>
-                {sharing
-                  ? <ActivityIndicator size="small" color={colors.cyan} />
-                  : <Ionicons name="share-outline" size={18} color={colors.cyan} />}
+                {sharing ? <ActivityIndicator size="small" color={colors.cyan} /> : <Ionicons name="share-outline" size={18} color={colors.cyan} />}
                 <Text style={s.actionBtnText}>Share</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.actionBtn} onPress={handleRefreshPassengers} disabled={refreshingPassengers} activeOpacity={0.7}>
-                {refreshingPassengers
-                  ? <ActivityIndicator size="small" color={colors.cyan} />
-                  : <Ionicons name="refresh-outline" size={18} color={colors.cyan} />}
-                <Text style={s.actionBtnText}>Refresh</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.actionBtn} onPress={handleShowInfo} activeOpacity={0.7}>
+
+              <TouchableOpacity style={s.actionBtn} onPress={() => setInfoModal(true)} activeOpacity={0.7} testID="info-btn">
                 <Ionicons name="information-circle-outline" size={18} color={colors.cyan} />
                 <Text style={s.actionBtnText}>Info</Text>
               </TouchableOpacity>
+
+              <TouchableOpacity style={s.actionBtn} onPress={handleRefreshPassengers} disabled={refreshingPassengers} activeOpacity={0.7}>
+                {refreshingPassengers ? <ActivityIndicator size="small" color={colors.cyan} /> : <Ionicons name="refresh-outline" size={18} color={colors.cyan} />}
+                <Text style={s.actionBtnText}>Refresh</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* End trip */}
+            {/* ── END TRIP ── */}
             <TouchableOpacity
-              style={[s.endBtn, ending && { opacity: 0.6 }]}
-              onPress={handleEndTrip}
+              style={[s.endBtn, ending && s.endBtnDisabled]}
+              onPress={handleEndTripPress}
               disabled={ending}
-              testID="end-trip-btn">
-              {ending
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <>
-                    <Ionicons name="stop-circle-outline" size={20} color="#fff" />
-                    <Text style={s.endBtnText}>End SafeRide Trip</Text>
-                  </>}
+              testID="end-trip-btn"
+              activeOpacity={0.85}>
+              {ending ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <ActivityIndicator color="#fff" size="small" />
+                  <Text style={s.endBtnText}>Ending trip…</Text>
+                </View>
+              ) : (
+                <>
+                  <Ionicons name="stop-circle-outline" size={22} color="#fff" />
+                  <Text style={s.endBtnText}>End SafeRide Trip</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
 
         {/* Recent trips */}
         {history.length > 0 && (
-          <>
-            <Text style={[s.sectionLabel, { marginTop: 24, marginBottom: 12 }]}>RECENT TRIPS</Text>
+          <View style={{ marginTop: trip ? 8 : 0 }}>
+            <View style={[s.sectionHeader, { marginBottom: 12 }]}>
+              <Text style={s.sectionLabel}>RECENT TRIPS</Text>
+            </View>
             <View style={{ gap: 8 }}>
               {history.map((h) => {
                 const hGross = parseFloat(h.total_revenue || "0");
                 const hFee = Math.round(hGross * 0.03 * 100) / 100;
                 const hNet = Math.round((hGross - hFee) * 100) / 100;
                 const isExpanded = expandedTrip === h.id;
+                const durationMin = h.started_at && h.ended_at
+                  ? Math.round((new Date(h.ended_at).getTime() - new Date(h.started_at).getTime()) / 60000)
+                  : null;
                 return (
                   <TouchableOpacity
                     key={h.id}
@@ -707,16 +722,13 @@ export default function TripCentre() {
                     activeOpacity={0.8}>
                     <View style={{ flex: 1 }}>
                       <Text style={s.histDate}>
-                        {h.started_at ? new Date(h.started_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
+                        {h.started_at ? new Date(h.started_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                        {h.started_at ? ` · ${new Date(h.started_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}` : ""}
                       </Text>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                         <Ionicons name="people-outline" size={11} color={colors.textMuted} />
                         <Text style={s.histMeta}>{h.total_passengers || h.passenger_count || 0} passengers</Text>
-                        {h.ended_at && h.started_at && (
-                          <Text style={s.histMeta}>
-                            · {Math.round((new Date(h.ended_at).getTime() - new Date(h.started_at).getTime()) / 60000)}m
-                          </Text>
-                        )}
+                        {durationMin !== null && <Text style={s.histMeta}>· {durationMin}m</Text>}
                       </View>
                       <Text style={s.histRef}>{h.trip_reference}</Text>
                     </View>
@@ -727,61 +739,331 @@ export default function TripCentre() {
                           {h.status === "active" ? "Active" : "Completed"}
                         </Text>
                       </View>
+                      <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={colors.textDim} style={{ marginTop: 6 }} />
                     </View>
                     {isExpanded && (
                       <View style={s.histExpanded}>
-                        <View style={s.earningsRow}>
-                          <Text style={s.earningsLabel}>Gross</Text>
-                          <Text style={s.earningsVal}>{formatZAR(hGross)}</Text>
-                        </View>
-                        <View style={s.earningsRow}>
-                          <Text style={s.earningsLabel}>Fee 3%</Text>
-                          <Text style={[s.earningsVal, { color: colors.red }]}>−{formatZAR(hFee)}</Text>
-                        </View>
-                        <View style={s.earningsRow}>
-                          <Text style={[s.earningsLabel, { color: colors.text, fontWeight: "700" }]}>Net</Text>
-                          <Text style={[s.earningsVal, { color: colors.green, fontWeight: "800" }]}>{formatZAR(hNet)}</Text>
-                        </View>
+                        <ERow label="Gross" value={formatZAR(hGross)} colors={colors} />
+                        <ERow label="Fee 3%" value={`−${formatZAR(hFee)}`} valueColor={colors.red} colors={colors} />
+                        <ERow label="Net" value={formatZAR(hNet)} valueColor={colors.green} bold last colors={colors} />
                       </View>
                     )}
                   </TouchableOpacity>
                 );
               })}
             </View>
-          </>
+          </View>
+        )}
+
+        {/* Start New Trip CTA (shown below history when no active trip) */}
+        {!trip && !loading && (
+          <TouchableOpacity
+            style={[s.newTripRow, starting && { opacity: 0.6 }]}
+            onPress={handleStartTrip}
+            disabled={starting}
+            activeOpacity={0.8}>
+            {starting ? <ActivityIndicator size="small" color={colors.cyan} /> : <Ionicons name="add-circle-outline" size={20} color={colors.cyan} />}
+            <Text style={s.newTripText}>Start a New Trip</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.cyan} />
+          </TouchableOpacity>
         )}
       </ScrollView>
 
-      {/* Trip complete modal */}
-      <Modal visible={doneModal} transparent animationType="slide" onRequestClose={() => {}}>
+      {/* ══════════════════════════════════════════
+          TRIP INFO MODAL — full bottom sheet
+      ══════════════════════════════════════════ */}
+      <Modal visible={infoModal} transparent animationType="slide" onRequestClose={() => setInfoModal(false)}>
         <View style={s.modalOverlay}>
-          <View style={s.modalSheet}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setInfoModal(false)} />
+          <View style={s.infoSheet}>
+            <View style={s.modalHandle} />
+
+            {/* Header */}
+            <View style={s.infoSheetHeader}>
+              <View style={s.infoSheetIconWrap}>
+                <Ionicons name="information-circle" size={28} color={colors.cyan} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.infoSheetTitle}>Trip Information</Text>
+                <Text style={s.infoSheetSub}>Full details for this SafeRide trip</Text>
+              </View>
+              <TouchableOpacity onPress={() => setInfoModal(false)} style={s.closeBtn}>
+                <Ionicons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {trip ? (
+                <>
+                  {/* TRIP REFERENCE */}
+                  <InfoSection title="TRIP REFERENCE" colors={colors}>
+                    <TouchableOpacity style={s.refRow} onPress={handleCopyRef} activeOpacity={0.7}>
+                      <Text style={s.refText}>{trip.trip_reference || "—"}</Text>
+                      <View style={s.copyBadge}>
+                        <Ionicons name="copy-outline" size={12} color={colors.cyan} />
+                        <Text style={s.copyBadgeText}>Copy</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </InfoSection>
+
+                  {/* TRIP DETAILS */}
+                  <InfoSection title="TRIP DETAILS" colors={colors}>
+                    <InfoRow label="Status" colors={colors}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green }} />
+                        <Text style={{ color: colors.green, fontWeight: "700", fontSize: 13 }}>ACTIVE</Text>
+                      </View>
+                    </InfoRow>
+                    <InfoRow label="Vehicle" value={trip.vehicle_plate || "—"} mono colors={colors} />
+                    <InfoRow label="Started" value={trip.started_at ? new Date(trip.started_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "—"} colors={colors} />
+                    <InfoRow label="Duration" value={duration} accent={colors.cyan} colors={colors} />
+                    <InfoRow label="Date" value={trip.started_at ? new Date(trip.started_at).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "long", year: "numeric" }) : "—"} colors={colors} last />
+                  </InfoSection>
+
+                  {/* PASSENGERS */}
+                  <InfoSection title="PASSENGERS" colors={colors}>
+                    <InfoRow label="App passengers (paid)" value={String(passengers.length)} accent={colors.cyan} colors={colors} />
+                    <InfoRow label="Cash passengers" value={String(cashPassengers)} colors={colors} />
+                    <InfoRow label="Total on board" value={String(totalOnBoard)} accent={colors.text} bold colors={colors} />
+                    {taxiCapacity > 0 && (
+                      <InfoRow label="Taxi capacity" value={`${taxiCapacity} seats (${fillPct}% full)`} accent={fillPct >= 100 ? colors.red : fillPct >= 80 ? "#FFD60A" : colors.green} colors={colors} />
+                    )}
+                    <InfoRow label="SafeRide profiles" value={`${passengers.filter(p => p.safety_profile_complete).length} / ${passengers.length}`} last colors={colors} />
+                  </InfoSection>
+
+                  {/* EARNINGS */}
+                  <InfoSection title="EARNINGS" colors={colors}>
+                    <InfoRow label="Gross fare" value={formatZAR(gross)} colors={colors} />
+                    <InfoRow label="Platform fee (3%)" value={`−${formatZAR(tripFee)}`} accent={colors.red} colors={colors} />
+                    <InfoRow label="Net earnings" value={formatZAR(tripNet)} accent={colors.green} bold last colors={colors} />
+                  </InfoSection>
+
+                  {/* GPS */}
+                  <InfoSection title="GPS LOCATION" colors={colors}>
+                    {currentLoc ? (
+                      <>
+                        <InfoRow label="Latitude" value={currentLoc.latitude.toFixed(6)} mono colors={colors} />
+                        <InfoRow label="Longitude" value={currentLoc.longitude.toFixed(6)} mono colors={colors} />
+                        {(currentLoc.speed ?? 0) > 0 && (
+                          <InfoRow label="Speed" value={`${Math.round((currentLoc.speed ?? 0) * 3.6)} km/h`} colors={colors} />
+                        )}
+                        <InfoRow label="Last update" value={lastLocUpdate ? timeAgo(lastLocUpdate.toISOString()) : "—"} accent={colors.green} last colors={colors} />
+                      </>
+                    ) : (
+                      <View style={{ padding: 12, alignItems: "center" }}>
+                        <Ionicons name="location-outline" size={24} color={colors.textDim} />
+                        <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6 }}>No GPS location yet</Text>
+                        <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>Location updates every 30 seconds</Text>
+                      </View>
+                    )}
+                  </InfoSection>
+
+                  {/* PASSENGER LIST */}
+                  {passengers.length > 0 && (
+                    <InfoSection title={`PASSENGER LIST (${passengers.length})`} colors={colors}>
+                      {passengers.map((p, i) => (
+                        <View key={p.id || i} style={[s.infoPassRow, i < passengers.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                          <View style={s.infoPassAvatar}>
+                            <Ionicons name="person" size={14} color={colors.cyan} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: colors.text, fontWeight: "600", fontSize: 13 }}>{p.passenger_name || "Passenger"}</Text>
+                            {p.boarded_at && (
+                              <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                                {new Date(p.boarded_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={{ alignItems: "flex-end" }}>
+                            <Text style={{ color: colors.green, fontWeight: "700", fontSize: 13 }}>{formatZAR(p.payment_amount || 0)}</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 }}>
+                              <Ionicons name={p.safety_profile_complete ? "shield-checkmark" : "warning-outline"} size={10} color={p.safety_profile_complete ? colors.green : "#FFD60A"} />
+                              <Text style={{ color: p.safety_profile_complete ? colors.green : "#FFD60A", fontSize: 9, fontWeight: "700" }}>
+                                {p.safety_profile_complete ? "SafeRide" : "No profile"}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+                    </InfoSection>
+                  )}
+                </>
+              ) : (
+                <View style={{ padding: 32, alignItems: "center" }}>
+                  <Text style={{ color: colors.textMuted }}>No active trip</Text>
+                </View>
+              )}
+
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ══════════════════════════════════════════
+          END TRIP CONFIRMATION MODAL
+      ══════════════════════════════════════════ */}
+      <Modal visible={endConfirmModal} transparent animationType="slide" onRequestClose={() => setEndConfirmModal(false)}>
+        <View style={s.modalOverlay}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setEndConfirmModal(false)} />
+          <View style={s.endConfirmSheet}>
+            <View style={s.modalHandle} />
+
+            <View style={{ alignItems: "center", marginBottom: 20 }}>
+              <View style={s.endConfirmIcon}>
+                <Ionicons name="stop-circle" size={44} color={colors.red} />
+              </View>
+              <Text style={s.endConfirmTitle}>End SafeRide Trip?</Text>
+              <Text style={s.endConfirmSub}>
+                This will stop GPS tracking and close the passenger manifest. This cannot be undone.
+              </Text>
+            </View>
+
+            {/* Trip summary preview */}
+            {trip && (
+              <View style={s.endConfirmSummary}>
+                <View style={s.endConfirmRow}>
+                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+                  <Text style={s.endConfirmLabel}>Duration</Text>
+                  <Text style={s.endConfirmVal}>{duration}</Text>
+                </View>
+                <View style={s.endConfirmRow}>
+                  <Ionicons name="people-outline" size={14} color={colors.textMuted} />
+                  <Text style={s.endConfirmLabel}>Total passengers</Text>
+                  <Text style={s.endConfirmVal}>{totalOnBoard}</Text>
+                </View>
+                <View style={s.endConfirmRow}>
+                  <Ionicons name="cash-outline" size={14} color={colors.textMuted} />
+                  <Text style={s.endConfirmLabel}>Earned this trip</Text>
+                  <Text style={[s.endConfirmVal, { color: colors.green }]}>{formatZAR(tripNet)}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Buttons */}
+            <TouchableOpacity
+              style={s.endConfirmBtn}
+              onPress={doEndTrip}
+              activeOpacity={0.85}
+              testID="confirm-end-btn">
+              <Ionicons name="stop-circle-outline" size={20} color="#fff" />
+              <Text style={s.endConfirmBtnText}>Confirm — End Trip</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={s.keepGoingBtn}
+              onPress={() => setEndConfirmModal(false)}
+              activeOpacity={0.8}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.green} />
+              <Text style={s.keepGoingText}>Keep Going</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ══════════════════════════════════════════
+          TRIP COMPLETE MODAL
+      ══════════════════════════════════════════ */}
+      <Modal visible={doneModal} transparent animationType="slide" onRequestClose={() => setDoneModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.doneSheet}>
             <View style={s.modalHandle} />
             <View style={s.doneIconWrap}>
               <Ionicons name="checkmark-circle" size={64} color={colors.green} />
             </View>
             <Text style={s.doneTitle}>TRIP COMPLETE</Text>
+            <Text style={s.doneSub}>Great work! Your passengers are safe and your earnings are recorded.</Text>
+
             {tripSummary && (
               <View style={s.doneGrid}>
                 <DoneStat label="Duration" value={`${tripSummary.duration_minutes}m`} colors={colors} />
                 <DoneStat label="Passengers" value={String(tripSummary.total_passengers)} colors={colors} />
-                <DoneStat label="Gross earned" value={formatZAR(tripSummary.gross_earnings)} colors={colors} />
-                <DoneStat label="Net earned" value={formatZAR(tripSummary.net_earnings)} colors={colors} accent={colors.green} />
+                <DoneStat label="Gross" value={formatZAR(tripSummary.gross_earnings)} colors={colors} />
+                <DoneStat label="Net Earned" value={formatZAR(tripSummary.net_earnings)} colors={colors} accent={colors.green} />
               </View>
             )}
+
             <View style={{ gap: 12, marginTop: 20 }}>
-              <TouchableOpacity style={s.doneStartBtn} onPress={handleStartNewTrip}>
-                <Ionicons name="shield-checkmark-outline" size={18} color="#fff" />
-                <Text style={s.doneStartBtnText}>Start New Trip</Text>
+              {/* Primary: Start New Trip */}
+              <TouchableOpacity
+                style={s.doneStartBtn}
+                onPress={handleStartNewTrip}
+                activeOpacity={0.85}
+                disabled={starting}>
+                {starting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="add-circle-outline" size={20} color="#fff" />
+                    <Text style={s.doneStartBtnText}>Start New Trip</Text>
+                  </>
+                )}
               </TouchableOpacity>
-              <TouchableOpacity style={s.doneDoneBtn} onPress={() => setDoneModal(false)}>
-                <Text style={s.doneDoneBtnText}>Done</Text>
+
+              {/* Share last trip summary */}
+              <TouchableOpacity
+                style={s.doneShareBtn}
+                onPress={handleShareTrip}
+                activeOpacity={0.85}
+                disabled={sharing}>
+                {sharing ? (
+                  <ActivityIndicator color={colors.cyan} size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="share-outline" size={18} color={colors.cyan} />
+                    <Text style={s.doneShareBtnText}>Share Trip Summary</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Done */}
+              <TouchableOpacity style={s.doneDoneBtn} onPress={() => setDoneModal(false)} activeOpacity={0.8}>
+                <Text style={s.doneDoneBtnText}>Done — Go to Home</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+// ── Sub-components ───────────────────────────────────────────
+
+function ERow({ label, value, valueColor, bold, last, colors }: {
+  label: string; value: string; valueColor?: string; bold?: boolean; last?: boolean; colors: any;
+}) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, borderBottomWidth: last ? 0 : 1, borderBottomColor: colors.border }}>
+      <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: bold ? "700" : "400" }}>{label}</Text>
+      <Text style={{ color: valueColor || colors.text, fontSize: 13, fontWeight: bold ? "800" : "600" }}>{value}</Text>
+    </View>
+  );
+}
+
+function InfoSection({ title, children, colors }: { title: string; children: React.ReactNode; colors: any }) {
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8 }}>{title}</Text>
+      <View style={{ backgroundColor: colors.bg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 2 }}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+function InfoRow({ label, value, accent, bold, mono, last, colors, children }: {
+  label: string; value?: string; accent?: string; bold?: boolean; mono?: boolean; last?: boolean; colors: any; children?: React.ReactNode;
+}) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, borderBottomWidth: last ? 0 : 1, borderBottomColor: colors.border }}>
+      <Text style={{ color: colors.textMuted, fontSize: 12 }}>{label}</Text>
+      {children ? children : (
+        <Text style={{ color: accent || colors.text, fontSize: 13, fontWeight: bold ? "800" : "600", fontFamily: mono ? "monospace" : undefined }}>
+          {value}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -794,11 +1076,11 @@ function DoneStat({ label, value, colors, accent }: { label: string; value: stri
   );
 }
 
+// ── Styles ───────────────────────────────────────────────────
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 14, gap: 12, backgroundColor: colors.bg },
-  backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
-  refreshBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
   title: { color: colors.text, fontSize: 20, fontWeight: "800" },
   subtitle: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
 
@@ -815,46 +1097,75 @@ const makeStyles = (colors: any) => StyleSheet.create({
   earningsRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
   earningsLabel: { color: colors.textMuted, fontSize: 12 },
   earningsVal: { color: colors.text, fontSize: 14, fontWeight: "700" },
-  earningsFooter: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
   ratingText: { color: colors.textMuted, fontSize: 11 },
 
+  // No active trip
   noTripCard: { backgroundColor: colors.bg2, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 24, alignItems: "center", marginBottom: 16 },
   noTripIcon: { width: 88, height: 88, borderRadius: 44, backgroundColor: colors.greenDim, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.green, marginBottom: 16 },
   noTripTitle: { color: colors.text, fontSize: 20, fontWeight: "800", marginBottom: 8 },
   noTripSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: 20 },
-  startBtn: { width: "100%", backgroundColor: colors.green, borderRadius: 12, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
-  startBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
-  infoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  infoRowText: { color: colors.textMuted, fontSize: 13, flex: 1 },
+  startBtn: { width: "100%", backgroundColor: colors.green, borderRadius: 14, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
+  startBtnText: { color: "#fff", fontSize: 16, fontWeight: "900" },
+  featureRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  featureDot: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
+  featureText: { color: colors.textMuted, fontSize: 13, flex: 1 },
 
+  // Active trip
   activeTripSection: { borderLeftWidth: 3, paddingLeft: 12, marginBottom: 16 },
-  activeBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.green + "18", borderRadius: 10, borderWidth: 1, borderColor: colors.green + "50", padding: 12, marginBottom: 8 },
+  activeBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.green + "18", borderRadius: 10, borderWidth: 1, borderColor: colors.green + "50", padding: 12, marginBottom: 12 },
   activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
-  activeBannerText: { color: colors.green, fontWeight: "800", fontSize: 12, letterSpacing: 1, flex: 1 },
+  activeBannerText: { color: colors.green, fontWeight: "800", fontSize: 11, letterSpacing: 1 },
   activeBannerRef: { color: colors.cyan, fontSize: 11, fontFamily: "monospace" },
-  startedText: { color: colors.textMuted, fontSize: 12, marginBottom: 10 },
 
+  // Live timer row
+  timerRow: { flexDirection: "row", backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 12, overflow: "hidden" },
+  timerBlock: { flex: 1, alignItems: "center", paddingVertical: 12 },
+  timerDivider: { width: 1, backgroundColor: colors.border, marginVertical: 8 },
+  timerVal: { color: colors.text, fontSize: 16, fontWeight: "900" },
+  timerLabel: { color: colors.textDim, fontSize: 9, fontWeight: "700", letterSpacing: 1.2, marginTop: 2 },
+
+  // Map
   mapWrap: { height: 200, borderRadius: 12, overflow: "hidden", marginBottom: 12, borderWidth: 1, borderColor: colors.border },
   map: { flex: 1 },
   carMarker: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.cyan },
   passengerMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.green, alignItems: "center", justifyContent: "center" },
-  mapFallback: { height: 80, backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", gap: 4, marginBottom: 12 },
-  mapFallbackCoord: { color: colors.cyan, fontSize: 12, fontFamily: "monospace" },
+  mapFallback: { height: 72, backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", gap: 4, marginBottom: 12, flexDirection: "row" },
+  mapFallbackCoord: { color: colors.cyan, fontSize: 11, fontFamily: "monospace" },
   mapFallbackSub: { color: colors.textMuted, fontSize: 11 },
 
-  shareRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 16 },
-  shareRowTitle: { color: colors.text, fontWeight: "600", fontSize: 14 },
+  // Share row
+  shareRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: 10, borderWidth: 1, borderColor: colors.cyan + "40", padding: 14, marginBottom: 14 },
+  shareRowTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
   shareRowSub: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
 
+  // Taxi info card
+  taxiInfoCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 14 },
+  taxiInfoHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
+  taxiInfoTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, flex: 1 },
+  taxiInfoRow: { flexDirection: "row", alignItems: "center" },
+  taxiInfoLabel: { color: colors.text, fontWeight: "600", fontSize: 14 },
+  taxiInfoSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  stepper: { flexDirection: "row", alignItems: "center" },
+  stepperBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  stepperVal: { color: colors.text, fontSize: 20, fontWeight: "800", minWidth: 44, textAlign: "center" },
+  onBoardRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
+  onBoardStat: { alignItems: "center", minWidth: 48 },
+  onBoardVal: { color: colors.text, fontSize: 24, fontWeight: "900" },
+  onBoardLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "600", marginTop: 2 },
+  onBoardPlus: { color: colors.textDim, fontSize: 20, fontWeight: "300" },
+  fillBarBg: { height: 4, backgroundColor: colors.border, borderRadius: 2 },
+  fillBarFill: { height: 4, borderRadius: 2 },
+
+  // Section header
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   sectionLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4 },
   countBadge: { backgroundColor: colors.greenDim, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
   countBadgeText: { color: colors.green, fontSize: 10, fontWeight: "700" },
 
+  // Passenger list
   noPassCard: { alignItems: "center", padding: 24, backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 12, gap: 6 },
   noPassTitle: { color: colors.text, fontWeight: "700", fontSize: 14, marginTop: 6 },
   noPassSub: { color: colors.textMuted, fontSize: 12, textAlign: "center", lineHeight: 18 },
-
   passCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg2, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, gap: 10 },
   passAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
   passName: { color: colors.text, fontWeight: "700", fontSize: 14 },
@@ -863,30 +1174,20 @@ const makeStyles = (colors: any) => StyleSheet.create({
   spBadge: { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, borderWidth: 1, marginTop: 4 },
   spBadgeText: { fontSize: 9, fontWeight: "700" },
 
-  taxiInfoCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 14 },
-  taxiInfoHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
-  taxiInfoTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, flex: 1 },
-  taxiInfoRow: { flexDirection: "row", alignItems: "center" },
-  taxiInfoLabel: { color: colors.text, fontWeight: "600", fontSize: 14 },
-  taxiInfoSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  stepper: { flexDirection: "row", alignItems: "center", gap: 0 },
-  stepperBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
-  stepperVal: { color: colors.text, fontSize: 20, fontWeight: "800", minWidth: 44, textAlign: "center" },
-  onBoardRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, gap: 10 },
-  onBoardStat: { alignItems: "center" },
-  onBoardVal: { color: colors.text, fontSize: 22, fontWeight: "900" },
-  onBoardLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "600", marginTop: 2 },
-  onBoardPlus: { color: colors.textDim, fontSize: 18, fontWeight: "300" },
-
+  // This trip earnings
   tripEarningsCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 14, marginTop: 4 },
 
+  // Action buttons
   actionRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
-  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.bg2, borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingVertical: 12 },
-  actionBtnText: { color: colors.text, fontSize: 12, fontWeight: "600" },
+  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingVertical: 14 },
+  actionBtnText: { color: colors.text, fontSize: 12, fontWeight: "700" },
 
-  endBtn: { backgroundColor: colors.red, borderRadius: 12, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 8 },
-  endBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  // End trip button
+  endBtn: { backgroundColor: colors.red, borderRadius: 14, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 8 },
+  endBtnDisabled: { opacity: 0.6 },
+  endBtnText: { color: "#fff", fontSize: 16, fontWeight: "900" },
 
+  // History
   histCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, flexDirection: "row", flexWrap: "wrap" },
   histDate: { color: colors.text, fontWeight: "700", fontSize: 13 },
   histMeta: { color: colors.textMuted, fontSize: 11 },
@@ -896,14 +1197,52 @@ const makeStyles = (colors: any) => StyleSheet.create({
   statusBadgeText: { fontSize: 10, fontWeight: "700" },
   histExpanded: { width: "100%", marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, gap: 4 },
 
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
-  modalSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48, borderTopWidth: 1, borderColor: colors.green + "40" },
+  // Start new trip row
+  newTripRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.cyan + "40", padding: 16, marginTop: 16 },
+  newTripText: { flex: 1, color: colors.cyan, fontWeight: "700", fontSize: 15 },
+
+  // Modal shared
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
   modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 },
+
+  // Info modal
+  infoSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 48, maxHeight: "90%", borderTopWidth: 1, borderColor: colors.border },
+  infoSheetHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 },
+  infoSheetIconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.cyan },
+  infoSheetTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  infoSheetSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bg3 ?? colors.border, alignItems: "center", justifyContent: "center" },
+  refRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12 },
+  refText: { color: colors.cyan, fontFamily: "monospace", fontSize: 13, fontWeight: "700", flex: 1 },
+  copyBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.cyanDim, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: colors.cyan + "50" },
+  copyBadgeText: { color: colors.cyan, fontSize: 11, fontWeight: "700" },
+  infoPassRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
+  infoPassAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
+
+  // End confirm modal
+  endConfirmSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 48, borderTopWidth: 1, borderColor: colors.red + "40" },
+  endConfirmIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.red + "15", alignItems: "center", justifyContent: "center", marginBottom: 16, borderWidth: 2, borderColor: colors.red + "40" },
+  endConfirmTitle: { color: colors.text, fontSize: 22, fontWeight: "900", marginBottom: 8 },
+  endConfirmSub: { color: colors.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 },
+  endConfirmSummary: { backgroundColor: colors.bg, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 20, gap: 10 },
+  endConfirmRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  endConfirmLabel: { color: colors.textMuted, fontSize: 13, flex: 1 },
+  endConfirmVal: { color: colors.text, fontSize: 13, fontWeight: "700" },
+  endConfirmBtn: { backgroundColor: colors.red, borderRadius: 14, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 12 },
+  endConfirmBtnText: { color: "#fff", fontSize: 16, fontWeight: "900" },
+  keepGoingBtn: { borderRadius: 14, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.greenDim, borderWidth: 1, borderColor: colors.green + "50" },
+  keepGoingText: { color: colors.green, fontSize: 15, fontWeight: "800" },
+
+  // Done modal
+  doneSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 28, paddingBottom: 48, borderTopWidth: 1, borderColor: colors.green + "40" },
   doneIconWrap: { alignItems: "center", marginBottom: 12 },
-  doneTitle: { color: colors.green, fontSize: 24, fontWeight: "900", textAlign: "center", letterSpacing: 1, marginBottom: 20 },
+  doneTitle: { color: colors.green, fontSize: 26, fontWeight: "900", textAlign: "center", letterSpacing: 1 },
+  doneSub: { color: colors.textMuted, fontSize: 14, textAlign: "center", marginTop: 6, marginBottom: 20, lineHeight: 20 },
   doneGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
-  doneStartBtn: { backgroundColor: colors.green, borderRadius: 12, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  doneStartBtnText: { color: "#fff", fontSize: 15, fontWeight: "800" },
-  doneDoneBtn: { borderRadius: 12, padding: 14, alignItems: "center", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
-  doneDoneBtnText: { color: colors.text, fontSize: 14, fontWeight: "700" },
+  doneStartBtn: { backgroundColor: colors.green, borderRadius: 14, padding: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  doneStartBtnText: { color: "#fff", fontSize: 16, fontWeight: "900" },
+  doneShareBtn: { borderRadius: 14, padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan + "50" },
+  doneShareBtnText: { color: colors.cyan, fontWeight: "800", fontSize: 15 },
+  doneDoneBtn: { borderRadius: 14, padding: 14, alignItems: "center", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  doneDoneBtnText: { color: colors.textMuted, fontSize: 14, fontWeight: "700" },
 });
