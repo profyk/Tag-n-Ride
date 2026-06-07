@@ -13,7 +13,7 @@ const securityHeaders = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https://res.cloudinary.com",
+      "img-src 'self' data: blob: https://res.cloudinary.com https://staticmap.openstreetmap.de",
       "font-src 'self' data:",
       "connect-src 'self' https://tag-n-ride-production.up.railway.app",
       "frame-ancestors 'none'",

@@ -19,13 +19,11 @@ const ThemeContext = createContext<ThemeContextValue>({
 export function useTheme() { return useContext(ThemeContext); }function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("dark");
   const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("dark");
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = (localStorage.getItem("tnr_theme") as Theme) || "dark";
     setThemeState(stored);
     applyTheme(stored);
-    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -56,8 +54,6 @@ export function useTheme() { return useContext(ThemeContext); }function ThemePro
     localStorage.setItem("tnr_theme", t);
     applyTheme(t);
   };
-
-  if (!mounted) return null;
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme }}>
