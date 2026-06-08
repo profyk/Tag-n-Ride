@@ -4147,6 +4147,7 @@ async def create_new_tables():
                         safety_profile_complete BOOLEAN DEFAULT false
                     )
                 """)
+                await conn.execute("ALTER TABLE trip_passengers ADD COLUMN IF NOT EXISTS safety_profile_complete BOOLEAN DEFAULT false")
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS gps_locations (
                         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
