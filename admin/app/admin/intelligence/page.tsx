@@ -16,7 +16,7 @@ import {
   ChevronDown, Star,
 } from "lucide-react";
 import client, { isSuperAdmin } from "@/lib/api";
-import AdminShell from "@/components/layout/AdminShell";
+import { AdminShell } from "@/components/layout/AdminShell";
 
 // ── colour palette ────────────────────────────────────────────
 const C = {
