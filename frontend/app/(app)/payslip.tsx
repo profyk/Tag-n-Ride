@@ -258,31 +258,33 @@ export default function PayslipScreen() {
   const { state } = useAuth();
   const router = useRouter();
   const s = makeStyles(colors);
-  const docsRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
   const now = new Date();
 
   // Statement state
   const [stmtPeriod, setStmtPeriod] = useState("1month");
-  const [stmtYear, setStmtYear] = useState(now.getFullYear());
-  const [stmtMonth, setStmtMonth] = useState(now.getMonth() + 1);
+  const [stmtYear, setStmtYear]     = useState(now.getFullYear());
+  const [stmtMonth, setStmtMonth]   = useState(now.getMonth() + 1);
   const [stmtPricing, setStmtPricing] = useState<any>(null);
   const [loadingStmtPricing, setLoadingStmtPricing] = useState(true);
   const [generatingStmt, setGeneratingStmt] = useState(false);
+  const [stmtResult, setStmtResult] = useState<{ id: string; label: string } | null>(null);
 
   // Formal payslip state
-  const [frmPeriod, setFrmPeriod] = useState("1month");
-  const [frmYear, setFrmYear] = useState(now.getFullYear());
-  const [frmMonth, setFrmMonth] = useState(now.getMonth() + 1);
+  const [frmPeriod, setFrmPeriod]   = useState("1month");
+  const [frmYear, setFrmYear]       = useState(now.getFullYear());
+  const [frmMonth, setFrmMonth]     = useState(now.getMonth() + 1);
   const [frmPricing, setFrmPricing] = useState<any>(null);
   const [loadingFrmPricing, setLoadingFrmPricing] = useState(true);
   const [generatingFrm, setGeneratingFrm] = useState(false);
+  const [frmResult, setFrmResult]   = useState<{ id: string; label: string } | null>(null);
 
   // Shared state
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory]         = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [walletBalance, setWalletBalance] = useState(0);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance]   = useState(0);
+  const [downloadingId, setDownloadingId]   = useState<string | null>(null);
 
   useEffect(() => {
     if (state.status === "authed" && state.user.role !== "driver") {
@@ -317,39 +319,30 @@ export default function PayslipScreen() {
   const getFee = (pricing: any, period: string) => {
     if (!pricing) return 0;
     const map: Record<string, number> = {
-      "1month": pricing.fee_1month,
-      "3months": pricing.fee_3months,
-      "6months": pricing.fee_6months,
+      "1month":   pricing.fee_1month,
+      "3months":  pricing.fee_3months,
+      "6months":  pricing.fee_6months,
       "12months": pricing.fee_12months,
     };
     return map[period] ?? 0;
   };
 
-  const shiftMonth = (dir: number, year: number, month: number, setYear: (y: number) => void, setMonth: (m: number) => void) => {
+  const shiftMonth = (
+    dir: number, year: number, month: number,
+    setYear: (y: number) => void, setMonth: (m: number) => void,
+  ) => {
     let m = month + dir;
     let y = year;
     if (m > 12) { m = 1; y += 1; }
-    if (m < 1) { m = 12; y -= 1; }
+    if (m < 1)  { m = 12; y -= 1; }
     setMonth(m); setYear(y);
   };
 
-  const handleGenerateStatement = () => {
-    const fee = getFee(stmtPricing, stmtPeriod);
-    const period = getPeriodRange(stmtPeriod, stmtYear, stmtMonth);
-    Alert.alert(
-      "Generate Earnings Statement?",
-      `Generate ${period} Earnings Statement?\n${formatR(fee)} will be deducted from your wallet.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Generate", onPress: doGenerateStatement },
-      ]
-    );
-  };
-
-  const doGenerateStatement = async () => {
+  // ── Generate earnings statement ──────────────────────────────
+  const handleGenerateStatement = async () => {
     setGeneratingStmt(true);
+    setStmtResult(null);
     try {
-      // Always re-fetch pricing + wallet — never trust cached values for a paid action
       const [fresh, freshWallet] = await Promise.all([
         api.payslipPricing(),
         api.wallet().catch(() => null),
@@ -381,45 +374,23 @@ export default function PayslipScreen() {
         period_type: stmtPeriod,
         month: monthStr(stmtYear, stmtMonth),
       });
+
+      const id = newEntry?.id ?? newEntry?.payslip_id;
+      const label = getPeriodRange(stmtPeriod, stmtYear, stmtMonth);
+      setStmtResult({ id, label });
       await loadAll();
-      Alert.alert("Ready ✓", "Your document is ready. View it in My Documents.", [
-        { text: "View Documents", onPress: () => router.push("/(app)/documents") },
-        { text: "OK", style: "cancel" },
-      ]);
-      const idToFetch = newEntry?.id ?? newEntry?.payslip_id;
-      if (idToFetch) {
-        const data = await api.payslipGet(idToFetch);
-        const html = buildStatementPDF(data);
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-        const safePeriod = (data.period_label || "Statement").replace(/[^a-zA-Z0-9]/g, "-");
-        await Sharing.shareAsync(uri, {
-          mimeType: "application/pdf",
-          dialogTitle: `TagNRide-Statement-${safePeriod}.pdf`,
-          UTI: "com.adobe.pdf",
-        });
-      }
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to generate statement.");
-    } finally { setGeneratingStmt(false); }
+    } finally {
+      setGeneratingStmt(false);
+    }
   };
 
-  const handleGenerateFormal = () => {
-    const fee = getFee(frmPricing, frmPeriod);
-    const period = getPeriodRange(frmPeriod, frmYear, frmMonth);
-    Alert.alert(
-      "Generate Formal Payslip?",
-      `Generate ${period} Formal Payslip?\n${formatR(fee)} will be deducted from your wallet.\n\nThis document is publicly verifiable at tagnride.com/verify`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Generate", onPress: doGenerateFormal },
-      ]
-    );
-  };
-
-  const doGenerateFormal = async () => {
+  // ── Generate formal payslip ──────────────────────────────────
+  const handleGenerateFormal = async () => {
     setGeneratingFrm(true);
+    setFrmResult(null);
     try {
-      // Always re-fetch pricing + wallet — never trust cached values for a paid action
       const [fresh, freshWallet] = await Promise.all([
         api.formalPayslipPricing(),
         api.wallet().catch(() => null),
@@ -451,29 +422,19 @@ export default function PayslipScreen() {
         period_type: frmPeriod,
         month: monthStr(frmYear, frmMonth),
       });
+
+      const id = newEntry?.id ?? newEntry?.payslip_id;
+      const label = getPeriodRange(frmPeriod, frmYear, frmMonth);
+      setFrmResult({ id, label });
       await loadAll();
-      Alert.alert("Ready ✓", "Your document is ready. View it in My Documents.", [
-        { text: "View Documents", onPress: () => router.push("/(app)/documents") },
-        { text: "OK", style: "cancel" },
-      ]);
-      const idToFetch = newEntry?.id ?? newEntry?.payslip_id;
-      if (idToFetch) {
-        const data = await api.payslipGet(idToFetch);
-        const html = buildFormalPayslipPDF(data);
-        const { uri } = await Print.printToFileAsync({ html, base64: false });
-        const safePeriod = (data.period_label || "Payslip").replace(/[^a-zA-Z0-9]/g, "-");
-        const safeName = (data.driver_name || "Driver").replace(/[^a-zA-Z0-9]/g, "-");
-        await Sharing.shareAsync(uri, {
-          mimeType: "application/pdf",
-          dialogTitle: `TagNRide-Payslip-${safePeriod}-${safeName}.pdf`,
-          UTI: "com.adobe.pdf",
-        });
-      }
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to generate payslip.");
-    } finally { setGeneratingFrm(false); }
+    } finally {
+      setGeneratingFrm(false);
+    }
   };
 
+  // ── Download PDF from history ────────────────────────────────
   const handleDownload = async (item: any) => {
     setDownloadingId(item.id);
     try {
@@ -482,15 +443,11 @@ export default function PayslipScreen() {
       const html = isPayslip ? buildFormalPayslipPDF(data) : buildStatementPDF(data);
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       const safePeriod = (data.period_label || "Doc").replace(/[^a-zA-Z0-9]/g, "-");
-      const safeName = (data.driver_name || "Driver").replace(/[^a-zA-Z0-9]/g, "-");
+      const safeName   = (data.driver_name || "Driver").replace(/[^a-zA-Z0-9]/g, "-");
       const fileName = isPayslip
         ? `TagNRide-Payslip-${safePeriod}-${safeName}.pdf`
         : `TagNRide-Statement-${safePeriod}.pdf`;
-      await Sharing.shareAsync(uri, {
-        mimeType: "application/pdf",
-        dialogTitle: fileName,
-        UTI: "com.adobe.pdf",
-      });
+      await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: fileName, UTI: "com.adobe.pdf" });
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Could not generate PDF.");
     } finally { setDownloadingId(null); }
@@ -499,9 +456,7 @@ export default function PayslipScreen() {
   const handleShare = async (item: any) => {
     if (item.document_type === "payslip" && item.reference_number) {
       const url = `https://tagnride.com/verify?ref=${encodeURIComponent(item.reference_number)}`;
-      try {
-        await Share.share({ message: `View my payslip: ${url}`, url });
-      } catch {}
+      try { await Share.share({ message: `View my payslip: ${url}`, url }); } catch {}
     } else {
       handleDownload(item);
     }
@@ -527,22 +482,27 @@ export default function PayslipScreen() {
 
   if (state.status !== "authed") return null;
 
-  const stmtFee = getFee(stmtPricing, stmtPeriod);
-  const frmFee = getFee(frmPricing, frmPeriod);
+  const stmtFee   = getFee(stmtPricing, stmtPeriod);
+  const frmFee    = getFee(frmPricing, frmPeriod);
+  const stmtReady = walletBalance >= stmtFee && stmtFee > 0;
+  const frmReady  = walletBalance >= frmFee  && frmFee  > 0;
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
-      <ScrollView ref={docsRef} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 20, paddingBottom: 48 }}>
 
-        <TouchableOpacity onPress={() => router.back()} style={s.backRow}>
-          <Ionicons name="arrow-back" size={20} color={colors.cyan} />
-          <Text style={s.backText}>Back</Text>
-        </TouchableOpacity>
+        {/* Header */}
+        <View style={s.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+            <Ionicons name="arrow-back" size={20} color={colors.cyan} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>Earnings Documents</Text>
+            <Text style={s.subtitle}>Statements & payslips for bank applications</Text>
+          </View>
+        </View>
 
-        <Text style={s.title}>Earnings Documents</Text>
-        <Text style={s.subtitle}>Request statements and formal payslips for bank applications</Text>
-
-        {/* ── EARNINGS STATEMENT CARD ── */}
+        {/* ── EARNINGS STATEMENT CARD ─────────────────────────── */}
         <View style={s.card}>
           <View style={s.cardHeader}>
             <View style={[s.cardIconWrap, { backgroundColor: colors.cyanDim }]}>
@@ -559,87 +519,147 @@ export default function PayslipScreen() {
             </View>
           </View>
 
-          {loadingStmtPricing ? (
-            <ActivityIndicator color={colors.cyan} style={{ marginVertical: 20 }} />
-          ) : !stmtPricing?.enabled ? (
-            <View style={s.disabledBox}>
-              <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
-              <Text style={s.disabledText}>Earnings statements are currently unavailable.</Text>
+          {/* Statement success banner */}
+          {stmtResult && (
+            <View style={s.successBanner}>
+              <View style={s.successIconWrap}>
+                <Ionicons name="checkmark-circle" size={22} color="#22c55e" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.successTitle}>Statement Generated!</Text>
+                <Text style={s.successSub}>{stmtResult.label} · Saved to Documents</Text>
+              </View>
             </View>
-          ) : (
-            <>
-              <Text style={s.sectionLabel}>STATEMENT PERIOD</Text>
-              <View style={s.periodRow}>
-                {PERIOD_TYPES.map((pt) => {
-                  const feeMap: Record<string, number> = {
-                    "1month": stmtPricing.fee_1month,
-                    "3months": stmtPricing.fee_3months,
-                    "6months": stmtPricing.fee_6months,
-                    "12months": stmtPricing.fee_12months,
-                  };
-                  const active = stmtPeriod === pt.key;
-                  return (
-                    <TouchableOpacity
-                      key={pt.key}
-                      style={[s.periodBtn, active && s.periodBtnActiveCyan]}
-                      onPress={() => setStmtPeriod(pt.key)}
-                    >
-                      <Text style={[s.periodBtnLabel, active && { color: colors.cyan }]}>{pt.label}</Text>
-                      <Text style={[s.periodBtnFee, active && { color: colors.cyan }]}>{formatR(feeMap[pt.key])}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+          )}
 
-              <Text style={s.sectionLabel}>SELECT MONTH</Text>
-              <View style={s.monthRow}>
-                <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(-1, stmtYear, stmtMonth, setStmtYear, setStmtMonth)}>
-                  <Ionicons name="chevron-back" size={20} color={colors.cyan} />
-                </TouchableOpacity>
-                <View style={s.monthCenter}>
-                  <Text style={s.monthMain}>{MONTH_FULL[stmtMonth - 1]} {stmtYear}</Text>
-                  {stmtPeriod !== "1month" && (
-                    <Text style={s.monthRange}>{getPeriodRange(stmtPeriod, stmtYear, stmtMonth)}</Text>
-                  )}
-                </View>
-                <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(1, stmtYear, stmtMonth, setStmtYear, setStmtMonth)}>
-                  <Ionicons name="chevron-forward" size={20} color={colors.cyan} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={s.feeInfo}>
-                <View style={s.feeRow}>
-                  <Text style={s.feeLabel}>Wallet Balance</Text>
-                  <Text style={[s.feeValue, { color: walletBalance >= stmtFee ? colors.green : colors.red }]}>{formatR(walletBalance)}</Text>
-                </View>
-                <View style={s.feeRow}>
-                  <Text style={s.feeLabel}>Statement Fee</Text>
-                  <Text style={[s.feeValue, { color: colors.cyan }]}>{formatR(stmtFee)}</Text>
-                </View>
-              </View>
-
+          {stmtResult && (
+            <View style={s.resultActions}>
               <TouchableOpacity
-                style={[s.generateBtnCyan, generatingStmt && { opacity: 0.6 }]}
-                onPress={handleGenerateStatement}
-                disabled={generatingStmt}
+                style={s.resultPrimaryBtn}
+                onPress={() => router.push("/(app)/documents")}
+                activeOpacity={0.85}
               >
-                {generatingStmt ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="download-outline" size={18} color="#fff" />
-                    <Text style={s.generateBtnText}>
-                      Generate Statement — {formatR(stmtFee)}
-                    </Text>
-                  </>
-                )}
+                <Ionicons name="folder-open" size={16} color="#fff" />
+                <Text style={s.resultPrimaryText}>View in My Documents</Text>
               </TouchableOpacity>
-            </>
+              <TouchableOpacity
+                style={s.resultSecondaryBtn}
+                onPress={() => handleDownload({ id: stmtResult.id, document_type: "statement" })}
+                disabled={downloadingId === stmtResult.id}
+                activeOpacity={0.8}
+              >
+                {downloadingId === stmtResult.id
+                  ? <ActivityIndicator color={colors.cyan} size="small" />
+                  : <Ionicons name="download-outline" size={16} color={colors.cyan} />}
+                <Text style={s.resultSecondaryText}>Download PDF</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setStmtResult(null)} style={s.resultResetBtn}>
+                <Text style={s.resultResetText}>Generate Another</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {!stmtResult && (
+            loadingStmtPricing ? (
+              <ActivityIndicator color={colors.cyan} style={{ marginVertical: 20 }} />
+            ) : !stmtPricing?.enabled ? (
+              <View style={s.disabledBox}>
+                <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
+                <Text style={s.disabledText}>Earnings statements are currently unavailable.</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={s.sectionLabel}>STATEMENT PERIOD</Text>
+                <View style={s.periodRow}>
+                  {PERIOD_TYPES.map((pt) => {
+                    const feeMap: Record<string, number> = {
+                      "1month": stmtPricing.fee_1month, "3months": stmtPricing.fee_3months,
+                      "6months": stmtPricing.fee_6months, "12months": stmtPricing.fee_12months,
+                    };
+                    const active = stmtPeriod === pt.key;
+                    return (
+                      <TouchableOpacity
+                        key={pt.key}
+                        style={[s.periodBtn, active && s.periodBtnActiveCyan]}
+                        onPress={() => setStmtPeriod(pt.key)}
+                      >
+                        <Text style={[s.periodBtnLabel, active && { color: colors.cyan }]}>{pt.label}</Text>
+                        <Text style={[s.periodBtnFee, active && { color: colors.cyan }]}>{formatR(feeMap[pt.key])}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={s.sectionLabel}>SELECT MONTH</Text>
+                <View style={s.monthRow}>
+                  <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(-1, stmtYear, stmtMonth, setStmtYear, setStmtMonth)}>
+                    <Ionicons name="chevron-back" size={20} color={colors.cyan} />
+                  </TouchableOpacity>
+                  <View style={s.monthCenter}>
+                    <Text style={s.monthMain}>{MONTH_FULL[stmtMonth - 1]} {stmtYear}</Text>
+                    {stmtPeriod !== "1month" && (
+                      <Text style={s.monthRange}>{getPeriodRange(stmtPeriod, stmtYear, stmtMonth)}</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(1, stmtYear, stmtMonth, setStmtYear, setStmtMonth)}>
+                    <Ionicons name="chevron-forward" size={20} color={colors.cyan} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={s.feeInfo}>
+                  <View style={s.feeRow}>
+                    <View style={s.feeRowLeft}>
+                      <Ionicons name="wallet-outline" size={13} color={colors.textMuted} />
+                      <Text style={s.feeLabel}>Wallet Balance</Text>
+                    </View>
+                    <Text style={[s.feeValue, { color: walletBalance >= stmtFee ? colors.green : colors.red }]}>
+                      {formatR(walletBalance)}
+                    </Text>
+                  </View>
+                  <View style={[s.feeRow, { borderTopWidth: 1, borderTopColor: colors.border, marginTop: 6, paddingTop: 8 }]}>
+                    <View style={s.feeRowLeft}>
+                      <Ionicons name="receipt-outline" size={13} color={colors.textMuted} />
+                      <Text style={s.feeLabel}>Statement Fee</Text>
+                    </View>
+                    <Text style={[s.feeValue, { color: colors.cyan }]}>{formatR(stmtFee)}</Text>
+                  </View>
+                </View>
+
+                {!stmtReady && (
+                  <View style={s.insufficientBox}>
+                    <Ionicons name="warning-outline" size={13} color={colors.red} />
+                    <Text style={s.insufficientText}>
+                      You need {formatR(stmtFee - walletBalance)} more to generate this statement.
+                    </Text>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[s.generateBtnCyan, (!stmtReady || generatingStmt) && s.generateBtnDisabled]}
+                  onPress={handleGenerateStatement}
+                  disabled={generatingStmt || !stmtReady}
+                  activeOpacity={0.85}
+                >
+                  {generatingStmt ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text" size={20} color="#fff" />
+                      <View style={s.btnTextWrap}>
+                        <Text style={s.generateBtnText}>Generate Statement</Text>
+                        <Text style={s.generateBtnSub}>{formatR(stmtFee)} will be deducted</Text>
+                      </View>
+                      <Ionicons name="arrow-forward" size={18} color="rgba(255,255,255,0.7)" />
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )
           )}
         </View>
 
-        {/* ── FORMAL PAYSLIP CARD ── */}
-        <View style={[s.card, { borderColor: "#22c55e", borderWidth: 1.5 }]}>
+        {/* ── FORMAL PAYSLIP CARD ──────────────────────────────── */}
+        <View style={[s.card, { borderColor: "#22c55e60", borderWidth: 1.5 }]}>
           <View style={s.cardHeader}>
             <View style={[s.cardIconWrap, { backgroundColor: "#22c55e20" }]}>
               <Ionicons name="shield-checkmark" size={20} color="#22c55e" />
@@ -655,94 +675,163 @@ export default function PayslipScreen() {
             </View>
           </View>
 
-          {loadingFrmPricing ? (
-            <ActivityIndicator color="#22c55e" style={{ marginVertical: 20 }} />
-          ) : !frmPricing?.enabled ? (
-            <View style={s.disabledBox}>
-              <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
-              <Text style={s.disabledText}>Formal payslip feature is currently unavailable.</Text>
+          {/* Formal payslip success banner */}
+          {frmResult && (
+            <View style={[s.successBanner, { borderColor: "#22c55e40", backgroundColor: "#22c55e12" }]}>
+              <View style={s.successIconWrap}>
+                <Ionicons name="shield-checkmark" size={22} color="#22c55e" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.successTitle}>Payslip Generated!</Text>
+                <Text style={s.successSub}>{frmResult.label} · Saved to Documents</Text>
+              </View>
             </View>
-          ) : (
-            <>
-              <Text style={s.sectionLabel}>PAYSLIP PERIOD</Text>
-              <View style={s.periodRow}>
-                {PERIOD_TYPES.map((pt) => {
-                  const feeMap: Record<string, number> = {
-                    "1month": frmPricing.fee_1month,
-                    "3months": frmPricing.fee_3months,
-                    "6months": frmPricing.fee_6months,
-                    "12months": frmPricing.fee_12months,
-                  };
-                  const active = frmPeriod === pt.key;
-                  return (
-                    <TouchableOpacity
-                      key={pt.key}
-                      style={[s.periodBtn, active && s.periodBtnActiveGreen]}
-                      onPress={() => setFrmPeriod(pt.key)}
-                    >
-                      <Text style={[s.periodBtnLabel, active && { color: "#22c55e" }]}>{pt.label}</Text>
-                      <Text style={[s.periodBtnFee, active && { color: "#22c55e" }]}>{formatR(feeMap[pt.key])}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+          )}
 
-              <Text style={s.sectionLabel}>SELECT MONTH</Text>
-              <View style={[s.monthRow, { borderColor: "#22c55e40" }]}>
-                <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(-1, frmYear, frmMonth, setFrmYear, setFrmMonth)}>
-                  <Ionicons name="chevron-back" size={20} color="#22c55e" />
-                </TouchableOpacity>
-                <View style={s.monthCenter}>
-                  <Text style={s.monthMain}>{MONTH_FULL[frmMonth - 1]} {frmYear}</Text>
-                  {frmPeriod !== "1month" && (
-                    <Text style={s.monthRange}>{getPeriodRange(frmPeriod, frmYear, frmMonth)}</Text>
-                  )}
-                </View>
-                <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(1, frmYear, frmMonth, setFrmYear, setFrmMonth)}>
-                  <Ionicons name="chevron-forward" size={20} color="#22c55e" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={s.feeInfo}>
-                <View style={s.feeRow}>
-                  <Text style={s.feeLabel}>Wallet Balance</Text>
-                  <Text style={[s.feeValue, { color: walletBalance >= frmFee ? colors.green : colors.red }]}>{formatR(walletBalance)}</Text>
-                </View>
-                <View style={s.feeRow}>
-                  <Text style={s.feeLabel}>Payslip Fee</Text>
-                  <Text style={[s.feeValue, { color: "#22c55e" }]}>{formatR(frmFee)}</Text>
-                </View>
-              </View>
-
-              <View style={s.verifyNote}>
-                <Ionicons name="information-circle-outline" size={14} color="#22c55e" />
-                <Text style={[s.verifyNoteText, { color: "#22c55e" }]}>
-                  This payslip can be verified at tagnride.com/verify
-                </Text>
-              </View>
-
+          {frmResult && (
+            <View style={s.resultActions}>
               <TouchableOpacity
-                style={[s.generateBtnGreen, generatingFrm && { opacity: 0.6 }]}
-                onPress={handleGenerateFormal}
-                disabled={generatingFrm}
+                style={[s.resultPrimaryBtn, { backgroundColor: "#22c55e" }]}
+                onPress={() => router.push("/(app)/documents")}
+                activeOpacity={0.85}
               >
-                {generatingFrm ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="shield-checkmark" size={18} color="#fff" />
-                    <Text style={s.generateBtnText}>
-                      Generate Formal Payslip — {formatR(frmFee)}
-                    </Text>
-                  </>
-                )}
+                <Ionicons name="folder-open" size={16} color="#fff" />
+                <Text style={s.resultPrimaryText}>View in My Documents</Text>
               </TouchableOpacity>
-            </>
+              <TouchableOpacity
+                style={[s.resultSecondaryBtn, { backgroundColor: "#22c55e15", borderColor: "#22c55e50" }]}
+                onPress={() => handleDownload({ id: frmResult.id, document_type: "payslip" })}
+                disabled={downloadingId === frmResult.id}
+                activeOpacity={0.8}
+              >
+                {downloadingId === frmResult.id
+                  ? <ActivityIndicator color="#22c55e" size="small" />
+                  : <Ionicons name="download-outline" size={16} color="#22c55e" />}
+                <Text style={[s.resultSecondaryText, { color: "#22c55e" }]}>Download PDF</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setFrmResult(null)} style={s.resultResetBtn}>
+                <Text style={s.resultResetText}>Generate Another</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {!frmResult && (
+            loadingFrmPricing ? (
+              <ActivityIndicator color="#22c55e" style={{ marginVertical: 20 }} />
+            ) : !frmPricing?.enabled ? (
+              <View style={s.disabledBox}>
+                <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
+                <Text style={s.disabledText}>Formal payslip feature is currently unavailable.</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={s.sectionLabel}>PAYSLIP PERIOD</Text>
+                <View style={s.periodRow}>
+                  {PERIOD_TYPES.map((pt) => {
+                    const feeMap: Record<string, number> = {
+                      "1month": frmPricing.fee_1month, "3months": frmPricing.fee_3months,
+                      "6months": frmPricing.fee_6months, "12months": frmPricing.fee_12months,
+                    };
+                    const active = frmPeriod === pt.key;
+                    return (
+                      <TouchableOpacity
+                        key={pt.key}
+                        style={[s.periodBtn, active && s.periodBtnActiveGreen]}
+                        onPress={() => setFrmPeriod(pt.key)}
+                      >
+                        <Text style={[s.periodBtnLabel, active && { color: "#22c55e" }]}>{pt.label}</Text>
+                        <Text style={[s.periodBtnFee, active && { color: "#22c55e" }]}>{formatR(feeMap[pt.key])}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={s.sectionLabel}>SELECT MONTH</Text>
+                <View style={[s.monthRow, { borderColor: "#22c55e40" }]}>
+                  <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(-1, frmYear, frmMonth, setFrmYear, setFrmMonth)}>
+                    <Ionicons name="chevron-back" size={20} color="#22c55e" />
+                  </TouchableOpacity>
+                  <View style={s.monthCenter}>
+                    <Text style={s.monthMain}>{MONTH_FULL[frmMonth - 1]} {frmYear}</Text>
+                    {frmPeriod !== "1month" && (
+                      <Text style={s.monthRange}>{getPeriodRange(frmPeriod, frmYear, frmMonth)}</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity style={s.arrowBtn} onPress={() => shiftMonth(1, frmYear, frmMonth, setFrmYear, setFrmMonth)}>
+                    <Ionicons name="chevron-forward" size={20} color="#22c55e" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={s.feeInfo}>
+                  <View style={s.feeRow}>
+                    <View style={s.feeRowLeft}>
+                      <Ionicons name="wallet-outline" size={13} color={colors.textMuted} />
+                      <Text style={s.feeLabel}>Wallet Balance</Text>
+                    </View>
+                    <Text style={[s.feeValue, { color: walletBalance >= frmFee ? colors.green : colors.red }]}>
+                      {formatR(walletBalance)}
+                    </Text>
+                  </View>
+                  <View style={[s.feeRow, { borderTopWidth: 1, borderTopColor: colors.border, marginTop: 6, paddingTop: 8 }]}>
+                    <View style={s.feeRowLeft}>
+                      <Ionicons name="receipt-outline" size={13} color={colors.textMuted} />
+                      <Text style={s.feeLabel}>Payslip Fee</Text>
+                    </View>
+                    <Text style={[s.feeValue, { color: "#22c55e" }]}>{formatR(frmFee)}</Text>
+                  </View>
+                </View>
+
+                {!frmReady && (
+                  <View style={s.insufficientBox}>
+                    <Ionicons name="warning-outline" size={13} color={colors.red} />
+                    <Text style={s.insufficientText}>
+                      You need {formatR(frmFee - walletBalance)} more to generate this payslip.
+                    </Text>
+                  </View>
+                )}
+
+                <View style={s.verifyNote}>
+                  <Ionicons name="information-circle-outline" size={14} color="#22c55e" />
+                  <Text style={[s.verifyNoteText, { color: "#22c55e" }]}>
+                    Publicly verifiable at tagnride.com/verify
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[s.generateBtnGreen, (!frmReady || generatingFrm) && s.generateBtnDisabled]}
+                  onPress={handleGenerateFormal}
+                  disabled={generatingFrm || !frmReady}
+                  activeOpacity={0.85}
+                >
+                  {generatingFrm ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="shield-checkmark" size={20} color="#fff" />
+                      <View style={s.btnTextWrap}>
+                        <Text style={s.generateBtnText}>Generate Formal Payslip</Text>
+                        <Text style={s.generateBtnSub}>{formatR(frmFee)} will be deducted</Text>
+                      </View>
+                      <Ionicons name="arrow-forward" size={18} color="rgba(255,255,255,0.7)" />
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )
           )}
         </View>
 
-        {/* ── MY DOCUMENTS ── */}
-        <Text style={s.section}>MY DOCUMENTS</Text>
+        {/* ── MY DOCUMENTS ────────────────────────────────────── */}
+        <View style={s.docsHeader}>
+          <Text style={s.section}>MY DOCUMENTS</Text>
+          <TouchableOpacity
+            style={s.viewAllBtn}
+            onPress={() => router.push("/(app)/documents")}
+          >
+            <Text style={s.viewAllText}>View all</Text>
+            <Ionicons name="chevron-forward" size={13} color={colors.cyan} />
+          </TouchableOpacity>
+        </View>
 
         {loadingHistory ? (
           <ActivityIndicator color={colors.cyan} style={{ marginVertical: 16 }} />
@@ -758,8 +847,21 @@ export default function PayslipScreen() {
           history.map((item) => {
             const isPayslip = item.document_type === "payslip";
             const accentColor = isPayslip ? "#22c55e" : colors.cyan;
+            const isNew = (stmtResult?.id === item.id) || (frmResult?.id === item.id);
             return (
-              <View key={item.id} style={[s.historyCard, { borderLeftColor: accentColor, borderLeftWidth: 3 }]}>
+              <View
+                key={item.id}
+                style={[
+                  s.historyCard,
+                  { borderLeftColor: accentColor, borderLeftWidth: 3 },
+                  isNew && { borderColor: accentColor + "50", backgroundColor: accentColor + "08" },
+                ]}
+              >
+                {isNew && (
+                  <View style={[s.newBadge, { backgroundColor: accentColor + "20", borderColor: accentColor + "40" }]}>
+                    <Text style={[s.newBadgeText, { color: accentColor }]}>NEW</Text>
+                  </View>
+                )}
                 <View style={s.historyTop}>
                   <View style={[s.historyIconWrap, { backgroundColor: isPayslip ? "#22c55e20" : colors.cyanDim }]}>
                     <Ionicons
@@ -833,10 +935,12 @@ export default function PayslipScreen() {
 
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  backRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
-  backText: { color: colors.cyan, fontSize: 15, fontWeight: "600" },
-  title: { color: colors.text, fontSize: 24, fontWeight: "900", marginBottom: 6 },
-  subtitle: { color: colors.textMuted, fontSize: 13, marginBottom: 20 },
+
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 },
+  backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
+  title: { color: colors.text, fontSize: 22, fontWeight: "900" },
+  subtitle: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
+
   card: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 20, marginBottom: 16 },
   cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 18 },
   cardIconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
@@ -846,7 +950,24 @@ const makeStyles = (colors: any) => StyleSheet.create({
   priceBadgeText: { color: colors.cyan, fontSize: 11, fontWeight: "700" },
   bankBadge: { backgroundColor: "#22c55e20", borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: "#22c55e40" },
   bankBadgeText: { color: "#22c55e", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
-  section: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4, marginTop: 8, marginBottom: 12 },
+
+  successBanner: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: "#22c55e12", borderWidth: 1, borderColor: "#22c55e40",
+    borderRadius: radius.md, padding: 12, marginBottom: 12,
+  },
+  successIconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#22c55e20", alignItems: "center", justifyContent: "center" },
+  successTitle: { color: "#22c55e", fontWeight: "800", fontSize: 14 },
+  successSub: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+
+  resultActions: { gap: 8, marginBottom: 4 },
+  resultPrimaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.cyan, borderRadius: radius.md, paddingVertical: 13, shadowColor: colors.cyan, shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
+  resultPrimaryText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  resultSecondaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan + "50", borderRadius: radius.md, paddingVertical: 11 },
+  resultSecondaryText: { color: colors.cyan, fontWeight: "700", fontSize: 13 },
+  resultResetBtn: { alignItems: "center", paddingVertical: 10 },
+  resultResetText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+
   sectionLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.2, marginBottom: 10 },
   periodRow: { flexDirection: "row", gap: 6, marginBottom: 20 },
   periodBtn: { flex: 1, backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, alignItems: "center" },
@@ -859,21 +980,40 @@ const makeStyles = (colors: any) => StyleSheet.create({
   monthCenter: { flex: 1, alignItems: "center", paddingVertical: 10 },
   monthMain: { color: colors.text, fontSize: 16, fontWeight: "800" },
   monthRange: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  feeInfo: { backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 14 },
-  feeRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
+  feeInfo: { backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 12 },
+  feeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 3 },
+  feeRowLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
   feeLabel: { color: colors.textMuted, fontSize: 13 },
   feeValue: { fontSize: 13, fontWeight: "800" },
+
+  insufficientBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.redDim ?? colors.red + "15", borderRadius: radius.sm, padding: 10, marginBottom: 12 },
+  insufficientText: { color: colors.red, fontSize: 12, flex: 1, fontWeight: "600" },
+
   verifyNote: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
   verifyNoteText: { fontSize: 12, fontWeight: "600" },
-  generateBtnCyan: { backgroundColor: colors.cyan, borderRadius: radius.md, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
-  generateBtnGreen: { backgroundColor: "#22c55e", borderRadius: radius.md, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
-  generateBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
+
+  generateBtnCyan: { backgroundColor: colors.cyan, borderRadius: radius.md, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, shadowColor: colors.cyan, shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
+  generateBtnGreen: { backgroundColor: "#22c55e", borderRadius: radius.md, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, shadowColor: "#22c55e", shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 5 },
+  generateBtnDisabled: { shadowOpacity: 0, opacity: 0.5 },
+  btnTextWrap: { flex: 1 },
+  generateBtnText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  generateBtnSub: { color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 1 },
+
   disabledBox: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, backgroundColor: colors.bg, borderRadius: radius.sm },
   disabledText: { color: colors.textMuted, fontSize: 13, flex: 1 },
+
+  docsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  section: { color: colors.textMuted, fontSize: 12, fontWeight: "700", letterSpacing: 1.4 },
+  viewAllBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
+  viewAllText: { color: colors.cyan, fontSize: 12, fontWeight: "700" },
+
   emptyBox: { alignItems: "center", padding: 40, backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border },
   emptyTitle: { color: colors.text, fontSize: 16, fontWeight: "700", marginTop: 12 },
   emptyText: { color: colors.textMuted, fontSize: 13, marginTop: 4, textAlign: "center" },
+
   historyCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 12 },
+  newBadge: { alignSelf: "flex-start", borderRadius: radius.pill, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, marginBottom: 10 },
+  newBadgeText: { fontSize: 9, fontWeight: "900", letterSpacing: 1 },
   historyTop: { flexDirection: "row", alignItems: "flex-start", marginBottom: 14, gap: 12 },
   historyIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   historyPeriod: { color: colors.text, fontSize: 15, fontWeight: "800" },

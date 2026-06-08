@@ -62,7 +62,7 @@ function filterDocs(docs: UserDocument[], tab: FilterTab): UserDocument[] {
   if (tab === "all") return docs;
   if (tab === "payslips") return docs.filter(d => d.document_type === "payslip");
   if (tab === "statements") return docs.filter(d => d.document_type === "statement");
-  if (tab === "financial") return docs.filter(d => d.document_type === "topup" || d.document_type === "withdrawal");
+  if (tab === "financial") return docs.filter(d => d.document_type === "topup" || d.document_type === "withdrawal" || d.document_type === "receipt");
   if (tab === "identity") return docs.filter(d => d.document_type === "kyc");
   if (tab === "notices") return docs.filter(d => d.document_type === "notice" || d.document_type === "contract");
   return docs;
@@ -160,18 +160,23 @@ export default function DocumentsScreen() {
       let html = "";
       let fileName = "TagNRide-Document.pdf";
 
-      if (meta.statement_type === "passenger") {
-        // Passenger expense statement
-        const res = await api.getPassengerStatement(meta.statement_id ?? doc.id);
+      // Detect passenger expense statement: explicit type flag OR has statement_id but no payslip_id
+      const isPassengerStatement =
+        meta.statement_type === "passenger" ||
+        (doc.document_type === "statement" && !!meta.statement_id && !meta.payslip_id);
+
+      if (isPassengerStatement) {
+        const stmtId = meta.statement_id ?? doc.id;
+        const res = await api.getPassengerStatement(stmtId);
         const stmtData = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
-        html = buildPassengerStatementPDF(stmtData, res.reference);
+        html = buildPassengerStatementPDF(stmtData, res.reference ?? "");
         const safePeriod = (doc.period_label || res.reference || "Statement").replace(/[^a-zA-Z0-9]/g, "-");
         fileName = `TagNRide-Expense-Statement-${safePeriod}.pdf`;
       } else {
         // Driver earnings statement or formal payslip
         const payslipId = meta.payslip_id ?? doc.id;
         const data = await api.payslipGet(payslipId);
-        const isPayslip = (data.document_type ?? doc.document_type) === "payslip";
+        const isPayslip = doc.document_type === "payslip" || (data.document_type ?? "") === "payslip";
         html = isPayslip ? buildFormalPayslipPDF(data) : buildStatementPDF(data);
         const safePeriod = (data.period_label || "Doc").replace(/[^a-zA-Z0-9]/g, "-");
         const safeName = (data.driver_name || "Driver").replace(/[^a-zA-Z0-9]/g, "-");
@@ -310,6 +315,26 @@ export default function DocumentsScreen() {
                   ? "Documents will appear here when you generate statements, payslips, or when account events happen."
                   : `No ${tab} documents yet.`}
               </Text>
+              {tab === "statements" && (
+                <TouchableOpacity
+                  style={s.emptyAction}
+                  onPress={() => router.push("/(app)/statement")}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="document-text-outline" size={16} color={colors.cyan} />
+                  <Text style={s.emptyActionText}>Generate an Expense Statement</Text>
+                </TouchableOpacity>
+              )}
+              {tab === "payslips" && isDriver && (
+                <TouchableOpacity
+                  style={s.emptyAction}
+                  onPress={() => router.push("/(app)/payslip")}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="shield-checkmark-outline" size={16} color={colors.cyan} />
+                  <Text style={s.emptyActionText}>Generate a Payslip or Statement</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         />
@@ -441,6 +466,8 @@ const makeStyles = (colors: any) => StyleSheet.create({
   empty: { paddingTop: 60, alignItems: "center", paddingHorizontal: 24 },
   emptyTitle: { color: colors.text, fontWeight: "700", fontSize: 16, marginTop: 12 },
   emptyText: { color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 19 },
+  emptyAction: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 18, paddingHorizontal: 18, paddingVertical: 11, backgroundColor: colors.cyanDim, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.cyan + "40" },
+  emptyActionText: { color: colors.cyan, fontWeight: "700", fontSize: 13 },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, maxHeight: "85%" },
   sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 },

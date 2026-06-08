@@ -112,9 +112,9 @@ export default function PassengerStatementScreen() {
   const [data, setData]       = useState<any>(null);
   const [stmtRef, setStmtRef] = useState("");
   const [charged, setCharged] = useState(0);
+  const [generated, setGenerated] = useState(false);
 
-  // Pricing + wallet state
-  const [pricing, setPricing]         = useState<{ enabled: boolean; price: number } | null>(null);
+  const [pricing, setPricing]           = useState<{ enabled: boolean; price: number } | null>(null);
   const [walletBalance, setWalletBalance] = useState(0);
   const [loadingPricing, setLoadingPricing] = useState(true);
   const [downloadingPDF, setDownloadingPDF] = useState(false);
@@ -139,60 +139,43 @@ export default function PassengerStatementScreen() {
   const lastDay = new Date(year, month + 1, 0).getDate();
   const periodEnd = `${year}-${String(month + 1).padStart(2, "0")}-${lastDay}`;
 
-  const request = async () => {
-    // Re-fetch fresh pricing + wallet at request time
-    let freshPricing = pricing;
-    let freshBalance = walletBalance;
+  const handleGetStatement = async () => {
+    setLoading(true);
     try {
+      // Refresh pricing and balance right before submitting
       const [p, w] = await Promise.all([
         api.passengerStatementPricing().catch(() => null),
         api.wallet().catch(() => null),
       ]);
-      if (p) { freshPricing = p; setPricing(p); }
-      if (w) { freshBalance = w.balance; setWalletBalance(w.balance); }
-    } catch {}
+      const freshPricing = p ?? pricing;
+      const freshBalance = w?.balance ?? walletBalance;
+      if (p) setPricing(p);
+      if (w) setWalletBalance(w.balance);
 
-    if (freshPricing && !freshPricing.enabled) {
-      Alert.alert("Unavailable", "Expense statements are currently disabled. Please try again later.");
-      return;
+      if (freshPricing && !freshPricing.enabled) {
+        Alert.alert("Unavailable", "Expense statements are currently disabled. Please try again later.");
+        return;
+      }
+
+      const fee = freshPricing?.price ?? 0;
+      if (fee > 0 && freshBalance < fee) {
+        Alert.alert(
+          "Insufficient Balance",
+          `You need ${formatR(fee)} to generate this statement.\n\nYour balance: ${formatR(freshBalance)}\n\nPlease top up your wallet first.`
+        );
+        return;
+      }
+
+      const res = await api.requestPassengerStatement(periodStart, periodEnd);
+      setData(res.data);
+      setStmtRef(res.reference);
+      setCharged(res.amount_charged);
+      setGenerated(true);
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not generate statement.");
+    } finally {
+      setLoading(false);
     }
-
-    const fee = freshPricing?.price ?? 0;
-    if (fee <= 0 && freshPricing) {
-      // Price set to 0 intentionally — still confirm
-    } else if (fee > 0 && freshBalance < fee) {
-      Alert.alert(
-        "Insufficient Balance",
-        `You need ${formatR(fee)} to generate this statement.\n\nYour balance: ${formatR(freshBalance)}\n\nPlease top up your wallet first.`
-      );
-      return;
-    }
-
-    const feeLabel = fee > 0 ? `${formatR(fee)} will be deducted from your wallet.` : "This statement is free.";
-
-    Alert.alert(
-      "Monthly Expense Statement",
-      `Generate your ride spending breakdown for ${MONTHS[month]} ${year}.\n\n${feeLabel}`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Get Statement",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const res = await api.requestPassengerStatement(periodStart, periodEnd);
-              setData(res.data);
-              setStmtRef(res.reference);
-              setCharged(res.amount_charged);
-            } catch (e: any) {
-              Alert.alert("Failed", e?.message || "Could not generate statement.");
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
   };
 
   const handleDownloadPDF = async () => {
@@ -214,23 +197,56 @@ export default function PassengerStatementScreen() {
     }
   };
 
+  const resetForm = () => {
+    setData(null);
+    setGenerated(false);
+    setStmtRef("");
+    setCharged(0);
+    loadPricing();
+  };
+
   const s = makeStyles(colors);
   const d = data;
+  const fee = pricing?.price ?? 0;
+  const canAfford = walletBalance >= fee;
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48 }}>
-        <TouchableOpacity onPress={() => router.back()} style={s.back}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
-          <Text style={s.backText}>Back</Text>
-        </TouchableOpacity>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 56 }}>
 
-        <Text style={s.pageTitle}>Expense Statement</Text>
-        <Text style={s.pageSub}>Monthly breakdown of your ride spending and wallet activity</Text>
+        {/* Header */}
+        <View style={s.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+            <Ionicons name="chevron-back" size={20} color={colors.cyan} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={s.pageTitle}>Expense Statement</Text>
+            <Text style={s.pageSub}>Monthly ride spending breakdown</Text>
+          </View>
+        </View>
 
-        {!d && (
+        {/* ── Success banner ── */}
+        {generated && (
+          <View style={s.successBanner}>
+            <View style={s.successIconWrap}>
+              <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.successTitle}>Statement Generated!</Text>
+              <Text style={s.successSub}>Saved to your Documents</Text>
+            </View>
+            {charged > 0 && (
+              <View style={s.chargedTag}>
+                <Text style={s.chargedTagText}>−{formatR(charged)}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Month selector (only when not yet generated) ── */}
+        {!generated && (
           <View style={s.periodCard}>
-            <Text style={s.periodLabel}>SELECT MONTH</Text>
+            <Text style={s.sectionLabel}>SELECT MONTH</Text>
             <View style={s.monthRow}>
               <TouchableOpacity
                 onPress={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
@@ -246,9 +262,8 @@ export default function PassengerStatementScreen() {
             </View>
             <Text style={s.periodRange}>{periodStart} → {periodEnd}</Text>
 
-            {/* Pricing info */}
             {loadingPricing ? (
-              <ActivityIndicator color={colors.cyan} style={{ marginBottom: 16 }} />
+              <ActivityIndicator color={colors.cyan} style={{ marginVertical: 16 }} />
             ) : pricing && !pricing.enabled ? (
               <View style={s.disabledBox}>
                 <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
@@ -256,57 +271,86 @@ export default function PassengerStatementScreen() {
               </View>
             ) : (
               <>
+                {/* Fee / balance summary */}
                 <View style={s.feeBox}>
                   <View style={s.feeRow}>
-                    <Text style={s.feeLabel}>Statement Fee</Text>
-                    <Text style={[s.feeValue, { color: colors.cyan }]}>
-                      {pricing ? formatR(pricing.price) : "—"}
+                    <View style={s.feeRowLeft}>
+                      <Ionicons name="receipt-outline" size={14} color={colors.textMuted} />
+                      <Text style={s.feeLabel}>Statement Fee</Text>
+                    </View>
+                    <Text style={[s.feeValue, { color: fee === 0 ? colors.green : colors.cyan }]}>
+                      {fee === 0 ? "Free" : formatR(fee)}
                     </Text>
                   </View>
-                  <View style={s.feeRow}>
-                    <Text style={s.feeLabel}>Your Balance</Text>
-                    <Text style={[s.feeValue, {
-                      color: pricing && walletBalance >= pricing.price ? colors.green : colors.red,
-                    }]}>
+                  <View style={[s.feeRow, { borderTopWidth: 1, borderTopColor: colors.border, marginTop: 6, paddingTop: 10 }]}>
+                    <View style={s.feeRowLeft}>
+                      <Ionicons name="wallet-outline" size={14} color={colors.textMuted} />
+                      <Text style={s.feeLabel}>Your Balance</Text>
+                    </View>
+                    <Text style={[s.feeValue, { color: canAfford ? colors.green : colors.red }]}>
                       {formatR(walletBalance)}
                     </Text>
                   </View>
                 </View>
 
-                <TouchableOpacity style={s.dlBtn} onPress={request} disabled={loading}>
-                  {loading
-                    ? <ActivityIndicator color={colors.bg} />
-                    : <>
-                        <Ionicons name="document-text-outline" size={18} color={colors.bg} />
-                        <Text style={s.dlBtnText}>
-                          Get Statement{pricing && pricing.price > 0 ? ` — ${formatR(pricing.price)}` : ""}
-                        </Text>
-                      </>
-                  }
+                {!canAfford && fee > 0 && (
+                  <View style={s.insufficientBox}>
+                    <Ionicons name="warning-outline" size={14} color={colors.red} />
+                    <Text style={s.insufficientText}>
+                      You need {formatR(fee - walletBalance)} more to generate this statement.
+                    </Text>
+                  </View>
+                )}
+
+                {/* Get Statement button */}
+                <TouchableOpacity
+                  style={[
+                    s.getBtn,
+                    (!canAfford && fee > 0) && s.getBtnDisabled,
+                  ]}
+                  onPress={handleGetStatement}
+                  disabled={loading || (!canAfford && fee > 0)}
+                  activeOpacity={0.8}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text" size={20} color="#fff" />
+                      <View style={s.getBtnTextWrap}>
+                        <Text style={s.getBtnText}>Get Statement</Text>
+                        {fee > 0 && (
+                          <Text style={s.getBtnSub}>{formatR(fee)} will be deducted</Text>
+                        )}
+                        {fee === 0 && (
+                          <Text style={s.getBtnSub}>No charge · generates instantly</Text>
+                        )}
+                      </View>
+                      <Ionicons name="arrow-forward" size={18} color="rgba(255,255,255,0.7)" />
+                    </>
+                  )}
                 </TouchableOpacity>
               </>
             )}
           </View>
         )}
 
-        {d && (
+        {/* ── Statement data preview ── */}
+        {d && generated && (
           <>
-            {/* Header */}
+            {/* Period header */}
             <View style={s.stmtHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={s.stmtTitle}>Expense Statement</Text>
+                <Text style={s.stmtTitle}>{MONTHS[month]} {year}</Text>
                 <Text style={s.stmtMeta}>{d.passenger_name}</Text>
-                <Text style={s.stmtMeta}>{d.period_start} to {d.period_end}</Text>
-                <Text style={s.stmtRef}>Ref: {stmtRef}</Text>
-              </View>
-              <View style={s.feeTag}>
-                <Text style={s.feeTagText}>Fee: {formatZAR(charged)}</Text>
+                <Text style={s.stmtMeta}>{d.period_start} → {d.period_end}</Text>
+                {stmtRef ? <Text style={s.stmtRef}>Ref: {stmtRef}</Text> : null}
               </View>
             </View>
 
             {/* Summary */}
             <View style={s.section}>
-              <Text style={s.sectionTitle}>SUMMARY</Text>
+              <Text style={s.sectionLabel}>SUMMARY</Text>
               <Row label="Total rides" value={String(d.summary.total_trips)} colors={colors} s={s} />
               <Row label="Total spent on rides" value={formatZAR(d.summary.total_spent)} bold colors={colors} s={s} />
               <Row label="Total wallet top-ups" value={formatZAR(d.summary.total_topups)} green colors={colors} s={s} />
@@ -316,7 +360,7 @@ export default function PassengerStatementScreen() {
             {/* Trips */}
             {d.trips.length > 0 && (
               <View style={s.section}>
-                <Text style={s.sectionTitle}>TRIPS ({d.trips.length})</Text>
+                <Text style={s.sectionLabel}>TRIPS ({d.trips.length})</Text>
                 {d.trips.map((t: any, i: number) => (
                   <View key={i} style={[s.tripRow, i < d.trips.length - 1 && s.tripBorder]}>
                     <View style={{ flex: 1 }}>
@@ -332,7 +376,7 @@ export default function PassengerStatementScreen() {
             {/* Top-ups */}
             {d.topups.length > 0 && (
               <View style={s.section}>
-                <Text style={s.sectionTitle}>TOP-UPS ({d.topups.length})</Text>
+                <Text style={s.sectionLabel}>TOP-UPS ({d.topups.length})</Text>
                 {d.topups.map((t: any, i: number) => (
                   <View key={i} style={[s.tripRow, i < d.topups.length - 1 && s.tripBorder]}>
                     <View style={{ flex: 1 }}>
@@ -352,33 +396,39 @@ export default function PassengerStatementScreen() {
               </View>
             )}
 
-            <View style={{ gap: 10, marginTop: 24 }}>
+            {/* Actions */}
+            <View style={s.actionsWrap}>
+              {/* Primary: Go to Documents */}
               <TouchableOpacity
-                style={[s.dlBtn, downloadingPDF && { opacity: 0.6 }]}
+                style={s.primaryBtn}
+                onPress={() => router.push("/(app)/documents")}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="folder-open" size={20} color="#fff" />
+                <Text style={s.primaryBtnText}>View in My Documents</Text>
+              </TouchableOpacity>
+
+              {/* Secondary: Download PDF */}
+              <TouchableOpacity
+                style={[s.secondaryBtn, downloadingPDF && { opacity: 0.6 }]}
                 onPress={handleDownloadPDF}
                 disabled={downloadingPDF}
+                activeOpacity={0.8}
               >
                 {downloadingPDF
-                  ? <ActivityIndicator color={colors.bg} />
-                  : <>
-                      <Ionicons name="download-outline" size={18} color={colors.bg} />
-                      <Text style={s.dlBtnText}>Download PDF</Text>
-                    </>
-                }
+                  ? <ActivityIndicator color={colors.cyan} size="small" />
+                  : <Ionicons name="download-outline" size={18} color={colors.cyan} />}
+                <Text style={s.secondaryBtnText}>Download PDF</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.dlBtn, { backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border }]}
-                onPress={() => router.push("/(app)/documents")}
-              >
-                <Ionicons name="folder-outline" size={18} color={colors.cyan} />
-                <Text style={[s.dlBtnText, { color: colors.cyan }]}>View in My Documents</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.newBtn} onPress={() => { setData(null); loadPricing(); }}>
-                <Text style={s.newBtnText}>Generate Another Statement</Text>
+
+              {/* Tertiary: Generate another */}
+              <TouchableOpacity style={s.tertiaryBtn} onPress={resetForm}>
+                <Text style={s.tertiaryBtnText}>Generate Another Statement</Text>
               </TouchableOpacity>
             </View>
           </>
         )}
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -386,32 +436,65 @@ export default function PassengerStatementScreen() {
 
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  back: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 16 },
-  backText: { color: colors.text, fontSize: 16 },
-  pageTitle: { color: colors.text, fontSize: 26, fontWeight: "800" },
-  pageSub: { color: colors.textMuted, fontSize: 13, marginTop: 4, marginBottom: 24 },
-  periodCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 20, alignItems: "center" },
-  periodLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 16 },
+
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 24 },
+  backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border },
+  pageTitle: { color: colors.text, fontSize: 22, fontWeight: "800" },
+  pageSub: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
+
+  successBanner: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "#22c55e15", borderWidth: 1, borderColor: "#22c55e40",
+    borderRadius: radius.md, padding: 14, marginBottom: 20,
+  },
+  successIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#22c55e20", alignItems: "center", justifyContent: "center" },
+  successTitle: { color: "#22c55e", fontWeight: "800", fontSize: 15 },
+  successSub: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
+  chargedTag: { backgroundColor: colors.redDim ?? colors.red + "20", borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4 },
+  chargedTagText: { color: colors.red, fontSize: 12, fontWeight: "700" },
+
+  periodCard: {
+    backgroundColor: colors.bg2, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border, padding: 20,
+    alignItems: "center", marginBottom: 24,
+  },
+  sectionLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 16 },
   monthRow: { flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 8 },
-  arrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center" },
-  monthText: { color: colors.text, fontSize: 20, fontWeight: "800", minWidth: 180, textAlign: "center" },
-  periodRange: { color: colors.textMuted, fontSize: 12, marginBottom: 16 },
-  feeBox: { width: "100%", backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 16 },
-  feeRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 },
+  arrow: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.cyanDim, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.cyan + "40" },
+  monthText: { color: colors.text, fontSize: 22, fontWeight: "800", minWidth: 180, textAlign: "center" },
+  periodRange: { color: colors.textMuted, fontSize: 12, marginBottom: 20 },
+
+  feeBox: { width: "100%", backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 12 },
+  feeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 2 },
+  feeRowLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
   feeLabel: { color: colors.textMuted, fontSize: 13 },
-  feeValue: { fontSize: 13, fontWeight: "800" },
-  dlBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.cyan, borderRadius: radius.md, paddingVertical: 14, paddingHorizontal: 28 },
-  dlBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
+  feeValue: { fontSize: 14, fontWeight: "800" },
+
+  insufficientBox: { flexDirection: "row", alignItems: "center", gap: 8, width: "100%", backgroundColor: colors.redDim ?? colors.red + "15", borderRadius: radius.sm, padding: 10, marginBottom: 12 },
+  insufficientText: { color: colors.red, fontSize: 12, flex: 1, fontWeight: "600" },
+
+  getBtn: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: colors.cyan, borderRadius: radius.md,
+    paddingVertical: 16, paddingHorizontal: 20,
+    width: "100%", marginTop: 4,
+    shadowColor: colors.cyan, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  getBtnDisabled: { backgroundColor: colors.textDim ?? "#555", shadowOpacity: 0 },
+  getBtnTextWrap: { flex: 1 },
+  getBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  getBtnSub: { color: "rgba(255,255,255,0.75)", fontSize: 11, marginTop: 1 },
+
   disabledBox: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, backgroundColor: colors.bg, borderRadius: radius.sm, marginBottom: 8 },
   disabledText: { color: colors.textMuted, fontSize: 13, flex: 1 },
-  stmtHeader: { flexDirection: "row", alignItems: "flex-start", backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 20 },
+
+  stmtHeader: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 20 },
   stmtTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
-  stmtMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  stmtMeta: { color: colors.textMuted, fontSize: 12, marginTop: 3 },
   stmtRef: { color: colors.cyan, fontSize: 11, fontWeight: "700", marginTop: 6 },
-  feeTag: { backgroundColor: colors.redDim ?? colors.red + "20", borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 4 },
-  feeTagText: { color: colors.red, fontSize: 12, fontWeight: "700" },
-  section: { marginBottom: 20 },
-  sectionTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 10 },
+
+  section: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 14 },
   row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border + "55" },
   rowLabel: { color: colors.textMuted, fontSize: 13, flex: 1 },
   rowValue: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
@@ -422,6 +505,26 @@ const makeStyles = (colors: any) => StyleSheet.create({
   tripAmount: { color: colors.red, fontWeight: "800", fontSize: 14 },
   emptyBox: { alignItems: "center", paddingVertical: 40, gap: 12 },
   emptyText: { color: colors.textMuted, fontSize: 14 },
-  newBtn: { marginTop: 24, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: 14, alignItems: "center" },
-  newBtnText: { color: colors.textMuted, fontWeight: "700", fontSize: 14 },
+
+  actionsWrap: { gap: 10, marginTop: 8 },
+  primaryBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+    backgroundColor: colors.cyan, borderRadius: radius.md,
+    paddingVertical: 16,
+    shadowColor: colors.cyan, shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
+  },
+  primaryBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  secondaryBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+    backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan + "50",
+    borderRadius: radius.md, paddingVertical: 14,
+  },
+  secondaryBtnText: { color: colors.cyan, fontWeight: "700", fontSize: 15 },
+  tertiaryBtn: {
+    alignItems: "center", paddingVertical: 14,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    backgroundColor: colors.bg2, marginTop: 8,
+  },
+  tertiaryBtnText: { color: colors.textMuted, fontWeight: "700", fontSize: 14 },
 });
