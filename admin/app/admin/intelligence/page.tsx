@@ -262,6 +262,7 @@ export default function IntelligencePage() {
   const router = useRouter();
 
   // All hooks must come before any conditional return
+  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<"overview" | "money" | "users" | "safety" | "ai" | "leaderboard">("overview");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
@@ -300,15 +301,14 @@ export default function IntelligencePage() {
     }
   }, []);
 
-  // Role check — redirect non CEO/superadmin immediately (after all hooks)
+  // Mark as mounted on client — defers localStorage reads to client only
   useEffect(() => {
+    setMounted(true);
     if (!isSuperAdmin()) {
       router.replace("/admin/dashboard");
+    } else {
+      fetchData();
     }
-  }, []);
-
-  useEffect(() => {
-    if (isSuperAdmin()) fetchData();
   }, []);
 
   // Auto-refresh every 30s
@@ -355,7 +355,9 @@ export default function IntelligencePage() {
     URL.revokeObjectURL(url);
   };
 
-  // Guard — all hooks already called above, safe to return early now
+  // Before client mount: return a blank shell (not null — null causes Next.js 404)
+  // isSuperAdmin() reads localStorage which only exists on the client
+  if (!mounted) return <div className="min-h-screen bg-bg" />;
   if (!isSuperAdmin()) return null;
 
   const TABS = [
