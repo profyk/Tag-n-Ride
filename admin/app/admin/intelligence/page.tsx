@@ -261,15 +261,7 @@ const MEDAL_COLORS = ["#FFD700", "#C0C0C0", "#CD7F32"];
 export default function IntelligencePage() {
   const router = useRouter();
 
-  // Role check — redirect non CEO/superadmin immediately
-  useEffect(() => {
-    if (!isSuperAdmin()) {
-      router.replace("/admin/dashboard");
-    }
-  }, []);
-
-  if (!isSuperAdmin()) return null;
-
+  // All hooks must come before any conditional return
   const [tab, setTab] = useState<"overview" | "money" | "users" | "safety" | "ai" | "leaderboard">("overview");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
@@ -277,8 +269,6 @@ export default function IntelligencePage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [countdown, setCountdown] = useState(30);
-
-  // AI state
   const [question, setQuestion] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([
@@ -310,7 +300,16 @@ export default function IntelligencePage() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  // Role check — redirect non CEO/superadmin immediately (after all hooks)
+  useEffect(() => {
+    if (!isSuperAdmin()) {
+      router.replace("/admin/dashboard");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSuperAdmin()) fetchData();
+  }, []);
 
   // Auto-refresh every 30s
   useEffect(() => {
@@ -355,6 +354,9 @@ export default function IntelligencePage() {
     const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
   };
+
+  // Guard — all hooks already called above, safe to return early now
+  if (!isSuperAdmin()) return null;
 
   const TABS = [
     { id: "overview", label: "Overview", icon: Activity },
