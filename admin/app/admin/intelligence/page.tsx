@@ -260,9 +260,8 @@ const MEDAL_COLORS = ["#FFD700", "#C0C0C0", "#CD7F32"];
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function IntelligencePage() {
   const router = useRouter();
+  const isAuthorized = isSuperAdmin(); // SSR-safe: getToken() guards with typeof window check
 
-  // All hooks must come before any conditional return
-  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<"overview" | "money" | "users" | "safety" | "ai" | "leaderboard">("overview");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
@@ -301,14 +300,9 @@ export default function IntelligencePage() {
     }
   }, []);
 
-  // Mark as mounted on client — defers localStorage reads to client only
   useEffect(() => {
-    setMounted(true);
-    if (!isSuperAdmin()) {
-      router.replace("/admin/dashboard");
-    } else {
-      fetchData();
-    }
+    if (!isSuperAdmin()) { router.replace("/admin/dashboard"); return; }
+    fetchData();
   }, []);
 
   // Auto-refresh every 30s
@@ -355,11 +349,6 @@ export default function IntelligencePage() {
     URL.revokeObjectURL(url);
   };
 
-  // Before client mount: return a blank shell (not null — null causes Next.js 404)
-  // isSuperAdmin() reads localStorage which only exists on the client
-  if (!mounted) return <div className="min-h-screen bg-bg" />;
-  if (!isSuperAdmin()) return null;
-
   const TABS = [
     { id: "overview", label: "Overview", icon: Activity },
     { id: "money", label: "Money", icon: DollarSign },
@@ -371,8 +360,15 @@ export default function IntelligencePage() {
 
   const d = overview;
 
+  // Always render AdminShell — never return null/undefined from a Next.js page
+  // Role redirect is handled in useEffect above
   return (
     <AdminShell title="System Intelligence">
+      {!isAuthorized ? (
+        <div className="flex items-center justify-center h-64">
+          <p className="text-textMuted text-sm">Redirecting…</p>
+        </div>
+      ) : (<>
       {/* ── Page Header ── */}
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
@@ -974,6 +970,7 @@ export default function IntelligencePage() {
           </div>
         </div>
       )}
+      </>)}
     </AdminShell>
   );
 }
