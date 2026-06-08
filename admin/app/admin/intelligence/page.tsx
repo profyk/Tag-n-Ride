@@ -260,7 +260,6 @@ const MEDAL_COLORS = ["#FFD700", "#C0C0C0", "#CD7F32"];
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function IntelligencePage() {
   const router = useRouter();
-  const role = getRole();
 
   // Role check — redirect non CEO/superadmin immediately
   useEffect(() => {
