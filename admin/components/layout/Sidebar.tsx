@@ -14,7 +14,7 @@ import {
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
   Zap, Globe, Star, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
-  Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu,
+  Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -174,6 +174,7 @@ const HR_NAV: NavItem[] = [
 ];
 
 const SUPERADMIN_NAV: NavItem[] = [
+  { label: "Intelligence",         href: "/admin/intelligence", icon: Brain },
   { label: "Admin Accounts",      href: "/admin/admins",     icon: Shield },
   { label: "Settings & Security", href: "/admin/settings",   icon: Settings },
   { label: "System Console",      href: "/admin/console",    icon: Terminal },

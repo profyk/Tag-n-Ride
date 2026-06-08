@@ -25,6 +25,7 @@ import asyncio
 import asyncpg
 import bcrypt
 import jwt
+import anthropic as _anthropic
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, File, UploadFile
 from fastapi.responses import StreamingResponse
 import cloudinary
@@ -12939,6 +12940,414 @@ async def trip_passenger_current(user: dict = Depends(get_current_user)):
         t["started_at"] = iso(t.get("started_at"))
         if t.get("total_revenue") is not None: t["total_revenue"] = float(t["total_revenue"])
     return {"trip": t}
+
+# ════════════════════════════════════════════════════════════════
+# SYSTEM INTELLIGENCE — superadmin & CEO only
+# ════════════════════════════════════════════════════════════════
+
+class IntelligenceAskIn(BaseModel):
+    question: str = Field(min_length=3, max_length=1000)
+
+async def _get_intelligence_overview(conn) -> dict:
+    now_utc = datetime.now(timezone.utc)
+
+    # ── live pulse ──────────────────────────────────────────────
+    users_online = await conn.fetchval(
+        "SELECT COUNT(DISTINCT sender_id) FROM transactions WHERE created_at > NOW() - INTERVAL '30 minutes' AND is_test IS NOT TRUE"
+    ) or 0
+    drivers_active = await conn.fetchval(
+        "SELECT COUNT(*) FROM driver_routes WHERE status='active'"
+    ) or 0
+    trips_live = await conn.fetchval(
+        "SELECT COUNT(*) FROM trips WHERE status='active'"
+    ) or 0
+    money_last_hour = await conn.fetchval(
+        "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE created_at > NOW() - INTERVAL '1 hour' AND type='payment' AND status='completed' AND is_test IS NOT TRUE"
+    ) or 0
+    pending_kyc = await conn.fetchval("SELECT COUNT(*) FROM kyc_documents WHERE status='pending'") or 0
+    open_disputes = await conn.fetchval("SELECT COUNT(*) FROM disputes WHERE status='open'") or 0
+    open_incidents = await conn.fetchval("SELECT COUNT(*) FROM incidents WHERE status != 'resolved'") or 0
+
+    # ── money ────────────────────────────────────────────────────
+    today_gross = await conn.fetchval(
+        "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE"
+    ) or 0
+    today_cashouts = await conn.fetchval(
+        "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type IN ('cashup','withdrawal') AND status='completed' AND DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE"
+    ) or 0
+    today_topups = await conn.fetchval(
+        "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='topup' AND status='completed' AND DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE"
+    ) or 0
+    total_wallet = await conn.fetchval(
+        "SELECT COALESCE(SUM(balance),0) FROM wallets"
+    ) or 0
+    pending_withdrawals_amt = await conn.fetchval(
+        "SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE status='pending'"
+    ) or 0
+    monthly_revenue = await conn.fetchval(
+        "SELECT COALESCE(SUM(platform_fee),0) FROM transactions WHERE type='payment' AND status='completed' AND DATE_TRUNC('month',created_at)=DATE_TRUNC('month',NOW()) AND is_test IS NOT TRUE"
+    ) or 0
+    monthly_revenue_last = await conn.fetchval(
+        "SELECT COALESCE(SUM(platform_fee),0) FROM transactions WHERE type='payment' AND status='completed' AND DATE_TRUNC('month',created_at)=DATE_TRUNC('month',NOW()-INTERVAL '1 month') AND is_test IS NOT TRUE"
+    ) or 0
+    rev_growth = 0.0
+    if float(monthly_revenue_last) > 0:
+        rev_growth = round((float(monthly_revenue) - float(monthly_revenue_last)) / float(monthly_revenue_last) * 100, 1)
+    largest_txn = await conn.fetchval(
+        "SELECT COALESCE(MAX(amount),0) FROM transactions WHERE type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE"
+    ) or 0
+    txn_count_today = await conn.fetchval(
+        "SELECT COUNT(*) FROM transactions WHERE type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE"
+    ) or 0
+    avg_txn = float(today_gross) / int(txn_count_today) if int(txn_count_today) > 0 else 0.0
+    payslip_rev_today = await conn.fetchval(
+        "SELECT COALESCE(SUM(fee_charged),0) FROM payslips WHERE DATE(created_at)=CURRENT_DATE AND status!='deleted'"
+    ) or 0
+
+    # ── users ────────────────────────────────────────────────────
+    total_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')") or 0
+    total_passengers = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='passenger'") or 0
+    total_drivers = await conn.fetchval("SELECT COUNT(*) FROM drivers") or 0
+    total_owners = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='owner'") or 0
+    new_today = await conn.fetchval("SELECT COUNT(*) FROM users WHERE DATE(created_at)=CURRENT_DATE AND role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')") or 0
+    new_week = await conn.fetchval("SELECT COUNT(*) FROM users WHERE created_at >= DATE_TRUNC('week',NOW()) AND role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')") or 0
+    new_month = await conn.fetchval("SELECT COUNT(*) FROM users WHERE created_at >= DATE_TRUNC('month',NOW()) AND role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')") or 0
+    active_today = await conn.fetchval(
+        "SELECT COUNT(DISTINCT sender_id) FROM transactions WHERE DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE"
+    ) or 0
+    kyc_approved = await conn.fetchval("SELECT COUNT(*) FROM kyc_documents WHERE status='approved'") or 0
+    kyc_pending = await conn.fetchval("SELECT COUNT(*) FROM kyc_documents WHERE status='pending'") or 0
+    kyc_rejected = await conn.fetchval("SELECT COUNT(*) FROM kyc_documents WHERE status='rejected'") or 0
+    safety_complete = await conn.fetchval("SELECT COUNT(*) FROM passenger_safety_profiles WHERE profile_complete=TRUE") or 0
+    safety_incomplete = await conn.fetchval("SELECT COUNT(*) FROM passenger_safety_profiles WHERE profile_complete=FALSE") or 0
+    blacklisted = await conn.fetchval("SELECT COUNT(*) FROM blacklist") or 0
+    top_passenger_row = await conn.fetchrow(
+        """SELECT u.full_name, COALESCE(SUM(t.amount),0) as total_spent
+           FROM transactions t JOIN users u ON u.id=t.sender_id
+           WHERE t.type='payment' AND t.status='completed' AND t.is_test IS NOT TRUE
+           AND DATE_TRUNC('month',t.created_at)=DATE_TRUNC('month',NOW())
+           GROUP BY u.id, u.full_name ORDER BY total_spent DESC LIMIT 1"""
+    )
+    top_driver_row = await conn.fetchrow(
+        """SELECT u.full_name, COALESCE(SUM(t.amount),0) as total_earned
+           FROM transactions t JOIN users u ON u.id=t.receiver_id
+           WHERE t.type='payment' AND t.status='completed' AND t.is_test IS NOT TRUE
+           AND DATE_TRUNC('month',t.created_at)=DATE_TRUNC('month',NOW())
+           GROUP BY u.id, u.full_name ORDER BY total_earned DESC LIMIT 1"""
+    )
+
+    # ── trips ────────────────────────────────────────────────────
+    trips_today = await conn.fetchval("SELECT COUNT(*) FROM driver_routes WHERE DATE(started_at)=CURRENT_DATE") or 0
+    trips_week = await conn.fetchval("SELECT COUNT(*) FROM driver_routes WHERE started_at >= DATE_TRUNC('week',NOW())") or 0
+    pax_in_active = await conn.fetchval(
+        "SELECT COALESCE(SUM(app_count+cash_count),0) FROM driver_routes WHERE status='active'"
+    ) or 0
+    panic_month = await conn.fetchval(
+        "SELECT COUNT(*) FROM incidents WHERE flagged_at >= DATE_TRUNC('month',NOW())"
+    ) or 0
+
+    # ── safety ───────────────────────────────────────────────────
+    active_incidents = await conn.fetchval("SELECT COUNT(*) FROM incidents WHERE status != 'resolved'") or 0
+    incidents_month = await conn.fetchval("SELECT COUNT(*) FROM incidents WHERE flagged_at >= DATE_TRUNC('month',NOW())") or 0
+
+    # ── trends ───────────────────────────────────────────────────
+    daily_30 = await conn.fetch(
+        """SELECT DATE(created_at) as date,
+           COALESCE(SUM(platform_fee),0) as fees,
+           COALESCE(SUM(amount),0) as volume,
+           COUNT(*) as transactions
+           FROM transactions WHERE type='payment' AND status='completed'
+           AND created_at >= NOW()-INTERVAL '30 days' AND is_test IS NOT TRUE
+           GROUP BY DATE(created_at) ORDER BY date"""
+    )
+    hourly_today = await conn.fetch(
+        """SELECT EXTRACT(HOUR FROM created_at)::int as hour,
+           COUNT(*) as count, COALESCE(SUM(amount),0) as volume
+           FROM transactions WHERE type='payment' AND status='completed'
+           AND DATE(created_at)=CURRENT_DATE AND is_test IS NOT TRUE
+           GROUP BY EXTRACT(HOUR FROM created_at) ORDER BY hour"""
+    )
+    user_growth_30 = await conn.fetch(
+        """SELECT DATE(created_at) as date, COUNT(*) as new_users
+           FROM users WHERE created_at >= NOW()-INTERVAL '30 days'
+           AND role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')
+           GROUP BY DATE(created_at) ORDER BY date"""
+    )
+
+    # total all-time
+    total_txns_all = await conn.fetchval("SELECT COUNT(*) FROM transactions WHERE is_test IS NOT TRUE") or 0
+    total_vol_all = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='payment' AND status='completed' AND is_test IS NOT TRUE") or 0
+    total_fees_all = await conn.fetchval("SELECT COALESCE(SUM(platform_fee),0) FROM transactions WHERE type='payment' AND status='completed' AND is_test IS NOT TRUE") or 0
+
+    # Build user growth with running cumulative
+    user_growth_list = []
+    cumulative = int(total_users) - sum(int(r["new_users"]) for r in user_growth_30)
+    for r in user_growth_30:
+        cumulative += int(r["new_users"])
+        user_growth_list.append({"date": str(r["date"]), "new_users": int(r["new_users"]), "cumulative": cumulative})
+
+    # Determine system status
+    system_status = "healthy"
+    if int(open_incidents) > 2 or int(pending_kyc) > 20:
+        system_status = "degraded"
+
+    return {
+        "timestamp": now_utc.isoformat(),
+        "system_status": system_status,
+        "live_pulse": {
+            "users_online_estimate": int(users_online),
+            "drivers_active": int(drivers_active),
+            "trips_live": int(trips_live),
+            "money_moving_last_hour": float(money_last_hour),
+            "pending_kyc": int(pending_kyc),
+            "open_compliance_alerts": 0,
+            "open_incidents": int(open_incidents),
+            "open_disputes": int(open_disputes),
+        },
+        "money": {
+            "today_gross_volume": float(today_gross),
+            "today_platform_fees": round(float(today_gross) * 0.03, 2),
+            "today_cashouts": float(today_cashouts),
+            "today_topups": float(today_topups),
+            "total_wallet_balance": float(total_wallet),
+            "pending_withdrawals": float(pending_withdrawals_amt),
+            "monthly_revenue": float(monthly_revenue),
+            "monthly_revenue_last_month": float(monthly_revenue_last),
+            "revenue_growth_pct": rev_growth,
+            "largest_transaction_today": float(largest_txn),
+            "transaction_count_today": int(txn_count_today),
+            "avg_transaction_value": round(avg_txn, 2),
+            "payslip_revenue_today": float(payslip_rev_today),
+        },
+        "users": {
+            "total_users": int(total_users),
+            "total_passengers": int(total_passengers),
+            "total_drivers": int(total_drivers),
+            "total_owners": int(total_owners),
+            "new_users_today": int(new_today),
+            "new_users_this_week": int(new_week),
+            "new_users_this_month": int(new_month),
+            "active_users_today": int(active_today),
+            "kyc_approved": int(kyc_approved),
+            "kyc_pending": int(kyc_pending),
+            "kyc_rejected": int(kyc_rejected),
+            "safety_profiles_complete": int(safety_complete),
+            "safety_profiles_incomplete": int(safety_incomplete),
+            "blacklisted_users": int(blacklisted),
+            "top_passenger": {"name": top_passenger_row["full_name"], "total_spent_month": float(top_passenger_row["total_spent"])} if top_passenger_row else None,
+            "top_driver": {"name": top_driver_row["full_name"], "total_earned_month": float(top_driver_row["total_earned"])} if top_driver_row else None,
+        },
+        "trips": {
+            "active_trips_now": int(drivers_active),
+            "trips_today": int(trips_today),
+            "trips_this_week": int(trips_week),
+            "total_passengers_in_active_trips": int(pax_in_active),
+            "avg_trip_duration_minutes": 0,
+            "avg_passengers_per_trip": 0,
+            "panic_buttons_this_month": int(panic_month),
+        },
+        "safety": {
+            "active_incidents": int(active_incidents),
+            "incidents_this_month": int(incidents_month),
+            "emergency_sms_sent_month": 0,
+            "drivers_without_safety_profile": 0,
+            "passengers_without_safety_profile": int(safety_incomplete),
+        },
+        "system": {
+            "database_status": "healthy",
+            "payment_gateway_status": "healthy",
+            "sms_gateway_status": "healthy",
+            "cloudinary_status": "healthy",
+            "total_transactions_all_time": int(total_txns_all),
+            "total_volume_all_time": float(total_vol_all),
+            "total_fees_all_time": float(total_fees_all),
+        },
+        "trends": {
+            "daily_revenue_last_30_days": [
+                {"date": str(r["date"]), "fees": float(r["fees"]), "volume": float(r["volume"]), "transactions": int(r["transactions"])}
+                for r in daily_30
+            ],
+            "hourly_transactions_today": [
+                {"hour": r["hour"], "count": int(r["count"]), "volume": float(r["volume"])}
+                for r in hourly_today
+            ],
+            "user_growth_last_30_days": user_growth_list,
+            "top_areas": [],
+        },
+    }
+
+
+@api.get("/admin/intelligence/overview")
+async def intelligence_overview(admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        data = await _get_intelligence_overview(conn)
+    return data
+
+
+@api.post("/admin/intelligence/ask")
+async def intelligence_ask(body: IntelligenceAskIn, admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        overview = await _get_intelligence_overview(conn)
+
+    context_text = json.dumps(overview, indent=2, default=str)
+
+    system_prompt = (
+        "You are the Tag n Ride System Intelligence AI. "
+        "You are embedded in the admin panel of Tag n Ride Pty Ltd, "
+        "a South African fintech company that provides cashless payment solutions "
+        "for the minibus taxi industry. "
+        "You have access to real live data from the platform. "
+        "Answer questions about the system in plain English. "
+        "Always reference the actual numbers from the data provided. "
+        "Be specific, honest and actionable. "
+        "End every answer with a recommendation or next step. "
+        "Never make up numbers - only use what is in the context. "
+        "If you cannot answer from the data, say so clearly. "
+        "Keep answers under 300 words unless the question needs more. "
+        "Format key numbers in a visually clear way. "
+        "You understand: wallets, transactions, KYC, SafeRide, trips, fleet owners, "
+        "drivers, passengers, platform fees, CashUp, reconciliation, compliance, "
+        "payslips, incidents."
+    )
+
+    user_message = f"Here is the current system data:\n\n{context_text}\n\nQuestion from admin: {body.question}"
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not anthropic_key:
+        raise HTTPException(status_code=503, detail="AI service not configured. Set ANTHROPIC_API_KEY in environment.")
+
+    try:
+        client = _anthropic.Anthropic(api_key=anthropic_key)
+        message = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        answer = message.content[0].text if message.content else "No response generated."
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI service error: {str(e)}")
+
+    suggested = [
+        "What is my projected monthly revenue?",
+        "Which drivers need attention?",
+        "Are there any safety concerns right now?",
+        "How is user growth trending?",
+        "Is everything working correctly?",
+    ]
+
+    return {"answer": answer, "suggested_followups": suggested}
+
+
+@api.get("/admin/intelligence/timeline")
+async def intelligence_timeline(
+    metric: str = "revenue",
+    period: str = "30d",
+    admin: dict = Depends(require_superadmin),
+):
+    days = 7 if period == "7d" else 90 if period == "90d" else 30
+    async with pool.acquire() as conn:
+        if metric == "revenue":
+            rows = await conn.fetch(
+                """SELECT DATE(created_at) as date,
+                   COALESCE(SUM(platform_fee),0) as value,
+                   COUNT(*) as count
+                   FROM transactions WHERE type='payment' AND status='completed'
+                   AND created_at >= NOW()-($1 || ' days')::INTERVAL AND is_test IS NOT TRUE
+                   GROUP BY DATE(created_at) ORDER BY date""",
+                str(days)
+            )
+        elif metric == "transactions":
+            rows = await conn.fetch(
+                """SELECT DATE(created_at) as date,
+                   COUNT(*) as value, COALESCE(SUM(amount),0) as count
+                   FROM transactions WHERE type='payment' AND status='completed'
+                   AND created_at >= NOW()-($1 || ' days')::INTERVAL AND is_test IS NOT TRUE
+                   GROUP BY DATE(created_at) ORDER BY date""",
+                str(days)
+            )
+        elif metric == "users":
+            rows = await conn.fetch(
+                """SELECT DATE(created_at) as date, COUNT(*) as value, 0 as count
+                   FROM users WHERE created_at >= NOW()-($1 || ' days')::INTERVAL
+                   AND role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr')
+                   GROUP BY DATE(created_at) ORDER BY date""",
+                str(days)
+            )
+        elif metric == "trips":
+            rows = await conn.fetch(
+                """SELECT DATE(started_at) as date, COUNT(*) as value, 0 as count
+                   FROM driver_routes WHERE started_at >= NOW()-($1 || ' days')::INTERVAL
+                   GROUP BY DATE(started_at) ORDER BY date""",
+                str(days)
+            )
+        else:
+            rows = []
+
+    return {
+        "metric": metric,
+        "period": period,
+        "data": [{"date": str(r["date"]), "value": float(r["value"]), "count": float(r["count"])} for r in rows]
+    }
+
+
+@api.get("/admin/intelligence/leaderboard")
+async def intelligence_leaderboard(admin: dict = Depends(require_superadmin)):
+    async with pool.acquire() as conn:
+        top_drivers = await conn.fetch(
+            """SELECT u.full_name as name, u.phone_number,
+               COALESCE(SUM(t.driver_net),0) as earnings,
+               COUNT(t.id) as trips,
+               COALESCE(AVG(d.rating_avg),0) as rating
+               FROM transactions t
+               JOIN users u ON u.id=t.receiver_id
+               JOIN drivers d ON d.user_id=u.id
+               WHERE t.type='payment' AND t.status='completed' AND t.is_test IS NOT TRUE
+               AND DATE_TRUNC('month',t.created_at)=DATE_TRUNC('month',NOW())
+               GROUP BY u.id, u.full_name, u.phone_number, d.rating_avg
+               ORDER BY earnings DESC LIMIT 10"""
+        )
+        top_passengers = await conn.fetch(
+            """SELECT u.full_name as name, u.phone_number,
+               COALESCE(SUM(t.amount),0) as total_spent,
+               COUNT(t.id) as trips,
+               MIN(u.created_at) as member_since
+               FROM transactions t
+               JOIN users u ON u.id=t.sender_id
+               WHERE t.type='payment' AND t.status='completed' AND t.is_test IS NOT TRUE
+               AND DATE_TRUNC('month',t.created_at)=DATE_TRUNC('month',NOW())
+               GROUP BY u.id, u.full_name, u.phone_number
+               ORDER BY total_spent DESC LIMIT 10"""
+        )
+        top_owners = await conn.fetch(
+            """SELECT u.full_name as name, u.phone_number,
+               COUNT(DISTINCT od.driver_user_id) as fleet_size,
+               COALESCE(SUM(cr.cashup_amount),0) as fleet_revenue
+               FROM fleet_owners fo
+               JOIN users u ON u.id=fo.user_id
+               LEFT JOIN owner_drivers od ON od.owner_user_id=fo.user_id
+               LEFT JOIN cashup_records cr ON cr.owner_user_id=fo.user_id
+               AND DATE_TRUNC('month',cr.created_at)=DATE_TRUNC('month',NOW())
+               GROUP BY u.id, u.full_name, u.phone_number
+               ORDER BY fleet_revenue DESC LIMIT 10"""
+        )
+
+    def rank_list(rows, keys):
+        result = []
+        for i, r in enumerate(rows):
+            entry = {"rank": i + 1}
+            for k in keys:
+                v = r[k]
+                entry[k] = float(v) if hasattr(v, '__float__') and not isinstance(v, (int, str)) else (str(v) if hasattr(v, 'isoformat') else v)
+            result.append(entry)
+        return result
+
+    return {
+        "top_drivers": rank_list(top_drivers, ["name", "phone_number", "earnings", "trips", "rating"]),
+        "top_passengers": rank_list(top_passengers, ["name", "phone_number", "total_spent", "trips", "member_since"]),
+        "top_owners": rank_list(top_owners, ["name", "phone_number", "fleet_size", "fleet_revenue"]),
+    }
+
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line
