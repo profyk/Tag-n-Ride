@@ -25,7 +25,10 @@ import asyncio
 import asyncpg
 import bcrypt
 import jwt
-import anthropic as _anthropic
+try:
+    import anthropic as _anthropic
+except ImportError:
+    _anthropic = None  # type: ignore
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, File, UploadFile
 from fastapi.responses import StreamingResponse
 import cloudinary
@@ -13212,13 +13215,16 @@ async def intelligence_ask(body: IntelligenceAskIn, admin: dict = Depends(requir
 
     user_message = f"Here is the current system data:\n\n{context_text}\n\nQuestion from admin: {body.question}"
 
+    if _anthropic is None:
+        raise HTTPException(status_code=503, detail="AI service unavailable. The anthropic package is not installed on this server.")
+
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not anthropic_key:
-        raise HTTPException(status_code=503, detail="AI service not configured. Set ANTHROPIC_API_KEY in environment.")
+        raise HTTPException(status_code=503, detail="AI service not configured. Add ANTHROPIC_API_KEY to Railway environment variables.")
 
     try:
-        client = _anthropic.Anthropic(api_key=anthropic_key)
-        message = client.messages.create(
+        ai_client = _anthropic.Anthropic(api_key=anthropic_key)
+        message = ai_client.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=1024,
             system=system_prompt,
