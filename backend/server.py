@@ -4049,6 +4049,8 @@ async def create_new_tables():
                     ("formal_payslip_fee_6months", "15.00", "Formal payslip fee for 6-month period"),
                     ("formal_payslip_fee_12months", "25.00", "Formal payslip fee for 12-month period"),
                     ("formal_payslip_enabled", "true", "Enable/disable formal payslip feature"),
+                    ("track_me_fee", "3.00", "Fee charged per Track Me session (ZAR)"),
+                    ("track_me_enabled", "true", "Enable/disable Track Me feature"),
                 ]:
                     await conn.execute(
                         "INSERT INTO system_config (key,value,description) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
@@ -11863,6 +11865,15 @@ class SosUpdateIn(BaseModel):
 class SosChargeIn(BaseModel):
     price: float
 
+class TrackMeStartIn(BaseModel):
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class TrackMePingIn(BaseModel):
+    latitude: float
+    longitude: float
+    accuracy: Optional[float] = None
+
 _gps_last: dict = {}
 
 # ── GET /api/safety/profile ──
@@ -12766,6 +12777,7 @@ async def trip_track_public(trip_reference: str):
         last_lng = None
         last_update = None
 
+    is_personal = t["trip_reference"].startswith("TNR-TRACK-")
     return {
         "trip_reference": t["trip_reference"],
         "vehicle_plate": t.get("vehicle_plate") or "",
@@ -12777,6 +12789,135 @@ async def trip_track_public(trip_reference: str):
         "last_latitude": last_lat,
         "last_longitude": last_lng,
         "last_location_update": last_update,
+        "is_personal_track": is_personal,
+    }
+
+# ── POST /api/track-me/start ──
+@api.post("/track-me/start")
+async def track_me_start(body: TrackMeStartIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        enabled = await conn.fetchval("SELECT value FROM system_config WHERE key='track_me_enabled'")
+        if enabled and enabled.lower() == "false":
+            raise HTTPException(status_code=403, detail="Track Me is currently disabled")
+        fee_str = await conn.fetchval("SELECT value FROM system_config WHERE key='track_me_fee'")
+        fee = float(fee_str or "3.00")
+        wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"])
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        if float(wallet["balance"]) < fee:
+            raise HTTPException(status_code=400, detail=f"Insufficient balance. Track Me costs R{fee:.2f}.")
+        # Check for already active session
+        existing = await conn.fetchrow(
+            "SELECT id, trip_reference FROM trips WHERE driver_id=$1 AND status='active' AND trip_reference LIKE 'TNR-TRACK-%'",
+            user["id"]
+        )
+        if existing:
+            return {
+                "session_id": existing["id"],
+                "trip_reference": existing["trip_reference"],
+                "share_url": f"{TRACK_BASE_URL}/track/{existing['trip_reference']}",
+                "fee_charged": 0,
+                "already_active": True,
+            }
+        # Deduct fee
+        new_balance = float(wallet["balance"]) - fee
+        await conn.execute("UPDATE wallets SET balance=$1 WHERE user_id=$2", new_balance, user["id"])
+        # Record transaction
+        txn_id = str(uuid.uuid4())
+        ref = f"TNR-TRACK-{secrets.token_hex(3).upper()}"
+        await conn.execute(
+            "INSERT INTO transactions (id,reference,type,status,amount,sender_id,note) VALUES ($1,$2,'track_me','completed',$3,$4,'Track Me session fee')",
+            txn_id, ref, fee, user["id"]
+        )
+        # Create trip row for this session
+        session_id = str(uuid.uuid4())
+        trip_date = datetime.now(timezone.utc).strftime('%Y%m%d')
+        trip_ref = f"TNR-TRACK-{trip_date}-{user['id'][:6].upper()}-{secrets.token_hex(2).upper()}"
+        await conn.execute(
+            "INSERT INTO trips (id,trip_reference,driver_id,driver_name,driver_phone,vehicle_plate,status,total_passengers,total_revenue) "
+            "VALUES ($1,$2,$3,$4,$5,'',  'active',0,0)",
+            session_id, trip_ref, user["id"], user.get("full_name",""), user.get("phone_number","")
+        )
+        if body.latitude is not None and body.longitude is not None:
+            await conn.execute(
+                "INSERT INTO gps_locations (id,user_id,trip_id,latitude,longitude) VALUES ($1,$2,$3,$4,$5)",
+                str(uuid.uuid4()), user["id"], session_id, body.latitude, body.longitude
+            )
+            await conn.execute(
+                "UPDATE trips SET last_latitude=$1,last_longitude=$2,last_location_update=NOW() WHERE id=$3",
+                body.latitude, body.longitude, session_id
+            )
+    return {
+        "session_id": session_id,
+        "trip_reference": trip_ref,
+        "share_url": f"{TRACK_BASE_URL}/track/{trip_ref}",
+        "fee_charged": fee,
+        "already_active": False,
+    }
+
+# ── POST /api/track-me/{session_id}/ping ──
+@api.post("/track-me/{session_id}/ping")
+async def track_me_ping(session_id: str, body: TrackMePingIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow(
+            "SELECT id FROM trips WHERE id=$1 AND driver_id=$2 AND status='active' AND trip_reference LIKE 'TNR-TRACK-%'",
+            session_id, user["id"]
+        )
+        if not trip:
+            raise HTTPException(status_code=404, detail="No active Track Me session found")
+        await conn.execute(
+            "INSERT INTO gps_locations (id,user_id,trip_id,latitude,longitude,accuracy) VALUES ($1,$2,$3,$4,$5,$6)",
+            str(uuid.uuid4()), user["id"], session_id, body.latitude, body.longitude, body.accuracy
+        )
+        await conn.execute(
+            "UPDATE trips SET last_latitude=$1,last_longitude=$2,last_location_update=NOW() WHERE id=$3",
+            body.latitude, body.longitude, session_id
+        )
+    return {"ok": True}
+
+# ── POST /api/track-me/{session_id}/end ──
+@api.post("/track-me/{session_id}/end")
+async def track_me_end(session_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow(
+            "SELECT id FROM trips WHERE id=$1 AND driver_id=$2 AND trip_reference LIKE 'TNR-TRACK-%'",
+            session_id, user["id"]
+        )
+        if not trip:
+            raise HTTPException(status_code=404, detail="Track Me session not found")
+        await conn.execute("UPDATE trips SET status='completed', ended_at=NOW() WHERE id=$1", session_id)
+    return {"ok": True}
+
+# ── GET /api/track-me/active ──
+@api.get("/track-me/active")
+async def track_me_active(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, trip_reference, started_at FROM trips "
+            "WHERE driver_id=$1 AND status='active' AND trip_reference LIKE 'TNR-TRACK-%' "
+            "ORDER BY started_at DESC LIMIT 1",
+            user["id"]
+        )
+        if not row:
+            return {"session": None}
+        return {
+            "session": {
+                "id": row["id"],
+                "trip_reference": row["trip_reference"],
+                "share_url": f"{TRACK_BASE_URL}/track/{row['trip_reference']}",
+                "started_at": iso(row["started_at"]),
+            }
+        }
+
+# ── GET /api/track-me/fee ── PUBLIC
+@api.get("/track-me/fee")
+async def track_me_fee():
+    async with pool.acquire() as conn:
+        fee_str = await conn.fetchval("SELECT value FROM system_config WHERE key='track_me_fee'")
+        enabled_str = await conn.fetchval("SELECT value FROM system_config WHERE key='track_me_enabled'")
+    return {
+        "fee": float(fee_str or "3.00"),
+        "enabled": (enabled_str or "true").lower() != "false",
     }
 
 # ── GET /api/trips/passenger-current ──

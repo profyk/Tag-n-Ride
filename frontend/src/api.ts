@@ -638,6 +638,19 @@ export const api = {
 
   tripsPassengerCurrent: () => request<{ trip: any | null }>("/api/trips/passenger-current"),
 
+  trackMeFee: () => request<{ fee: number; enabled: boolean }>("/api/track-me/fee"),
+  trackMeStart: (body: { latitude?: number; longitude?: number }) =>
+    request<{ session_id: string; trip_reference: string; share_url: string; fee_charged: number; already_active: boolean }>("/api/track-me/start", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  trackMePing: (sessionId: string, body: { latitude: number; longitude: number; accuracy?: number }) =>
+    request<{ ok: boolean }>(`/api/track-me/${sessionId}/ping`, {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  trackMeEnd: (sessionId: string) =>
+    request<{ ok: boolean }>(`/api/track-me/${sessionId}/end`, { method: "POST", body: "{}" }),
+  trackMeActive: () => request<{ session: { id: string; trip_reference: string; share_url: string; started_at: string } | null }>("/api/track-me/active"),
+
   adminDriverLocations: () => request<any[]>("/api/trips/driver-locations"),
 
   adminIncidents: () => request<any[]>("/api/admin/incidents"),

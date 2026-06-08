@@ -105,6 +105,11 @@ export default function Home() {
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
   const [trackMeLoading, setTrackMeLoading] = useState(false);
+  const [trackMeSession, setTrackMeSession] = useState<{ id: string; share_url: string } | null>(null);
+  const [trackMeFee, setTrackMeFee] = useState<number>(3);
+  const [trackMeConfirmModal, setTrackMeConfirmModal] = useState(false);
+  const [trackMeStartLocation, setTrackMeStartLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const trackMePingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -116,10 +121,18 @@ export default function Home() {
       setAllTxns(t);
       setTxns(t.filter((tx: Txn) => !hidden.includes(tx.id)).slice(0, 5));
       if (sp !== null) setSafetyProfileComplete(!!sp?.profile_complete);
-      // Passenger: check if in active trip
+      // Passenger: check active trip + active track-me session + fee
       if (state.status === "authed" && state.user.role === "passenger") {
-        const pt = await api.tripsPassengerCurrent().catch(() => null);
+        const [pt, tm, fee] = await Promise.all([
+          api.tripsPassengerCurrent().catch(() => null),
+          api.trackMeActive().catch(() => null),
+          api.trackMeFee().catch(() => null),
+        ]);
         setPassengerTrip(pt?.trip || null);
+        if (tm?.session) {
+          setTrackMeSession({ id: tm.session.id, share_url: tm.session.share_url });
+        }
+        if (fee?.fee !== undefined) setTrackMeFee(fee.fee);
       }
     } catch {}
     finally { setLoading(false); setRefreshing(false); }
@@ -419,29 +432,81 @@ export default function Home() {
     }
   };
 
-  const handleTrackMe = async () => {
-    if (!passengerTrip) {
-      Alert.alert(
-        "Not in a trip yet",
-        "Track Me is available once you're in an active taxi ride.\n\nPay your fare and board a taxi — a live tracking link will be ready for you to share with family.",
-        [{ text: "Got it" }]
-      );
+  const stopTrackMePing = () => {
+    if (trackMePingRef.current) { clearInterval(trackMePingRef.current); trackMePingRef.current = null; }
+  };
+
+  const startTrackMePing = (sessionId: string) => {
+    stopTrackMePing();
+    trackMePingRef.current = setInterval(async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        await api.trackMePing(sessionId, {
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          accuracy: loc.coords.accuracy ?? undefined,
+        });
+      } catch {}
+    }, 30000);
+  };
+
+  const handleTrackMeStop = async () => {
+    if (!trackMeSession) return;
+    stopTrackMePing();
+    try { await api.trackMeEnd(trackMeSession.id); } catch {}
+    setTrackMeSession(null);
+    Alert.alert("Tracking stopped", "Your live location sharing has ended.");
+  };
+
+  const handleTrackMeOpenConfirm = async () => {
+    // If already in a taxi trip — free, share instantly
+    if (passengerTrip) {
+      setTrackMeLoading(true);
+      try {
+        const res = await api.tripsShare({ trip_id: passengerTrip.id });
+        await Share.share({
+          message: `🛡️ I'm in a Tag n Ride taxi right now. Track me live:\n\n${res.share_url}${passengerTrip.vehicle_plate ? `\n\nVehicle: ${passengerTrip.vehicle_plate}` : ""}\n\nUpdates every 30 seconds.`,
+          url: res.share_url,
+        });
+      } catch (e: any) {
+        if (e?.message !== "User did not share") Alert.alert("Could not share", e?.message || "Please try again.");
+      } finally { setTrackMeLoading(false); }
       return;
     }
+    // Standalone session — get location first, then show confirm
     setTrackMeLoading(true);
     try {
-      const res = await api.tripsShare({ trip_id: passengerTrip.id });
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setTrackMeStartLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+      } else {
+        setTrackMeStartLocation(null);
+      }
+    } catch { setTrackMeStartLocation(null); }
+    finally { setTrackMeLoading(false); }
+    setTrackMeConfirmModal(true);
+  };
+
+  const handleTrackMeStart = async () => {
+    setTrackMeConfirmModal(false);
+    setTrackMeLoading(true);
+    try {
+      const res = await api.trackMeStart({
+        latitude: trackMeStartLocation?.latitude,
+        longitude: trackMeStartLocation?.longitude,
+      });
+      setTrackMeSession({ id: res.session_id, share_url: res.share_url });
+      startTrackMePing(res.session_id);
       await Share.share({
-        message: `🛡️ I'm in a Tag n Ride taxi right now. Track me live for my safety:\n\n${res.share_url}${passengerTrip.vehicle_plate ? `\n\nVehicle: ${passengerTrip.vehicle_plate}` : ""}\n\nThis link updates every 30 seconds with my real-time location.`,
+        message: `🛡️ I've started a live safety tracker. Track my location here:\n\n${res.share_url}\n\nUpdates every 30 seconds while I have the app open.`,
         url: res.share_url,
       });
     } catch (e: any) {
-      if (e?.message !== "User did not share") {
-        Alert.alert("Could not share", e?.message || "Please try again.");
-      }
-    } finally {
-      setTrackMeLoading(false);
-    }
+      if (e?.message !== "User did not share") Alert.alert("Could not start", e?.message || "Please try again.");
+    } finally { setTrackMeLoading(false); }
   };
 
   const s = makeStyles(colors);
@@ -659,35 +724,46 @@ export default function Home() {
             {/* Track Me — safety quick action */}
             <TouchableOpacity
               testID="qa-trackme"
-              onPress={handleTrackMe}
+              onPress={trackMeSession ? handleTrackMeStop : handleTrackMeOpenConfirm}
               activeOpacity={0.85}
               disabled={trackMeLoading}
               style={[
                 s.trackMeBtn,
-                passengerTrip
-                  ? { borderColor: "#00E5FF50", backgroundColor: "rgba(0,229,255,0.05)" }
-                  : { borderColor: colors.border, backgroundColor: colors.bg2 },
+                trackMeSession
+                  ? { borderColor: "#4ade8050", backgroundColor: "rgba(74,222,128,0.05)" }
+                  : passengerTrip
+                    ? { borderColor: "#00E5FF50", backgroundColor: "rgba(0,229,255,0.05)" }
+                    : { borderColor: colors.border, backgroundColor: colors.bg2 },
               ]}>
               <View style={[
                 s.trackMeIconWrap,
-                { backgroundColor: passengerTrip ? "rgba(0,229,255,0.14)" : "rgba(128,128,128,0.1)" },
+                { backgroundColor: trackMeSession ? "rgba(74,222,128,0.14)" : passengerTrip ? "rgba(0,229,255,0.14)" : "rgba(128,128,128,0.1)" },
               ]}>
                 {trackMeLoading
-                  ? <ActivityIndicator size="small" color="#00E5FF" />
-                  : <Ionicons name="navigate" size={22} color={passengerTrip ? "#00E5FF" : colors.textMuted} />}
+                  ? <ActivityIndicator size="small" color={trackMeSession ? "#4ade80" : "#00E5FF"} />
+                  : <Ionicons name="navigate" size={22} color={trackMeSession ? "#4ade80" : passengerTrip ? "#00E5FF" : colors.textMuted} />}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: passengerTrip ? "#00E5FF" : colors.text, fontWeight: "700", fontSize: 14 }}>
+                <Text style={{ color: trackMeSession ? "#4ade80" : passengerTrip ? "#00E5FF" : colors.text, fontWeight: "700", fontSize: 14 }}>
                   Track Me
                 </Text>
-                <Text style={{ color: passengerTrip ? "#00E5FF90" : colors.textMuted, fontSize: 11, marginTop: 2 }}>
-                  {passengerTrip ? "Send live location link to family" : "Share your location when in a taxi"}
+                <Text style={{ color: trackMeSession ? "#4ade8090" : passengerTrip ? "#00E5FF90" : colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                  {trackMeSession
+                    ? "Broadcasting live · tap to stop"
+                    : passengerTrip
+                      ? "Share taxi live location · free"
+                      : `Share your location anytime · R${trackMeFee.toFixed(2)}`}
                 </Text>
               </View>
-              {passengerTrip ? (
+              {trackMeSession ? (
                 <View style={s.trackMeLiveBadge}>
                   <View style={s.trackMeLiveDot} />
                   <Text style={s.trackMeLiveText}>LIVE</Text>
+                </View>
+              ) : passengerTrip ? (
+                <View style={[s.trackMeLiveBadge, { borderColor: "rgba(0,229,255,0.25)", backgroundColor: "rgba(0,229,255,0.12)" }]}>
+                  <View style={[s.trackMeLiveDot, { backgroundColor: "#00E5FF" }]} />
+                  <Text style={[s.trackMeLiveText, { color: "#00E5FF" }]}>FREE</Text>
                 </View>
               ) : (
                 <Ionicons name="share-social-outline" size={18} color={colors.textDim} />
@@ -950,6 +1026,51 @@ export default function Home() {
           </View>
         </View>
       </Modal>
+      {/* Track Me confirm modal */}
+      <Modal visible={trackMeConfirmModal} transparent animationType="slide" onRequestClose={() => setTrackMeConfirmModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalSheet}>
+            <View style={s.modalHandle} />
+            <View style={[s.modalIconWrap, { backgroundColor: "rgba(0,229,255,0.08)", borderColor: "#00E5FF40" }]}>
+              <Ionicons name="navigate" size={28} color="#00E5FF" />
+            </View>
+            <Text style={s.modalTitle}>Start Track Me</Text>
+            <Text style={s.modalSub}>Share your live location with family or friends for your safety.</Text>
+
+            <View style={{ backgroundColor: colors.bg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 16, gap: 10 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Ionicons name="navigate-circle-outline" size={18} color="#00E5FF" />
+                <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>Your GPS location pings every 30 seconds</Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Ionicons name="eye-outline" size={18} color="#00E5FF" />
+                <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>Anyone with the link can see your location</Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Ionicons name="phone-portrait-outline" size={18} color={colors.yellow} />
+                <Text style={{ color: colors.textMuted, fontSize: 13, flex: 1 }}>Tracking pauses if you close the app</Text>
+              </View>
+            </View>
+
+            <View style={{ alignSelf: "center", backgroundColor: colors.bg, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10, borderWidth: 1, borderColor: "#00E5FF40", marginBottom: 20 }}>
+              <Text style={{ color: "#00E5FF", fontWeight: "900", fontSize: 18 }}>R{trackMeFee.toFixed(2)} <Text style={{ color: colors.textMuted, fontWeight: "600", fontSize: 13 }}>deducted from wallet</Text></Text>
+            </View>
+
+            <View style={s.modalActions}>
+              <View style={{ flex: 1 }}>
+                <Button label="Cancel" variant="secondary" onPress={() => setTrackMeConfirmModal(false)} />
+              </View>
+              <TouchableOpacity
+                onPress={handleTrackMeStart}
+                style={{ flex: 1, backgroundColor: "#00E5FF", borderRadius: 10, paddingVertical: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+                <Ionicons name="navigate" size={16} color="#000" />
+                <Text style={{ color: "#000", fontWeight: "900", fontSize: 14 }}>Start Tracking</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Pay Out modal */}
       <Modal visible={payOutModal} transparent animationType="slide" onRequestClose={() => setPayOutModal(false)}>
         <View style={s.modalOverlay}>

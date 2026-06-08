@@ -284,8 +284,8 @@ export default function TrackPage() {
                 <div style={{ flex: 1 }}>
                   <div style={{ color: isActive ? C.green : "#aaa", fontWeight: 800, fontSize: 15 }}>
                     {isActive
-                      ? "Your person is on the road"
-                      : "Trip has been completed safely"}
+                      ? (trip.is_personal_track ? "Live location active" : "Your person is on the road")
+                      : (trip.is_personal_track ? "Tracking session ended" : "Trip has been completed safely")}
                   </div>
                   <div style={{ color: C.textMut, fontSize: 12, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
                     {trip.started_at && (
@@ -302,11 +302,19 @@ export default function TrackPage() {
               </div>
             </div>
 
-            {/* Vehicle + driver */}
+            {/* Vehicle + driver / Person */}
             <div style={cardStyle()}>
-              <Row label="Vehicle" value={trip.vehicle_plate || "Not recorded"} mono accent={C.cyan} />
-              <Row label="Driver" value={trip.driver_name || "—"} />
-              <Row label="Passengers in vehicle" value={String(trip.passenger_count ?? 0)} />
+              {trip.is_personal_track ? (
+                <>
+                  <Row label="Person being tracked" value={trip.driver_name || "—"} />
+                </>
+              ) : (
+                <>
+                  <Row label="Vehicle" value={trip.vehicle_plate || "Not recorded"} mono accent={C.cyan} />
+                  <Row label="Driver" value={trip.driver_name || "—"} />
+                  <Row label="Passengers in vehicle" value={String(trip.passenger_count ?? 0)} />
+                </>
+              )}
               {hasLocation && (
                 <Row
                   label="Location updated"
@@ -369,7 +377,9 @@ export default function TrackPage() {
                 <div style={{ fontSize: 32, marginBottom: 10 }}>📡</div>
                 <div style={{ color: C.textMut, fontWeight: 700, fontSize: 14 }}>Waiting for GPS location</div>
                 <div style={{ color: C.textDim, fontSize: 12, marginTop: 6 }}>
-                  Location will appear once the driver's device sends a GPS ping
+                  {trip?.is_personal_track
+                    ? "Location will appear once the person's device sends a GPS ping"
+                    : "Location will appear once the driver's device sends a GPS ping"}
                 </div>
               </div>
             )}

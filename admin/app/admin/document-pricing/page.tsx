@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Button, Spinner, Input } from "@/components/ui";
 import { hasPermission, isSuperAdmin } from "@/lib/api";
-import { Save, ToggleLeft, ToggleRight, FileText, ShieldCheck, Building2, Users, Info } from "lucide-react";
+import { Save, ToggleLeft, ToggleRight, FileText, ShieldCheck, Building2, Users, Info, Navigation } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
@@ -366,6 +366,41 @@ export default function DocumentPricingPage() {
               Current saved price: <span className="font-mono text-textMuted">{formatR(payoutSettings.passenger_statement_price)}</span> per statement
             </p>
           )}
+        </Card>
+
+        {/* ── Track Me Session Fee ── */}
+        <Card>
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-9 h-9 rounded-xl bg-cyan/10 border border-cyan/20 flex items-center justify-center">
+              <Navigation size={16} className="text-cyan" />
+            </div>
+            <div>
+              <h2 className="text-text font-bold text-sm">Track Me</h2>
+              <p className="text-textDim text-[11px]">Fee charged per standalone tracking session (passengers, anytime)</p>
+            </div>
+            <div className="ml-auto">
+              <EnabledToggle
+                label="Enabled"
+                enabled={boolVal("track_me_enabled")}
+                onChange={() => toggleConfig("track_me_enabled", boolVal("track_me_enabled"))}
+                disabled={!canEdit}
+              />
+            </div>
+          </div>
+
+          <PeriodRow
+            label="Per Session"
+            configKey="track_me_fee"
+            value={edited["track_me_fee"] ?? config["track_me_fee"] ?? "3.00"}
+            saved={!!(config["track_me_fee"] !== edited["track_me_fee"])}
+            saving={savingKey === "track_me_fee"}
+            onChange={v => setEdited(prev => ({ ...prev, track_me_fee: v }))}
+            onSave={() => saveConfigKey("track_me_fee")}
+            disabled={!canEdit}
+          />
+          <p className="text-[10px] text-textDim mt-3">
+            Free when passenger is already in an active taxi trip. Set to 0 to make it always free.
+          </p>
         </Card>
 
       </div>
