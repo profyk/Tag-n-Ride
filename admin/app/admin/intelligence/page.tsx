@@ -286,8 +286,8 @@ export default function IntelligencePage() {
     setError(null);
     try {
       const [ovRes, lbRes] = await Promise.all([
-        client.get("/admin/intelligence/overview"),
-        client.get("/admin/intelligence/leaderboard"),
+        client.get("/api/admin/intelligence/overview"),
+        client.get("/api/admin/intelligence/leaderboard"),
       ]);
       setOverview(ovRes.data);
       setLeaderboard(lbRes.data);
@@ -324,7 +324,7 @@ export default function IntelligencePage() {
     setAiLoading(true);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     try {
-      const res = await client.post("/admin/intelligence/ask", { question: text });
+      const res = await client.post("/api/admin/intelligence/ask", { question: text });
       setMessages(m => [...m, {
         role: "ai",
         text: res.data.answer,
