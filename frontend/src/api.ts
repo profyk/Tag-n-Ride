@@ -53,6 +53,7 @@ export const api = {
     id_number?: string;
     email?: string;
     password?: string;
+    driver_mode?: boolean;
   }) =>
     request<{ token: string; user: User }>("/api/auth/register", {
       method: "POST",
@@ -220,12 +221,6 @@ export const api = {
   driverCashupHistory: () => request<any[]>("/api/driver/cashup-history"),
 
   // ── Owner cash-up management ──
-  ownerSetTarget: (driver_user_id: string, daily_target: number) =>
-    request<any>(`/api/owner/drivers/${driver_user_id}/set-target`, {
-      method: "POST",
-      body: JSON.stringify({ daily_target }),
-    }),
-
   ownerConfirmDriver: (driver_user_id: string) =>
     request<any>(`/api/owner/drivers/${driver_user_id}/confirm`, {
       method: "POST",

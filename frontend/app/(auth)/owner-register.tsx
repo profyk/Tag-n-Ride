@@ -225,6 +225,7 @@ export default function OwnerRegister() {
         password: password,
         business_name: businessName.trim() || undefined,
         id_number: idNumber.trim() || undefined,
+        driver_mode: driverMode === true,
       });
       await tokenStore.set(r.token);
       if (driverMode && selfie && licenceFront) {

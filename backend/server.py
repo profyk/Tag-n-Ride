@@ -674,6 +674,8 @@ class RegisterIn(BaseModel):
     email: Optional[str] = Field(default=None, max_length=255)
     # Owner login password (bcrypt) — required for role=owner
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    # Whether owner also drives (stored in fleet_owners.registered_as_driver)
+    driver_mode: Optional[bool] = None
 
     @field_validator("pin")
     @classmethod
@@ -876,8 +878,8 @@ async def register(body: RegisterIn):
                 )
             if body.role == "owner":
                 await conn.execute(
-                    "INSERT INTO fleet_owners (id,user_id,business_name) VALUES ($1,$2,$3)",
-                    str(uuid.uuid4()), user_id, body.business_name
+                    "INSERT INTO fleet_owners (id,user_id,business_name,registered_as_driver) VALUES ($1,$2,$3,$4)",
+                    str(uuid.uuid4()), user_id, body.business_name, bool(body.driver_mode)
                 )
                 await conn.execute(
                     "INSERT INTO drivers (id,user_id,qr_code,vehicle_plate) VALUES ($1,$2,$3,$4)",
@@ -3213,6 +3215,15 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT FALSE")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vehicle_plate TEXT")
                 await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT FALSE")
+                # Owner auth columns — required for owner registration and login
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT")
+                await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by TEXT")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS flagged BOOLEAN DEFAULT FALSE")
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS flag_reason TEXT")
                 # New tables
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS support_notes (

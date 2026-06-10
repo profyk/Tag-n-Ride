@@ -9,7 +9,7 @@ type AuthState =
 type Ctx = {
   state: AuthState;
   signIn: (phone_number: string, pin: string) => Promise<User>;
-  signUp: (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string }) => Promise<User>;
+  signUp: (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; driver_mode?: boolean }) => Promise<User>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = useCallback(
-    async (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string }) => {
+    async (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string; driver_mode?: boolean }) => {
       const r = await api.register(body);
       await tokenStore.set(r.token);
       setState({ status: "authed", user: r.user });
