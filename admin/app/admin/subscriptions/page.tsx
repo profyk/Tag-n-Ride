@@ -15,7 +15,7 @@ import {
   AreaChart, Area, Cell,
 } from "recharts";
 
-const STATUS_TONE: Record<string, "green" | "red" | "yellow" | "muted"> = {
+const STATUS_TONE: Record<string, "green" | "red" | "yellow" | "cyan" | "muted"> = {
   active: "green", overdue: "red", cancelled: "muted", free: "cyan",
 };
 
