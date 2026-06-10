@@ -522,16 +522,10 @@ export default function Home() {
           <Text style={s.name} testID="home-username">{state.user.full_name.split(" ")[0]} 👋</Text>
         </View>
         <View style={s.headerActions}>
-          <TouchableOpacity onPress={() => router.push("/(app)/documents")} style={s.headerBtn} testID="home-docs-btn">
-            <Ionicons name="document-text-outline" size={22} color={colors.text} />
-            {docsUnreadCount > 0 && (
-              <View style={s.badge}><Text style={s.badgeText}>{docsUnreadCount > 9 ? "9+" : docsUnreadCount}</Text></View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push("/(app)/notifications")} style={s.headerBtn} testID="home-notif-btn">
+          <TouchableOpacity onPress={() => router.push("/(app)/notifications")} style={s.headerBtn} testID="home-inbox-btn">
             <Ionicons name="notifications-outline" size={22} color={colors.text} />
-            {unreadCount > 0 && (
-              <View style={s.badge}><Text style={s.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View>
+            {(unreadCount + docsUnreadCount) > 0 && (
+              <View style={s.badge}><Text style={s.badgeText}>{(unreadCount + docsUnreadCount) > 9 ? "9+" : (unreadCount + docsUnreadCount)}</Text></View>
             )}
           </TouchableOpacity>
           {/* SOS button in top bar — tap 3× to open */}

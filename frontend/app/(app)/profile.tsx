@@ -479,8 +479,9 @@ const APP_VERSION = "1.0.0";export default function Profile() {
             onPress={() => router.push("/(app)/trip-centre")} testID="row-tripcentre" colors={colors} />
         )}
 
-        <Row icon="folder-outline" label="My Documents"
-          onPress={() => router.push("/(app)/documents")} testID="row-documents" colors={colors} />
+        <Row icon="notifications-outline" label="Inbox"
+          sub="Alerts and documents"
+          onPress={() => router.push("/(app)/notifications")} testID="row-inbox" colors={colors} />
         {isPassenger && (
           <Row icon="add-circle-outline" label="Top up wallet"
             onPress={() => router.push("/topup")} testID="row-topup" colors={colors} />
