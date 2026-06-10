@@ -12,7 +12,7 @@ import {
   Terminal, Sun, Moon, FlaskConical, RefreshCw,
   DollarSign, RotateCcw, PieChart, Banknote,
   ShieldAlert, AlertOctagon, Gauge, Tag, Megaphone,
-  Zap, Globe, Star, MessageCircle,
+  Globe, Star, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
 } from "lucide-react";
@@ -159,7 +159,6 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Settings,
     color: "text-textMuted",
     items: [
-      { label: "Pricing Rules",    href: "/admin/pricing",          icon: Zap,      permission: "manage_pricing" },
       { label: "Document Pricing", href: "/admin/document-pricing", icon: FileText, permission: "edit_fees" },
       { label: "Coverage Zones",   href: "/admin/geography",        icon: Globe,    permission: "view_analytics" },
       { label: "System Health",    href: "/admin/health",           icon: Activity, permission: "view_audit" },
