@@ -15,7 +15,7 @@ import {
   Globe, Star, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
-  Landmark, ClipboardList,
+  Landmark, ClipboardList, Download, Zap,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -103,6 +103,9 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Accounting",            href: "/admin/accounting",     icon: Calculator,   permission: "view_analytics" },
       { label: "Statements",            href: "/admin/statements",     icon: FileText,     permission: "download_statements" },
       { label: "Financial Reports",     href: "/admin/reports",        icon: BarChart3,    permission: "view_analytics" },
+      { label: "Subscriptions",         href: "/admin/subscriptions",  icon: Tag,          permission: "view_analytics" },
+      { label: "Fee Simulator",         href: "/admin/fee-simulator",  icon: Calculator,   permission: "view_analytics" },
+      { label: "Export Center",         href: "/admin/export-center",  icon: Download,     permission: "export_data" },
       { label: "Document Pricing",      href: "/admin/document-pricing", icon: Tag,        permission: "edit_fees" },
     ],
   },
@@ -144,6 +147,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Risk & Fraud",      href: "/admin/risk",       icon: ShieldAlert,   permission: "view_risk" },
       { label: "Disputes",          href: "/admin/disputes",   icon: Scale,         permission: "manage_users" },
       { label: "Tx Limits",         href: "/admin/limits",     icon: Gauge,         permission: "manage_limits" },
+      { label: "Velocity Monitor",  href: "/admin/velocity",   icon: Zap,           permission: "manage_limits" },
       { label: "GDPR & Privacy",    href: "/admin/gdpr",       icon: ShieldCheck,   permission: "view_audit" },
     ],
   },

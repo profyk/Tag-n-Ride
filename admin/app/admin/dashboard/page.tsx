@@ -7,6 +7,7 @@ import { formatZAR, formatDate } from "@/lib/utils";
 import {
   AlertTriangle, Download, CheckCircle, RefreshCw, TrendingUp, TrendingDown,
   ArrowRight, Copy, Clock, ShieldCheck, Zap, Users, Activity,
+  Calculator, BarChart3, Brain, Shield, Wallet, CreditCard,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
@@ -124,12 +125,15 @@ export default function DashboardPage() {
         {/* Quick links */}
         <div className="flex items-center gap-2 flex-wrap">
           {[
-            { href: "/admin/withdrawals", label: "Withdrawals", color: "text-yellow border-yellow/20 hover:bg-yellow/5" },
-            { href: "/admin/kyc", label: "KYC Review", color: "text-cyan border-cyan/20 hover:bg-cyan/5" },
-            { href: "/admin/drivers", label: "Drivers", color: "text-purple border-purple/20 hover:bg-purple/5" },
-            { href: "/admin/support", label: "Support Lookup", color: "text-green border-green/20 hover:bg-green/5" },
-            { href: "/admin/transactions", label: "Transactions", color: "text-textMuted border-border hover:bg-bg2" },
-            { href: "/admin/payroll", label: "Payroll", color: "text-textMuted border-border hover:bg-bg2" },
+            { href: "/admin/withdrawals",   label: "Withdrawals",    color: "text-yellow border-yellow/20 hover:bg-yellow/5" },
+            { href: "/admin/kyc",           label: "KYC Review",     color: "text-cyan border-cyan/20 hover:bg-cyan/5" },
+            { href: "/admin/drivers",       label: "Drivers",        color: "text-purple border-purple/20 hover:bg-purple/5" },
+            { href: "/admin/support",       label: "Support Lookup", color: "text-green border-green/20 hover:bg-green/5" },
+            { href: "/admin/transactions",  label: "Transactions",   color: "text-textMuted border-border hover:bg-bg2" },
+            { href: "/admin/payroll",       label: "Payroll",        color: "text-textMuted border-border hover:bg-bg2" },
+            { href: "/admin/fee-simulator", label: "Fee Simulator",  color: "text-textMuted border-border hover:bg-bg2" },
+            { href: "/admin/velocity",      label: "Velocity",       color: "text-red/80 border-red/20 hover:bg-red/5" },
+            { href: "/admin/export-center", label: "Export Center",  color: "text-textMuted border-border hover:bg-bg2" },
           ].map(l => (
             <Link key={l.href} href={l.href}>
               <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${l.color}`}>
@@ -137,6 +141,35 @@ export default function DashboardPage() {
               </span>
             </Link>
           ))}
+        </div>
+
+        {/* Tools row */}
+        <div>
+          <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3">Platform Tools</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { href: "/admin/fee-simulator", label: "Fee Simulator", desc: "Calculate fees interactively", icon: Calculator, color: "text-cyan", bg: "bg-cyan/10" },
+              { href: "/admin/intelligence",  label: "AI Intelligence", desc: "Ask AI, system pulse", icon: Brain, color: "text-purple", bg: "bg-purple/10" },
+              { href: "/admin/velocity",      label: "Velocity Monitor", desc: "Fraud velocity rules", icon: Zap, color: "text-red", bg: "bg-red/10" },
+              { href: "/admin/export-center", label: "Export Center", desc: "Download platform data", icon: Download, color: "text-green", bg: "bg-green/10" },
+            ].map(tool => {
+              const Icon = tool.icon;
+              return (
+                <Link key={tool.href} href={tool.href}>
+                  <div className="flex items-center gap-3 p-3 bg-bg2 border border-border rounded-xl hover:border-cyan/20 cursor-pointer transition-all group">
+                    <div className={`w-9 h-9 rounded-xl ${tool.bg} flex items-center justify-center flex-shrink-0`}>
+                      <Icon size={16} className={tool.color} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-text text-xs font-bold leading-tight">{tool.label}</p>
+                      <p className="text-textDim text-[10px] leading-tight mt-0.5 truncate">{tool.desc}</p>
+                    </div>
+                    <ArrowRight size={12} className="text-textDim ml-auto group-hover:text-textMuted flex-shrink-0 transition-colors" />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
 
         {/* Today stats */}

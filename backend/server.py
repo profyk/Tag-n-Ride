@@ -3546,6 +3546,33 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS expected NUMERIC(14,2) DEFAULT 0")
                 await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS actual NUMERIC(14,2) DEFAULT 0")
                 await conn.execute("ALTER TABLE reconciliation_discrepancies ADD COLUMN IF NOT EXISTS resolution_note TEXT")
+                # velocity_rules + velocity_alerts tables
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS velocity_rules (
+                        id SERIAL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        description TEXT DEFAULT '',
+                        tx_type TEXT NOT NULL DEFAULT 'all',
+                        window_minutes INTEGER NOT NULL DEFAULT 60,
+                        max_count INTEGER NOT NULL DEFAULT 10,
+                        max_amount NUMERIC(14,2) NOT NULL DEFAULT 5000,
+                        action TEXT NOT NULL DEFAULT 'flag',
+                        active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS velocity_alerts (
+                        id SERIAL PRIMARY KEY,
+                        user_id TEXT REFERENCES users(id),
+                        rule_id INTEGER REFERENCES velocity_rules(id),
+                        tx_count INTEGER NOT NULL DEFAULT 0,
+                        tx_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+                        action_taken TEXT NOT NULL DEFAULT 'flagged',
+                        resolved BOOLEAN DEFAULT FALSE,
+                        triggered_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
                 # Seed default tx limits
                 for lid, role, dl, stl, ml, mint, maxt, maxw, minw in [
                     ("lim-pass-std","passenger",5000,2000,30000,10,5000,0,50),
@@ -4520,6 +4547,227 @@ async def export_financial_report(request: Request, admin: dict = Depends(requir
         writer.writerow([str(r["month"])[:7], float(r["gross_volume"] or 0), float(r["fee_revenue"] or 0), r["txn_count"], float(r["driver_payouts"] or 0)])
     output.seek(0)
     return StreamingResponse(io.BytesIO(output.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=financial-report.csv"})
+
+@api.get("/admin/export/drivers")
+async def export_drivers(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "export_data"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.full_name, u.phone_number, d.vehicle_plate, d.vehicle_model,
+                   d.is_verified, d.kyc_status, d.rating,
+                   COALESCE(w.balance, 0) as wallet_balance, u.is_active, u.created_at
+            FROM users u
+            JOIN drivers d ON d.user_id = u.id
+            LEFT JOIN wallets w ON w.user_id = u.id
+            ORDER BY u.created_at DESC
+        """)
+        await audit(conn, admin["id"], "EXPORT_DRIVERS", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Full Name","Phone","Plate","Vehicle","Verified","KYC Status","Rating","Wallet Balance","Active","Joined"])
+    for r in rows:
+        w.writerow([r["full_name"],r["phone_number"],r["vehicle_plate"] or "",r["vehicle_model"] or "",r["is_verified"],r["kyc_status"] or "",float(r["rating"] or 0),float(r["wallet_balance"]),r["is_active"],iso(r["created_at"])])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=drivers.csv"})
+
+@api.get("/admin/export/owners")
+async def export_owners(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "export_data"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.full_name, u.email, u.phone_number, fo.cashup_method,
+                   fo.bank_name, fo.account_number, fo.account_name,
+                   COUNT(od.id) as driver_count, u.is_active, u.created_at
+            FROM users u
+            JOIN fleet_owners fo ON fo.user_id = u.id
+            LEFT JOIN owner_drivers od ON od.owner_id = fo.id
+            GROUP BY u.full_name, u.email, u.phone_number, fo.cashup_method,
+                     fo.bank_name, fo.account_number, fo.account_name, u.is_active, u.created_at
+            ORDER BY u.created_at DESC
+        """)
+        await audit(conn, admin["id"], "EXPORT_OWNERS", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Full Name","Email","Phone","Cashup Method","Bank","Account Number","Account Name","Drivers","Active","Joined"])
+    for r in rows:
+        w.writerow([r["full_name"],r["email"] or "",r["phone_number"] or "",r["cashup_method"] or "",r["bank_name"] or "",r["account_number"] or "",r["account_name"] or "",r["driver_count"],r["is_active"],iso(r["created_at"])])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=fleet-owners.csv"})
+
+@api.get("/admin/export/withdrawals")
+async def export_withdrawals(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "export_data"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT wr.id, u.full_name, u.phone_number, wr.amount, wr.status,
+                   wr.bank_name, wr.account_number, wr.account_name,
+                   wr.created_at, wr.processed_at
+            FROM withdrawal_requests wr
+            JOIN users u ON u.id = wr.user_id
+            ORDER BY wr.created_at DESC
+        """)
+        await audit(conn, admin["id"], "EXPORT_WITHDRAWALS", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["ID","Full Name","Phone","Amount","Status","Bank","Account Number","Account Name","Requested","Processed"])
+    for r in rows:
+        w.writerow([r["id"],r["full_name"],r["phone_number"] or "",float(r["amount"]),r["status"],r["bank_name"] or "",r["account_number"] or "",r["account_name"] or "",iso(r["created_at"]),iso(r["processed_at"]) if r["processed_at"] else ""])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=withdrawals.csv"})
+
+@api.get("/admin/export/refunds")
+async def export_refunds(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT rr.id, u.full_name, u.phone_number, t.reference as txn_ref,
+                   rr.amount, rr.reason, rr.status, rr.created_at, rr.resolved_at
+            FROM refund_requests rr
+            JOIN users u ON u.id = rr.user_id
+            LEFT JOIN transactions t ON t.id = rr.transaction_id
+            ORDER BY rr.created_at DESC
+        """)
+        await audit(conn, admin["id"], "EXPORT_REFUNDS", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["ID","Full Name","Phone","Txn Reference","Amount","Reason","Status","Requested","Resolved"])
+    for r in rows:
+        w.writerow([r["id"],r["full_name"],r["phone_number"] or "",r["txn_ref"] or "",float(r["amount"] or 0),r["reason"] or "",r["status"],iso(r["created_at"]),iso(r["resolved_at"]) if r["resolved_at"] else ""])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=refunds.csv"})
+
+@api.get("/admin/export/kyc")
+async def export_kyc(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "review_kyc"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.full_name, u.phone_number, d.kyc_status, d.is_verified,
+                   kd.document_type, kd.status as doc_status, kd.created_at as submitted_at, kd.reviewed_at
+            FROM users u
+            JOIN drivers d ON d.user_id = u.id
+            LEFT JOIN kyc_documents kd ON kd.user_id = u.id
+            ORDER BY kd.created_at DESC NULLS LAST
+        """)
+        await audit(conn, admin["id"], "EXPORT_KYC", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Full Name","Phone","KYC Status","Verified","Document Type","Doc Status","Submitted","Reviewed"])
+    for r in rows:
+        w.writerow([r["full_name"],r["phone_number"] or "",r["kyc_status"] or "",r["is_verified"],r["document_type"] or "",r["doc_status"] or "",iso(r["submitted_at"]) if r["submitted_at"] else "",iso(r["reviewed_at"]) if r["reviewed_at"] else ""])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=kyc-submissions.csv"})
+
+@api.get("/admin/export/flagged")
+async def export_flagged(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_risk"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.full_name, u.phone_number, u.role, u.is_active, u.ban_reason,
+                   COALESCE(w.frozen_reason, '') as frozen_reason,
+                   w.frozen as wallet_frozen, u.created_at
+            FROM users u
+            LEFT JOIN wallets w ON w.user_id = u.id
+            WHERE u.is_active = false OR w.frozen = true OR u.ban_reason IS NOT NULL
+            ORDER BY u.created_at DESC
+        """)
+        await audit(conn, admin["id"], "EXPORT_FLAGGED", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Full Name","Phone","Role","Active","Ban Reason","Wallet Frozen","Frozen Reason","Joined"])
+    for r in rows:
+        w.writerow([r["full_name"],r["phone_number"] or "",r["role"],r["is_active"],r["ban_reason"] or "",r["wallet_frozen"],r["frozen_reason"],iso(r["created_at"])])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=flagged-accounts.csv"})
+
+@api.get("/admin/export/payroll")
+async def export_payroll(request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_staff"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT pr.id, pr.period_label, pr.run_date, pr.total_gross,
+                   pr.total_paye, pr.total_uif, pr.total_net,
+                   pr.staff_count, pr.status, pr.executed_by
+            FROM payroll_runs pr
+            ORDER BY pr.run_date DESC
+        """)
+        await audit(conn, admin["id"], "EXPORT_PAYROLL", None, None, {"count": len(rows)}, request.client.host)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Run ID","Period","Run Date","Gross","PAYE","UIF","Net","Staff Count","Status","Run By"])
+    for r in rows:
+        w.writerow([r["id"],r["period_label"] or "",iso(r["run_date"]) if r["run_date"] else "",float(r["total_gross"] or 0),float(r["total_paye"] or 0),float(r["total_uif"] or 0),float(r["total_net"] or 0),r["staff_count"] or 0,r["status"],r["executed_by"] or ""])
+    out.seek(0)
+    return StreamingResponse(io.BytesIO(out.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=payroll.csv"})
+
+# ── Admin: Velocity Rules ─────────────────────────────────────
+
+@api.get("/admin/velocity/rules")
+async def get_velocity_rules(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM velocity_rules ORDER BY created_at DESC")
+    return [dict(r) for r in rows]
+
+@api.post("/admin/velocity/rules")
+async def create_velocity_rule(body: dict, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_limits"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO velocity_rules (name, description, tx_type, window_minutes, max_count, max_amount, action, active, created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,true,NOW())
+            RETURNING *
+        """, body.get("name"), body.get("description",""), body.get("tx_type","all"),
+            int(body.get("window_minutes",60)), int(body.get("max_count",10)),
+            float(body.get("max_amount",5000)), body.get("action","flag"))
+        await audit(conn, admin["id"], "CREATE_VELOCITY_RULE", str(row["id"]), "velocity_rule", {"name": body.get("name")}, request.client.host)
+    return dict(row)
+
+@api.patch("/admin/velocity/rules/{rule_id}")
+async def update_velocity_rule(rule_id: int, body: dict, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_limits"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        if "active" in body:
+            await conn.execute("UPDATE velocity_rules SET active=$1 WHERE id=$2", body["active"], rule_id)
+        await audit(conn, admin["id"], "UPDATE_VELOCITY_RULE", str(rule_id), "velocity_rule", body, request.client.host)
+    return {"ok": True}
+
+@api.delete("/admin/velocity/rules/{rule_id}")
+async def delete_velocity_rule(rule_id: int, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "manage_limits"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM velocity_rules WHERE id=$1", rule_id)
+        await audit(conn, admin["id"], "DELETE_VELOCITY_RULE", str(rule_id), "velocity_rule", {}, request.client.host)
+    return {"ok": True}
+
+@api.get("/admin/velocity/alerts")
+async def get_velocity_alerts(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT va.*, u.full_name as user_name, u.phone_number,
+                   vr.name as rule_name
+            FROM velocity_alerts va
+            JOIN users u ON u.id = va.user_id
+            JOIN velocity_rules vr ON vr.id = va.rule_id
+            ORDER BY va.triggered_at DESC
+            LIMIT 200
+        """)
+    return [dict(r) for r in rows]
+
+@api.post("/admin/velocity/alerts/{alert_id}/resolve")
+async def resolve_velocity_alert(alert_id: int, request: Request, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE velocity_alerts SET resolved=true WHERE id=$1", alert_id)
+        await audit(conn, admin["id"], "RESOLVE_VELOCITY_ALERT", str(alert_id), "velocity_alert", {}, request.client.host)
+    return {"ok": True}
 
 # ── 3. DISPUTES ──────────────────────────────────────────────
 @api.get("/admin/disputes")

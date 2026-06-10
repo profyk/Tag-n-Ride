@@ -3,28 +3,49 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
+import { formatZAR, formatDate } from "@/lib/utils";
+import {
+  TrendingUp, Users, AlertTriangle, CheckCircle, Save, Zap, Gift,
+  RefreshCw, CreditCard, Building, Calendar, DollarSign, ChevronRight,
+  BarChart3,
+} from "lucide-react";
 import toast from "react-hot-toast";
-import { formatDate } from "@/lib/utils";
-import { TrendingUp, Users, AlertTriangle, CheckCircle, Save, Zap, Gift } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area, Cell,
+} from "recharts";
 
 const STATUS_TONE: Record<string, "green" | "red" | "yellow" | "muted"> = {
-  active: "green", overdue: "red", cancelled: "muted",
+  active: "green", overdue: "red", cancelled: "muted", free: "cyan",
 };
 
-function StatCard({ label, value, sub, icon: Icon, color }: any) {
+const TT = {
+  contentStyle: {
+    background: "var(--bg2)", border: "1px solid var(--border)",
+    borderRadius: 8, color: "var(--text)", fontSize: 11,
+  },
+};
+
+const MONTH_COLORS = ["#00D4FF", "#00E676", "#A064FF", "#FFD60A", "#FF8C42", "#FF4D9E"];
+
+function KPICard({ label, value, sub, icon: Icon, color, border }: {
+  label: string; value: string | number; sub?: string;
+  icon: any; color: string; border: string;
+}) {
   return (
-    <Card className="p-5">
+    <div className={`bg-bg2 border ${border} rounded-xl p-5`}>
       <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm text-gray-500 mb-1">{label}</p>
-          <p className="text-2xl font-black text-gray-900">{value}</p>
-          {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+        <div className="flex-1 min-w-0">
+          <p className="text-[9px] font-bold text-textDim uppercase tracking-widest mb-2">{label}</p>
+          <p className={`text-2xl font-black ${color}`}>{value}</p>
+          {sub && <p className="text-textDim text-xs mt-1">{sub}</p>}
         </div>
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${color}`}>
-          <Icon className="w-5 h-5 text-white" />
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-current/10`}
+          style={{ backgroundColor: `var(--${color.replace("text-", "")})/10` }}>
+          <Icon size={18} className={color} />
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -34,18 +55,18 @@ export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
 
-  // Pricing settings
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [pricePerTaxi, setPricePerTaxi] = useState("10");
   const [freeTaxis, setFreeTaxis] = useState("1");
   const [ownerStmtPrice, setOwnerStmtPrice] = useState("10");
   const [passengerStmtPrice, setPassengerStmtPrice] = useState("5");
   const [savingPricing, setSavingPricing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "subscribers" | "settings">("overview");
 
   const loadAll = () => {
     setLoading(true);
     Promise.all([api.subscriptions(), api.subscriptionRevenue()])
-      .then(([subs, rev]) => { setRows(subs.data); setRevenue(rev.data); })
+      .then(([subs, rev]) => { setRows(Array.isArray(subs.data) ? subs.data : []); setRevenue(rev.data); })
       .catch(() => toast.error("Failed to load subscriptions"))
       .finally(() => setLoading(false));
   };
@@ -97,168 +118,266 @@ export default function SubscriptionsPage() {
     finally { setActing(null); }
   };
 
-  const fmtZAR = (v: number) => `R${v.toFixed(2)}`;
+  const overdueCount = rows.filter(r => r.status === "overdue").length;
+  const activeCount = rows.filter(r => r.status === "active").length;
+  const freeCount = rows.filter(r => r.monthly_fee === 0 || r.status === "free").length;
+  const monthlyData = revenue?.monthly_breakdown?.map((m: any, i: number) => ({
+    month: new Date(m.year, m.month - 1).toLocaleString("default", { month: "short" }),
+    revenue: m.revenue,
+    billings: m.billings,
+  })) ?? [];
+
+  const TABS = [
+    { id: "overview", label: "Overview", icon: BarChart3 },
+    { id: "subscribers", label: "Subscribers", icon: Users },
+    { id: "settings", label: "Pricing Settings", icon: DollarSign },
+  ] as const;
 
   return (
     <AdminShell title="Subscriptions">
       <div className="space-y-6">
 
-        {/* Revenue KPIs */}
-        {revenue && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="Monthly Recurring Revenue" value={fmtZAR(revenue.mrr)}
-              sub="Active paid subscriptions" icon={TrendingUp} color="bg-green-500" />
-            <StatCard label="This Month" value={fmtZAR(revenue.this_month)}
-              sub="Collected so far" icon={CheckCircle} color="bg-blue-500" />
-            <StatCard label="Active Subscribers" value={revenue.active_subscriptions}
-              sub={`${revenue.free_subscriptions} on free tier`} icon={Users} color="bg-purple-500" />
-            <StatCard label="Overdue" value={revenue.overdue_subscriptions}
-              sub="Need attention" icon={AlertTriangle} color="bg-red-500" />
+        {/* Alert banner for overdue */}
+        {overdueCount > 0 && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-red/10 border border-red/20 rounded-xl">
+            <AlertTriangle size={16} className="text-red flex-shrink-0" />
+            <p className="text-red text-sm font-semibold">
+              {overdueCount} fleet owner{overdueCount !== 1 ? "s" : ""} ha{overdueCount !== 1 ? "ve" : "s"} overdue subscriptions — wallet balance may be insufficient.
+            </p>
+            <button
+              onClick={() => setActiveTab("subscribers")}
+              className="ml-auto text-xs font-bold text-red border border-red/30 px-3 py-1 rounded-lg hover:bg-red/10 transition-colors flex items-center gap-1"
+            >
+              View <ChevronRight size={12} />
+            </button>
           </div>
         )}
 
-        {/* Monthly breakdown */}
-        {revenue?.monthly_breakdown?.length > 0 && (
-          <Card className="p-5">
-            <h2 className="font-semibold text-gray-800 mb-4">Monthly Revenue History</h2>
-            <div className="flex gap-3 overflow-x-auto pb-1">
-              {revenue.monthly_breakdown.map((m: any) => (
-                <div key={`${m.year}-${m.month}`}
-                  className="flex-shrink-0 text-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 min-w-[90px]">
-                  <div className="text-xs text-gray-400 font-medium">
-                    {new Date(m.year, m.month - 1).toLocaleString("default", { month: "short" })} {m.year}
-                  </div>
-                  <div className="text-lg font-black text-green-600 mt-1">{fmtZAR(m.revenue)}</div>
-                  <div className="text-xs text-gray-400">{m.billings} billing{m.billings !== 1 ? "s" : ""}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KPICard label="Monthly Recurring Revenue" value={revenue ? formatZAR(revenue.mrr ?? revenue.monthly_revenue ?? 0) : "—"} sub="Active paid subscriptions" icon={TrendingUp} color="text-green" border="border-green/20" />
+          <KPICard label="This Month Collected" value={revenue ? formatZAR(revenue.this_month ?? revenue.this_month_revenue ?? 0) : "—"} sub="Billing to date" icon={CheckCircle} color="text-cyan" border="border-cyan/20" />
+          <KPICard label="Active Subscribers" value={activeCount || revenue?.active_subscriptions || 0} sub={`${freeCount} on free tier`} icon={Users} color="text-purple" border="border-purple/20" />
+          <KPICard label="Overdue Accounts" value={overdueCount} sub="Require manual action" icon={AlertTriangle} color={overdueCount > 0 ? "text-red" : "text-textMuted"} border={overdueCount > 0 ? "border-red/20" : "border-border"} />
+        </div>
 
-        {/* Pricing settings */}
-        <Card className="p-5">
-          <h2 className="font-semibold text-gray-800 mb-1">Subscription & Statement Pricing</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            First <strong>{freeTaxis}</strong> taxi is free. Additional taxis billed monthly.
-            Statement fees are deducted from user wallet on download.
-          </p>
-          {settingsLoading ? <Spinner /> : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Price / extra taxi / month (R)</label>
-                <input type="number" min={0} value={pricePerTaxi} onChange={e => setPricePerTaxi(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Free taxis per owner</label>
-                <input type="number" min={0} max={10} value={freeTaxis} onChange={e => setFreeTaxis(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Owner statement price (R)</label>
-                <input type="number" min={0} value={ownerStmtPrice} onChange={e => setOwnerStmtPrice(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Passenger statement price (R)</label>
-                <input type="number" min={0} value={passengerStmtPrice} onChange={e => setPassengerStmtPrice(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-            </div>
-          )}
-          <div className="mt-4">
-            <Button onClick={savePricing} disabled={savingPricing} className="bg-blue-600 hover:bg-blue-700 text-white">
-              <Save className="w-4 h-4 mr-1.5" />
-              {savingPricing ? "Saving…" : "Save pricing"}
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-border pb-0">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                activeTab === t.id ? "text-cyan border-cyan" : "text-textMuted border-transparent hover:text-text"
+              }`}
+            >
+              <t.icon size={12} /> {t.label}
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-2 pb-2">
+            <Button variant="secondary" onClick={loadAll} disabled={loading}>
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
             </Button>
           </div>
-        </Card>
+        </div>
 
-        {/* Owner subscription table */}
-        <Card>
-          <div className="px-5 pt-4 pb-2">
-            <h2 className="font-semibold text-gray-800">Fleet Owner Subscriptions</h2>
-            <p className="text-sm text-gray-400 mt-0.5">
-              Billing runs automatically on the 1st of each month. Use bill-now to charge immediately or waive to skip.
-            </p>
+        {/* ─── TAB: OVERVIEW ─── */}
+        {activeTab === "overview" && (
+          <div className="space-y-6">
+            {/* Revenue history chart */}
+            {monthlyData.length > 0 && (
+              <Card>
+                <div className="flex items-center gap-2 mb-5">
+                  <BarChart3 size={15} className="text-cyan" />
+                  <h2 className="text-sm font-bold text-text">Monthly Subscription Revenue</h2>
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={monthlyData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="month" tick={{ fill: "var(--textMuted)", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "var(--textMuted)", fontSize: 10 }} tickFormatter={v => `R${v}`} />
+                    <Tooltip {...TT} formatter={(v: number) => [formatZAR(v), "Revenue"]} />
+                    <Bar dataKey="revenue" radius={[5, 5, 0, 0]}>
+                      {monthlyData.map((_: any, i: number) => (
+                        <Cell key={i} fill={MONTH_COLORS[i % MONTH_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            )}
+
+            {/* How it works */}
+            <div className="bg-bg2 border border-cyan/20 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <CreditCard size={15} className="text-cyan" />
+                <h3 className="text-sm font-bold text-text">How Fleet Subscriptions Work</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {[
+                  { icon: Gift, title: "Free Tier", desc: `First ${freeTaxis} taxi per owner is always free — zero cost for single-taxi operators`, color: "text-green" },
+                  { icon: DollarSign, title: "Paid Tier", desc: `Each additional taxi costs R${pricePerTaxi}/month, deducted automatically from owner wallet`, color: "text-cyan" },
+                  { icon: Calendar, title: "Auto-Billing", desc: "Billing runs on the 1st of each month. Failed billing marks account overdue and sends notification", color: "text-yellow" },
+                  { icon: Building, title: "Statement Fees", desc: `Owner statements R${ownerStmtPrice} · Passenger statements R${passengerStmtPrice} — deducted on download`, color: "text-purple" },
+                ].map(item => (
+                  <div key={item.title} className="flex items-start gap-3 p-3 bg-bg rounded-xl border border-border">
+                    <item.icon size={14} className={`${item.color} flex-shrink-0 mt-0.5`} />
+                    <div>
+                      <p className="text-text text-xs font-bold">{item.title}</p>
+                      <p className="text-textMuted text-[11px] mt-0.5 leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-          {loading ? (
-            <div className="p-8 flex justify-center"><Spinner /></div>
-          ) : rows.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">No subscriptions yet</div>
-          ) : (
-            <Table headers={["Owner", "Taxis", "Monthly Fee", "Status", "Next Billing", "Total Paid", "Actions"]}>
-              {rows.map(r => (
-                <Tr key={r.owner_user_id}>
-                  <Td>
-                    <div className="font-medium">{r.full_name}</div>
-                    <div className="text-xs text-gray-400">{r.business_name || r.email || "—"}</div>
-                  </Td>
-                  <Td>
-                    <span className="font-mono font-bold">{r.taxi_count}</span>
-                    <div className="text-xs text-gray-400">
-                      {r.billable_taxis === 0
-                        ? <span className="flex items-center gap-1 text-green-600"><Gift className="w-3 h-3" /> Free tier</span>
-                        : `${r.billable_taxis} billed`}
-                    </div>
-                  </Td>
-                  <Td>
-                    <span className={`font-mono font-bold ${r.monthly_fee > 0 ? "text-blue-600" : "text-green-500"}`}>
-                      {r.monthly_fee > 0 ? fmtZAR(r.monthly_fee) : "Free"}
-                    </span>
-                  </Td>
-                  <Td>
-                    <Badge label={r.status} tone={STATUS_TONE[r.status] || "muted"} />
-                    {r.overdue_since && (
-                      <div className="text-xs text-red-500 mt-1">Since {formatDate(r.overdue_since)}</div>
-                    )}
-                  </Td>
-                  <Td>{r.next_billing_date ? formatDate(r.next_billing_date) : "—"}</Td>
-                  <Td>
-                    <span className="font-mono text-green-700 font-semibold">{fmtZAR(r.total_paid)}</span>
-                    <div className="text-xs text-gray-400">{r.paid_count} payment{r.paid_count !== 1 ? "s" : ""}</div>
-                  </Td>
-                  <Td>
-                    <div className="flex gap-2 flex-wrap">
-                      <Button
-                        onClick={() => billNow(r.owner_user_id, r.full_name)}
-                        disabled={acting === r.owner_user_id}
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
-                      >
-                        <Zap className="w-3 h-3 mr-1" />
-                        Bill now
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => waive(r.owner_user_id, r.full_name)}
-                        disabled={acting === r.owner_user_id + "_waive"}
-                        className="border-green-400 text-green-700 hover:bg-green-50 text-xs"
-                      >
-                        <Gift className="w-3 h-3 mr-1" />
-                        Waive
-                      </Button>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
-          )}
-        </Card>
+        )}
 
-        {/* Info */}
-        <Card className="p-4 bg-blue-50 border-blue-200">
-          <h3 className="font-semibold text-blue-800 mb-2">How Subscriptions Work</h3>
-          <ul className="text-sm text-blue-700 space-y-1 list-disc ml-4">
-            <li>First taxi per owner is always free — no charge for single-taxi operators</li>
-            <li>Each additional taxi costs the configured monthly fee (default R10/taxi)</li>
-            <li>Billing runs automatically on the 1st of each month from the owner&apos;s wallet</li>
-            <li>Failed billing marks the account as <strong>overdue</strong> and sends a notification</li>
-            <li><strong>Bill now</strong> charges immediately; <strong>Waive</strong> skips this month and resets next billing date</li>
-            <li>Statement fees are a separate revenue stream — deducted per download request</li>
-          </ul>
-        </Card>
+        {/* ─── TAB: SUBSCRIBERS ─── */}
+        {activeTab === "subscribers" && (
+          <div className="space-y-4">
+            {loading ? (
+              <div className="flex justify-center py-16"><Spinner /></div>
+            ) : rows.length === 0 ? (
+              <div className="text-center py-16 text-textMuted">
+                <Building size={40} className="mx-auto mb-3 opacity-20" />
+                <p className="font-semibold">No fleet owners yet</p>
+                <p className="text-xs mt-1 text-textDim">Subscriptions appear here when fleet owners register</p>
+              </div>
+            ) : (
+              <Table headers={["Owner", "Taxis", "Monthly Fee", "Status", "Next Billing", "Total Paid", "Actions"]} empty={false}>
+                {rows.map(r => (
+                  <Tr key={r.owner_user_id}>
+                    <Td>
+                      <p className="font-semibold text-sm">{r.full_name}</p>
+                      <p className="text-[10px] text-textMuted">{r.business_name || r.email || "—"}</p>
+                    </Td>
+                    <Td>
+                      <span className="font-mono font-bold text-text">{r.taxi_count}</span>
+                      <p className="text-[10px] mt-0.5">
+                        {r.billable_taxis === 0
+                          ? <span className="text-green flex items-center gap-1"><Gift size={9} /> Free tier</span>
+                          : <span className="text-textMuted">{r.billable_taxis} billed</span>}
+                      </p>
+                    </Td>
+                    <Td>
+                      <span className={`font-mono font-bold text-sm ${r.monthly_fee > 0 ? "text-cyan" : "text-green"}`}>
+                        {r.monthly_fee > 0 ? formatZAR(r.monthly_fee) : "Free"}
+                      </span>
+                    </Td>
+                    <Td>
+                      <Badge label={r.status} tone={STATUS_TONE[r.status] || "muted"} />
+                      {r.overdue_since && (
+                        <p className="text-[10px] text-red mt-0.5">Since {formatDate(r.overdue_since)}</p>
+                      )}
+                    </Td>
+                    <Td className="text-textMuted text-xs">{r.next_billing_date ? formatDate(r.next_billing_date) : "—"}</Td>
+                    <Td>
+                      <span className="font-mono text-green font-semibold">{formatZAR(r.total_paid)}</span>
+                      <p className="text-[10px] text-textDim">{r.paid_count} payment{r.paid_count !== 1 ? "s" : ""}</p>
+                    </Td>
+                    <Td>
+                      <div className="flex gap-1.5 flex-wrap">
+                        <Button
+                          onClick={() => billNow(r.owner_user_id, r.full_name)}
+                          disabled={!!acting}
+                          loading={acting === r.owner_user_id}
+                        >
+                          <Zap size={12} /> Bill Now
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => waive(r.owner_user_id, r.full_name)}
+                          disabled={!!acting}
+                          loading={acting === r.owner_user_id + "_waive"}
+                        >
+                          <Gift size={12} /> Waive
+                        </Button>
+                      </div>
+                    </Td>
+                  </Tr>
+                ))}
+              </Table>
+            )}
+          </div>
+        )}
 
+        {/* ─── TAB: SETTINGS ─── */}
+        {activeTab === "settings" && (
+          <div className="space-y-6">
+            <Card>
+              <div className="flex items-center gap-2 mb-1">
+                <DollarSign size={15} className="text-cyan" />
+                <h2 className="text-sm font-bold text-text">Subscription & Statement Pricing</h2>
+              </div>
+              <p className="text-textMuted text-xs mb-5">
+                First <span className="text-cyan font-bold">{freeTaxis}</span> taxi is free. Additional taxis billed monthly.
+                Statement fees are deducted from user wallet on download.
+              </p>
+              {settingsLoading ? <Spinner /> : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {[
+                    {
+                      label: "Price / extra taxi / month (R)",
+                      value: pricePerTaxi, setter: setPricePerTaxi,
+                      desc: "Monthly charge per taxi beyond the free tier",
+                    },
+                    {
+                      label: "Free taxis per owner",
+                      value: freeTaxis, setter: setFreeTaxis,
+                      desc: "Number of taxis included for free",
+                    },
+                    {
+                      label: "Owner statement price (R)",
+                      value: ownerStmtPrice, setter: setOwnerStmtPrice,
+                      desc: "Fee deducted per fleet statement download",
+                    },
+                    {
+                      label: "Passenger statement price (R)",
+                      value: passengerStmtPrice, setter: setPassengerStmtPrice,
+                      desc: "Fee deducted per passenger expense statement",
+                    },
+                  ].map(field => (
+                    <div key={field.label} className="bg-bg border border-border rounded-xl p-4">
+                      <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-2">{field.label}</label>
+                      <input
+                        type="number" min={0} value={field.value}
+                        onChange={e => field.setter(e.target.value)}
+                        className="w-full bg-bg2 border border-border rounded-lg px-3 py-2.5 text-text text-sm font-mono focus:outline-none focus:border-cyan transition-colors"
+                      />
+                      <p className="text-textDim text-[10px] mt-1.5">{field.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-5 pt-4 border-t border-border flex justify-end">
+                <Button onClick={savePricing} loading={savingPricing}>
+                  <Save size={13} /> Save Pricing
+                </Button>
+              </div>
+            </Card>
+
+            {/* Preview */}
+            <div className="bg-bg2 border border-border rounded-xl p-5">
+              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3">Pricing Preview</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {[1, 2, 3, 5, 10].map(n => {
+                  const billable = Math.max(0, n - parseInt(freeTaxis));
+                  const fee = billable * parseFloat(pricePerTaxi);
+                  return (
+                    <div key={n} className={`p-3 rounded-xl border ${fee === 0 ? "border-green/20 bg-green/5" : "border-cyan/20 bg-cyan/5"}`}>
+                      <p className="text-[10px] text-textMuted font-semibold">{n} Taxi{n !== 1 ? "s" : ""}</p>
+                      <p className={`text-lg font-black mt-0.5 ${fee === 0 ? "text-green" : "text-cyan"}`}>
+                        {fee === 0 ? "Free" : formatZAR(fee)}/mo
+                      </p>
+                      <p className="text-textDim text-[9px] mt-0.5">{billable} billed taxi{billable !== 1 ? "s" : ""}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AdminShell>
   );
