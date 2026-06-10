@@ -557,6 +557,19 @@ export const api = {
   payslipDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/driver/payslip/${id}`, { method: "DELETE" }),
 
+  payslipVerify: (ref: string) =>
+    request<{
+      valid: boolean;
+      document_type?: string;
+      driver_name?: string;
+      phone?: string;
+      period_label?: string;
+      driver_net_earnings?: number;
+      total_trips?: number;
+      issued_by?: string;
+      verified_at?: string;
+    }>(`/api/driver/payslip/verify?ref=${encodeURIComponent(ref)}`),
+
   // ── Admin: Payout settings ──
   getPayoutSettings: () =>
     request<PayoutSettings>("/api/admin/payout-settings"),
