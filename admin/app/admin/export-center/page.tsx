@@ -165,7 +165,7 @@ export default function ExportCenterPage() {
     },
   ];
 
-  const categories = [...new Set(EXPORTS.map(e => e.category))];
+  const categories = Array.from(new Set(EXPORTS.map(e => e.category)));
 
   return (
     <AdminShell title="Export Center" subtitle="Download platform data as CSV files">
