@@ -11335,6 +11335,13 @@ async def owner_get_statement(statement_id: str, user: dict = Depends(require_ow
     return {"statement_id": row["id"], "reference": row["reference"],
             "data": row["statement_data"], "created_at": iso(row["created_at"])}
 
+@api.get("/passenger/statement/pricing")
+async def passenger_statement_pricing(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow("SELECT passenger_statement_price FROM payout_settings WHERE id='default'")
+    price = float(settings["passenger_statement_price"] or 5) if settings else 5.0
+    return {"enabled": True, "price": price}
+
 @api.post("/passenger/statement/request")
 async def passenger_request_statement(body: StatementRequestIn, user: dict = Depends(get_current_user)):
     if user["role"] not in ("passenger", "driver"):

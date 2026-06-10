@@ -663,7 +663,7 @@ const PayslipStatementRow: React.FC<{
     </View>
     <View style={{ flex: 1 }}>
       <Text style={{ color: colors.text, fontWeight: "700", fontSize: 15 }}>
-        Payslip & Statement
+        {isDriver ? "Payslip & Statement" : "Expense Statement"}
       </Text>
       <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
         {isDriver
