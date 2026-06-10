@@ -490,6 +490,7 @@ export type DashboardStats = {
   total_owners?: number;
   active_drivers?: number;
   verified_drivers?: number;
+  active_incidents?: number;
   suspicious_transactions: Transaction[];
   recent_transactions: Transaction[];
   pending_driver_list: {
