@@ -1,5 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Select, Card, Modal } from "@/components/ui";
 import { api, Transaction } from "@/lib/api";
@@ -35,13 +37,14 @@ function DetailRow({ label, value, copy }: { label: string; value: string; copy?
   );
 }
 
-export default function TransactionsPage() {
+function TransactionsContent() {
+  const params = useSearchParams();
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [type, setType] = useState("");
   const [status, setStatus] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [from, setFrom] = useState(params.get("from") ?? "");
+  const [to, setTo] = useState(params.get("to") ?? "");
   const [search, setSearch] = useState("");
   const [minAmt, setMinAmt] = useState("");
   const [maxAmt, setMaxAmt] = useState("");
@@ -60,7 +63,7 @@ export default function TransactionsPage() {
     }).then((r) => setTxns(r.data)).finally(() => setLoading(false));
   }, [type, from, to, search, minAmt, maxAmt]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [type, from, to, minAmt, maxAmt]);
 
   const applyQuick = (qf: typeof QUICK_FILTERS[0]) => {
     if (activeQuick === qf.label) {
@@ -117,8 +120,14 @@ export default function TransactionsPage() {
             <option value="pending">Pending</option>
             <option value="failed">Failed</option>
           </Select>
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <div className="space-y-0.5">
+            <label className="text-[9px] font-bold text-textDim uppercase tracking-widest pl-0.5">From</label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div className="space-y-0.5">
+            <label className="text-[9px] font-bold text-textDim uppercase tracking-widest pl-0.5">To</label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
           <Input type="number" placeholder="Min amount" value={minAmt} onChange={(e) => setMinAmt(e.target.value)} />
           <Input type="number" placeholder="Max amount" value={maxAmt} onChange={(e) => setMaxAmt(e.target.value)} />
         </div>
@@ -243,5 +252,13 @@ export default function TransactionsPage() {
         )}
       </Modal>
     </AdminShell>
+  );
+}
+
+export default function TransactionsPage() {
+  return (
+    <Suspense fallback={<AdminShell title="Transactions"><Spinner /></AdminShell>}>
+      <TransactionsContent />
+    </Suspense>
   );
 }

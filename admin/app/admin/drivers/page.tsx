@@ -252,8 +252,10 @@ export default function DriversPage() {
 
   const verified  = drivers.filter((d) => d.is_verified).length;
   const pending   = drivers.filter((d) => !d.is_verified).length;
-  const avgRating = drivers.filter((d) => d.rating_count > 0)
-    .reduce((s, d, _, arr) => s + d.rating_avg / arr.length, 0);
+  const ratedDrivers = drivers.filter((d) => d.rating_count > 0);
+  const avgRating = ratedDrivers.length > 0
+    ? ratedDrivers.reduce((s, d) => s + d.rating_avg, 0) / ratedDrivers.length
+    : null;
 
   const exportCsv = () => {
     const rows = [
@@ -261,7 +263,7 @@ export default function DriversPage() {
       ...filtered.map((d) => [
         d.full_name, d.phone_number, d.vehicle_plate || "",
         formatZAR(d.total_earnings),
-        d.rating_avg.toFixed(1), d.rating_count.toString(),
+        d.rating_count > 0 ? d.rating_avg.toFixed(1) : "—", d.rating_count.toString(),
         d.kyc_status || "none",
         d.is_verified ? "Verified" : "Pending",
         d.created_at ? formatDate(d.created_at) : "",
@@ -285,7 +287,7 @@ export default function DriversPage() {
             { label: "Total Drivers", value: drivers.length,          color: "text-cyan",   filter: "all"      as const },
             { label: "Verified",      value: verified,                color: "text-green",  filter: "verified" as const },
             { label: "Pending",       value: pending,                 color: "text-yellow", filter: "pending"  as const },
-            { label: "Avg Rating",    value: `${avgRating.toFixed(1)} ★`, color: "text-yellow", filter: null },
+            { label: "Avg Rating",    value: avgRating != null ? `${avgRating.toFixed(1)} ★` : "—", color: "text-yellow", filter: null },
           ].map(({ label, value, color, filter: f }) => (
             <div
               key={label}

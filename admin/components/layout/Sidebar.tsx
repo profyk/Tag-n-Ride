@@ -35,7 +35,7 @@ const ROLE_COLORS: Record<string, string> = {
   support: "text-orange-400 bg-orange-400/10 border-orange-400/20",
 };
 
-type NavItem = { label: string; href: string; icon: any; permission?: string | null };
+type NavItem = { label: string; href: string; icon: any; permission?: string | null; superadminOnly?: boolean };
 
 type NavGroup = {
   id: string;
@@ -54,70 +54,85 @@ const CORE_NAV: NavItem[] = [
 ];
 
 const NAV_GROUPS: NavGroup[] = [
+  // ── People ──────────────────────────────────────────────────
   {
-    id: "users",
-    label: "Users & Drivers",
+    id: "people",
+    label: "People",
     icon: Users,
     color: "text-cyan",
     items: [
-      { label: "Users",               href: "/admin/users",        icon: Users,       permission: "manage_users" },
-      { label: "Drivers",             href: "/admin/drivers",      icon: Car,         permission: "manage_drivers" },
-      { label: "Fleet Owners",        href: "/admin/owners",       icon: Truck,       permission: "manage_drivers" },
-      { label: "Fleet Transfers",     href: "/admin/transfers",    icon: Repeat2,     permission: "manage_drivers" },
-      { label: "Commission Splits",   href: "/admin/commissions",  icon: Percent,     permission: "manage_drivers" },
-      { label: "KYC Review",          href: "/admin/kyc",          icon: Fingerprint, permission: "review_kyc" },
-      { label: "Passenger Analytics", href: "/admin/passengers",   icon: Users2,      permission: "view_analytics" },
-      { label: "Driver Performance",  href: "/admin/performance",  icon: PieChart,    permission: "view_analytics" },
-      { label: "Onboarding Funnel",   href: "/admin/onboarding",   icon: UserCheck,   permission: "manage_drivers" },
+      { label: "Users",          href: "/admin/users",       icon: Users,       permission: "manage_users" },
+      { label: "Drivers",        href: "/admin/drivers",     icon: Car,         permission: "manage_drivers" },
+      { label: "Fleet Owners",   href: "/admin/owners",      icon: Truck,       permission: "manage_drivers" },
+      { label: "Passengers",     href: "/admin/passengers",  icon: Users2,      permission: "view_analytics" },
+      { label: "KYC Review",     href: "/admin/kyc",         icon: Fingerprint, permission: "review_kyc" },
+      { label: "Onboarding",     href: "/admin/onboarding",  icon: UserCheck,   permission: "manage_drivers" },
     ],
   },
+  // ── Fleet ───────────────────────────────────────────────────
+  {
+    id: "fleet",
+    label: "Fleet",
+    icon: Truck,
+    color: "text-cyan",
+    items: [
+      { label: "Driver Transfers",   href: "/admin/transfers",   icon: Repeat2,  permission: "manage_drivers" },
+      { label: "Commission Splits",  href: "/admin/commissions", icon: Percent,  permission: "manage_drivers" },
+      { label: "Performance",        href: "/admin/performance", icon: PieChart, permission: "view_analytics" },
+      { label: "Fleet Reports",      href: "/admin/fleet",       icon: BarChart3,permission: "view_analytics" },
+    ],
+  },
+  // ── Finance ─────────────────────────────────────────────────
   {
     id: "finance",
     label: "Finance",
     icon: DollarSign,
     color: "text-green",
     items: [
-      { label: "Withdrawals",       href: "/admin/withdrawals",    icon: Wallet,      permission: "approve_withdrawals" },
-      { label: "Payouts",           href: "/admin/payouts",        icon: CreditCard,  permission: "approve_withdrawals" },
-      { label: "Revenue & Fees",    href: "/admin/revenue",        icon: TrendingUp,  permission: "view_analytics" },
-      { label: "Ledger",            href: "/admin/ledger",         icon: BookOpen,    permission: "view_ledger" },
-      { label: "Reconciliation",    href: "/admin/reconciliation", icon: RefreshCw,   permission: "view_ledger" },
-      { label: "Statements",        href: "/admin/statements",     icon: FileText,    permission: "download_statements" },
-      { label: "Financial Reports", href: "/admin/reports",        icon: BarChart3,   permission: "view_analytics" },
-      { label: "Refunds",           href: "/admin/refunds",        icon: RotateCcw,   permission: "manage_refunds" },
-      { label: "Chargebacks",       href: "/admin/chargebacks",    icon: AlertOctagon,permission: "manage_refunds" },
-      { label: "Wallet Operations", href: "/admin/wallet-ops",     icon: Banknote,    permission: "view_audit" },
-      { label: "Accounting",        href: "/admin/accounting",     icon: Calculator,  permission: "view_analytics" },
+      { label: "Withdrawals & Payouts", href: "/admin/withdrawals",    icon: Wallet,       permission: "approve_withdrawals" },
+      { label: "Revenue & Fees",        href: "/admin/revenue",        icon: TrendingUp,   permission: "view_analytics" },
+      { label: "Ledger",                href: "/admin/ledger",         icon: BookOpen,     permission: "view_ledger" },
+      { label: "Reconciliation",        href: "/admin/reconciliation", icon: RefreshCw,    permission: "view_ledger" },
+      { label: "Refunds",               href: "/admin/refunds",        icon: RotateCcw,    permission: "manage_refunds" },
+      { label: "Chargebacks",           href: "/admin/chargebacks",    icon: AlertOctagon, permission: "manage_refunds" },
+      { label: "Wallet Operations",     href: "/admin/wallet-ops",     icon: Banknote,     permission: "view_audit" },
+      { label: "Accounting",            href: "/admin/accounting",     icon: Calculator,   permission: "view_analytics" },
+      { label: "Statements",            href: "/admin/statements",     icon: FileText,     permission: "download_statements" },
+      { label: "Financial Reports",     href: "/admin/reports",        icon: BarChart3,    permission: "view_analytics" },
+      { label: "Document Pricing",      href: "/admin/document-pricing", icon: Tag,        permission: "edit_fees" },
     ],
   },
+  // ── Analytics ───────────────────────────────────────────────
   {
     id: "analytics",
-    label: "Analytics & Fleet",
+    label: "Analytics",
     icon: BarChart3,
     color: "text-purple",
     items: [
-      { label: "Analytics",        href: "/admin/analytics",      icon: BarChart3,  permission: "view_analytics" },
-      { label: "Data Analytics",  href: "/admin/data-analytics", icon: Cpu,        permission: "view_analytics" },
-      { label: "Growth Charts",   href: "/admin/growth",         icon: Rocket,     permission: "view_analytics" },
-      { label: "Routes & Trips",  href: "/admin/routes",         icon: MapPin,     permission: "view_analytics" },
-      { label: "Fleet Reports",   href: "/admin/fleet",          icon: Truck,      permission: "view_analytics" },
+      { label: "Overview",        href: "/admin/analytics",      icon: BarChart3, permission: "view_analytics" },
+      { label: "Data Analytics",  href: "/admin/data-analytics", icon: Cpu,       permission: "view_analytics" },
+      { label: "Growth",          href: "/admin/growth",         icon: Rocket,    permission: "view_analytics" },
+      { label: "Routes & Trips",  href: "/admin/routes",         icon: MapPin,    permission: "view_analytics" },
+      { label: "Intelligence",    href: "/admin/intelligence",   icon: Brain,     permission: null, superadminOnly: true },
     ],
   },
+  // ── SafeRide ─────────────────────────────────────────────────
   {
     id: "saferide",
     label: "SafeRide",
     icon: Shield,
     color: "text-red-400",
     items: [
-      { label: "SafeRide Command", href: "/admin/saferide",            icon: Shield,        permission: "view_audit" },
-      { label: "Live Trips",       href: "/admin/trips",               icon: Car,           permission: "view_analytics" },
-      { label: "Incidents",        href: "/admin/saferide/incidents",  icon: AlertTriangle, permission: "view_audit" },
+      { label: "Command Centre",  href: "/admin/saferide",           icon: Shield,        permission: "view_audit" },
+      { label: "Live Trips",      href: "/admin/trips",              icon: Activity,      permission: "view_analytics" },
+      { label: "Incidents",       href: "/admin/saferide/incidents", icon: AlertTriangle, permission: "view_audit" },
     ],
   },
+  // ── Compliance ───────────────────────────────────────────────
   {
     id: "compliance",
     label: "Compliance",
-    icon: Shield,
+    icon: ShieldCheck,
     color: "text-yellow",
     items: [
       { label: "Compliance & Risk", href: "/admin/compliance", icon: AlertTriangle, permission: "view_audit" },
@@ -127,41 +142,43 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "GDPR & Privacy",    href: "/admin/gdpr",       icon: ShieldCheck,   permission: "view_audit" },
     ],
   },
+  // ── Communications ───────────────────────────────────────────
   {
-    id: "growth",
-    label: "Growth & Comms",
+    id: "comms",
+    label: "Communications",
     icon: Megaphone,
     color: "text-orange-400",
     items: [
-      { label: "Notifications",  href: "/admin/notifications", icon: Bell,          permission: "manage_users" },
-      { label: "Broadcast",      href: "/admin/broadcast",     icon: Megaphone,     permission: "broadcast_messages" },
-      { label: "WhatsApp",       href: "/admin/whatsapp",      icon: MessageCircle, permission: "broadcast_messages" },
-      { label: "Promotions",     href: "/admin/promotions",    icon: Tag,           permission: "manage_promotions" },
-      { label: "Referrals",      href: "/admin/referrals",     icon: Users2,        permission: "view_analytics" },
-      { label: "User Feedback",  href: "/admin/feedback",      icon: Star,          permission: "view_analytics" },
-      { label: "Marketing",      href: "/admin/marketing",     icon: Target,        permission: "manage_promotions" },
-      { label: "Send Notice",    href: "/admin/notices",       icon: Mail,          permission: "manage_users" },
+      { label: "Broadcast",     href: "/admin/broadcast",     icon: Megaphone,     permission: "broadcast_messages" },
+      { label: "WhatsApp",      href: "/admin/whatsapp",      icon: MessageCircle, permission: "broadcast_messages" },
+      { label: "Notifications", href: "/admin/notifications", icon: Bell,          permission: "manage_users" },
+      { label: "Send Notice",   href: "/admin/notices",       icon: Mail,          permission: "manage_users" },
+      { label: "Promotions",    href: "/admin/promotions",    icon: Tag,           permission: "manage_promotions" },
+      { label: "Marketing",     href: "/admin/marketing",     icon: Target,        permission: "manage_promotions" },
+      { label: "Referrals",     href: "/admin/referrals",     icon: Users2,        permission: "view_analytics" },
+      { label: "User Feedback", href: "/admin/feedback",      icon: Star,          permission: "view_analytics" },
     ],
   },
+  // ── Support ──────────────────────────────────────────────────
   {
     id: "support",
     label: "Support",
     icon: HelpCircle,
     color: "text-cyan",
     items: [
-      { label: "Support Lookup",  href: "/admin/support",          icon: HelpCircle,    permission: "reset_pin" },
-      { label: "WA Support",      href: "/admin/whatsapp-support", icon: MessageCircle, permission: "reset_pin" },
+      { label: "Support Lookup",    href: "/admin/support",          icon: HelpCircle,    permission: "reset_pin" },
+      { label: "WhatsApp Support",  href: "/admin/whatsapp-support", icon: MessageCircle, permission: "reset_pin" },
     ],
   },
+  // ── System ───────────────────────────────────────────────────
   {
-    id: "platform",
-    label: "Platform",
+    id: "system",
+    label: "System",
     icon: Settings,
     color: "text-textMuted",
     items: [
-      { label: "Document Pricing", href: "/admin/document-pricing", icon: FileText, permission: "edit_fees" },
-      { label: "Coverage Zones",   href: "/admin/geography",        icon: Globe,    permission: "view_analytics" },
-      { label: "System Health",    href: "/admin/health",           icon: Activity, permission: "view_audit" },
+      { label: "Coverage Zones", href: "/admin/geography", icon: Globe,    permission: "view_analytics" },
+      { label: "System Health",  href: "/admin/health",    icon: Activity, permission: "view_audit" },
     ],
   },
 ];
@@ -173,13 +190,12 @@ const HR_NAV: NavItem[] = [
 ];
 
 const SUPERADMIN_NAV: NavItem[] = [
-  { label: "Intelligence",         href: "/admin/intelligence", icon: Brain },
-  { label: "Admin Accounts",      href: "/admin/admins",     icon: Shield },
-  { label: "Settings & Security", href: "/admin/settings",   icon: Settings },
-  { label: "System Console",      href: "/admin/console",    icon: Terminal },
-  { label: "Database",            href: "/admin/database",   icon: Database },
-  { label: "Superadmin",          href: "/admin/superadmin", icon: ShieldCheck },
-  { label: "Test Users",          href: "/admin/test-users", icon: FlaskConical },
+  { label: "Admin Accounts",    href: "/admin/admins",     icon: Shield },
+  { label: "Settings & Config", href: "/admin/settings",   icon: Settings },
+  { label: "System Console",    href: "/admin/console",    icon: Terminal },
+  { label: "Database",          href: "/admin/database",   icon: Database },
+  { label: "Superadmin Tools",  href: "/admin/superadmin", icon: ShieldCheck },
+  { label: "Test Users",        href: "/admin/test-users", icon: FlaskConical },
 ];
 
 // ── ThemeToggle ───────────────────────────────────────────────────────────────
@@ -239,7 +255,8 @@ function CollapsibleGroup({
   const hasActive = group.items.some(i => path === i.href || path.startsWith(i.href + "/"));
   const [open, setOpen] = useState(defaultOpen || hasActive);
 
-  const visible = group.items.filter(({ permission, label, href }) => {
+  const visible = group.items.filter(({ permission, label, href, superadminOnly }) => {
+    if (superadminOnly && !isSuperAdmin()) return false;
     if (permission && !hasPermission(permission)) return false;
     if (searchQuery) {
       return label.toLowerCase().includes(searchQuery.toLowerCase()) ||

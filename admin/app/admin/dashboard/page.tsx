@@ -175,16 +175,18 @@ export default function DashboardPage() {
           <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3">Platform Totals</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard label="Total Users" value={data.total_users.toLocaleString()} tone="cyan" />
-            <StatCard label="Total Drivers" value={data.total_drivers.toLocaleString()} tone="green" />
-            <StatCard label="Total Revenue" value={formatZAR(data.total_revenue)} tone="yellow" />
-            <StatCard label="In Wallets" value={formatZAR(data.total_wallet_balance)} tone="purple" />
+            <StatCard label="Drivers" value={`${data.total_drivers.toLocaleString()}${data.verified_drivers != null ? ` (${data.verified_drivers} verified)` : ""}`} tone="green" />
+            <StatCard label="Passengers" value={data.total_passengers.toLocaleString()} tone="cyan" />
+            {data.total_owners != null
+              ? <StatCard label="Fleet Owners" value={data.total_owners.toLocaleString()} tone="purple" />
+              : <StatCard label="All Transactions" value={data.total_transactions.toLocaleString()} tone="green" />}
           </div>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Total Revenue" value={formatZAR(data.total_revenue)} tone="yellow" />
+          <StatCard label="In Wallets" value={formatZAR(data.total_wallet_balance)} tone="purple" />
           <StatCard label="Total Withdrawn" value={formatZAR(data.total_withdrawn)} tone="red" />
-          <StatCard label="Passengers" value={data.total_passengers.toLocaleString()} tone="cyan" />
-          <StatCard label="All Transactions" value={data.total_transactions.toLocaleString()} tone="green" />
           <StatCard label="Flagged Accounts" value={String(data.flagged_accounts)} tone="red" />
         </div>
 

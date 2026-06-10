@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { CheckCircle, Clock, AlertTriangle, Search, X, Copy } from "lucide-react";
+import { CheckCircle, Clock, AlertTriangle, X, Copy, ExternalLink, ArrowUpCircle } from "lucide-react";
+import Link from "next/link";
 import toast from "react-hot-toast";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
@@ -145,7 +146,7 @@ export default function DisputesPage() {
 
         {loading ? <Spinner /> : (
           <Table
-            headers={["User", "Phone", "Reference", "Amount", "Days Open", "Status", "Opened", "Actions"]}
+            headers={["User", "Phone", "Reference", "Amount", "Age", "Status", "Opened", "Actions"]}
             empty={!filtered.length}>
             {filtered.map((d: any) => {
               const days = daysOpen(d.created_at);
@@ -200,44 +201,76 @@ export default function DisputesPage() {
       {/* View Modal */}
       {viewModal && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setViewModal(null)}>
-          <div className="bg-bg2 border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-bg2 border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-text font-bold text-lg">Dispute Details</h3>
               <button onClick={() => setViewModal(null)} className="text-textMuted hover:text-text text-2xl leading-none">×</button>
             </div>
 
-            <div className="space-y-3 mb-4">
+            {/* Status banner */}
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border mb-4 ${viewModal.status === "open" ? "bg-yellow/10 border-yellow/20" : "bg-green/10 border-green/20"}`}>
+              {viewModal.status === "open" ? <Clock size={13} className="text-yellow" /> : <CheckCircle size={13} className="text-green" />}
+              <span className={`text-xs font-bold capitalize ${viewModal.status === "open" ? "text-yellow" : "text-green"}`}>
+                {viewModal.status} · {daysOpen(viewModal.created_at)}d old
+              </span>
+              {viewModal.status === "resolved" && viewModal.resolved_by_name && (
+                <span className="text-textDim text-xs ml-auto">Resolved by {viewModal.resolved_by_name}</span>
+              )}
+            </div>
+
+            <div className="space-y-0 mb-4 bg-bg border border-border rounded-lg overflow-hidden">
               {[
                 { label: "User", value: viewModal.user_name },
                 { label: "Phone", value: viewModal.phone_number },
-                { label: "Reference", value: viewModal.reference || "—" },
                 { label: "Amount", value: viewModal.amount ? formatZAR(viewModal.amount) : "—" },
                 { label: "Opened", value: formatDate(viewModal.created_at) },
-                { label: "Days open", value: `${daysOpen(viewModal.created_at)}d` },
+                ...(viewModal.resolved_at ? [{ label: "Resolved", value: formatDate(viewModal.resolved_at) }] : []),
               ].map(({ label, value }) => (
-                <div key={label} className="flex justify-between py-2 border-b border-border last:border-0">
+                <div key={label} className="flex justify-between px-4 py-2.5 border-b border-border last:border-0">
                   <span className="text-textMuted text-xs">{label}</span>
                   <span className="text-text text-xs font-medium">{value}</span>
                 </div>
               ))}
+              {viewModal.reference && (
+                <div className="flex justify-between items-center px-4 py-2.5">
+                  <span className="text-textMuted text-xs">Reference</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-cyan">{viewModal.reference}</span>
+                    <button onClick={() => copyRef(viewModal.reference)} className="text-textDim hover:text-cyan"><Copy size={11} /></button>
+                    <Link href={`/admin/transactions?search=${encodeURIComponent(viewModal.reference)}`} className="text-textDim hover:text-cyan" title="View transaction">
+                      <ExternalLink size={11} />
+                    </Link>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="bg-bg border border-border rounded-lg p-3 mb-4">
-              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">User's Reason</p>
-              <p className="text-text text-sm">{viewModal.reason}</p>
+            <div className="bg-bg border border-border rounded-lg p-3 mb-3">
+              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">User's Complaint</p>
+              <p className="text-text text-sm leading-relaxed">{viewModal.reason || "No reason provided"}</p>
             </div>
 
             {viewModal.resolution && (
-              <div className="bg-green/5 border border-green/20 rounded-lg p-3 mb-4">
-                <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Resolution</p>
+              <div className="bg-green/5 border border-green/20 rounded-lg p-3 mb-3">
+                <p className="text-[10px] font-bold text-green uppercase tracking-widest mb-1.5">Resolution</p>
                 <p className="text-green text-sm">{viewModal.resolution}</p>
               </div>
             )}
 
             {viewModal.status === "open" && (
-              <Button className="w-full justify-center" onClick={() => { setResolveModal(viewModal); setViewModal(null); }}>
-                <CheckCircle size={13} /> Resolve Dispute
-              </Button>
+              <div className="flex gap-2 mt-2">
+                <Button className="flex-1 justify-center" onClick={() => { setResolveModal(viewModal); setViewModal(null); }}>
+                  <CheckCircle size={13} /> Resolve
+                </Button>
+                {daysOpen(viewModal.created_at) > 7 && (
+                  <Button variant="danger" className="flex-1 justify-center" onClick={() => {
+                    setResolution("Escalated to senior management for review");
+                    setResolveModal(viewModal); setViewModal(null);
+                  }}>
+                    <ArrowUpCircle size={13} /> Escalate
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         </div>

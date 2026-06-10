@@ -4,7 +4,8 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Spinner, StatCard, Button } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatZAR } from "@/lib/utils";
-import { Download, TrendingUp, TrendingDown } from "lucide-react";
+import { Download, TrendingUp, TrendingDown, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -134,7 +135,12 @@ export default function AnalyticsPage() {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={daily}>
+            <AreaChart data={daily} onClick={(e) => {
+              if (e?.activePayload?.[0]?.payload?.date) {
+                const d = e.activePayload[0].payload.date;
+                window.location.href = `/admin/transactions?from=${d}&to=${d}`;
+              }
+            }} style={{ cursor: "pointer" }}>
               <defs>
                 <linearGradient id="gC" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#00D4FF" stopOpacity={0.2} />
@@ -153,6 +159,7 @@ export default function AnalyticsPage() {
               <Area type="monotone" dataKey="count" stroke="#00E676" fill="url(#gG)" strokeWidth={2} dot={false} name="Count" />
             </AreaChart>
           </ResponsiveContainer>
+          <p className="text-[10px] text-textDim mt-2 text-center">Click any point to view transactions for that date</p>
         </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

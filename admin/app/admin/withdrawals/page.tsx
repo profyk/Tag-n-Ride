@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Card, Input, Select } from "@/components/ui";
 import { api, Withdrawal, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { CheckCircle, XCircle, Snowflake, Zap, RefreshCw, AlertTriangle, Search, X, Download } from "lucide-react";
+import { CheckCircle, XCircle, Snowflake, Zap, RefreshCw, AlertTriangle, Search, X, Download, Settings, Save, ShieldCheck, Fuel } from "lucide-react";
 import toast from "react-hot-toast";
 import { isSuperAdmin } from "@/lib/api";
 
@@ -13,6 +13,124 @@ const authHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
 });
+
+// ── Payout Settings Panel ─────────────────────────────────────────────────────
+function PayoutSettingsPanel() {
+  const canEdit = hasPermission("edit_fees") || isSuperAdmin();
+  const [open, setOpen] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [requireApproval, setRequireApproval] = useState(true);
+  const [autoApproveLimit, setAutoApproveLimit] = useState("0");
+  const [payFuelEnabled, setPayFuelEnabled] = useState(true);
+  const [payFuelMaxPerTxn, setPayFuelMaxPerTxn] = useState("500");
+  const [payFuelDailyLimit, setPayFuelDailyLimit] = useState("1000");
+
+  const loadSettings = async () => {
+    setLoadingSettings(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/payout-settings`, { headers: authHeaders() });
+      const data = await res.json();
+      setRequireApproval(data.require_approval ?? true);
+      setAutoApproveLimit(String(data.auto_approve_limit ?? 0));
+      setPayFuelEnabled(data.pay_fuel_enabled ?? true);
+      setPayFuelMaxPerTxn(String(data.pay_fuel_max_per_txn ?? 500));
+      setPayFuelDailyLimit(String(data.pay_fuel_daily_limit ?? 1000));
+    } catch { toast.error("Failed to load payout settings"); }
+    finally { setLoadingSettings(false); }
+  };
+
+  useEffect(() => { if (open) loadSettings(); }, [open]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/payout-settings`, {
+        method: "PATCH", headers: authHeaders(),
+        body: JSON.stringify({
+          require_approval: requireApproval,
+          auto_approve_limit: parseFloat(autoApproveLimit) || 0,
+          pay_fuel_enabled: payFuelEnabled,
+          pay_fuel_max_per_txn: parseFloat(payFuelMaxPerTxn) || 0,
+          pay_fuel_daily_limit: parseFloat(payFuelDailyLimit) || 0,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Failed");
+      toast.success("Payout settings saved");
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
+      <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg3 transition-colors" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center gap-2.5">
+          <Settings size={14} className="text-cyan" />
+          <span className="text-text font-semibold text-sm">Payout Settings</span>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ml-2 ${requireApproval ? "text-yellow bg-yellow/10 border-yellow/20" : "text-green bg-green/10 border-green/20"}`}>
+            {requireApproval ? "Manual Approval On" : "Auto-Approve On"}
+          </span>
+        </div>
+        <span className="text-textDim text-xs">{open ? "▲ Hide" : "▼ Configure"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-border px-4 pb-4 pt-3 space-y-4">
+          {loadingSettings ? <div className="py-4 flex justify-center"><div className="w-5 h-5 border-2 border-cyan border-t-transparent rounded-full animate-spin" /></div> : (
+            <>
+              <div className="grid grid-cols-2 gap-5">
+                <div className="space-y-3">
+                  <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest flex items-center gap-1.5"><ShieldCheck size={11} className="text-cyan" /> Approval Gate</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-text">Require Admin Approval</p>
+                      <p className="text-xs text-textMuted">Payouts queue before EFT</p>
+                    </div>
+                    <button disabled={!canEdit} onClick={() => setRequireApproval(v => !v)}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${requireApproval ? "bg-yellow" : "bg-green"} disabled:opacity-40`}>
+                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${requireApproval ? "left-0.5" : "left-5"}`} />
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-xs text-textMuted block mb-1">Auto-Approve up to (R) — 0 = off</label>
+                    <Input type="number" min="0" value={autoApproveLimit} onChange={e => setAutoApproveLimit(e.target.value)} disabled={!canEdit} placeholder="0" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest flex items-center gap-1.5"><Fuel size={11} className="text-orange-400" /> Pay Fuel Limits</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-text">Pay Fuel Enabled</p>
+                      <p className="text-xs text-textMuted">Instant fuel withdrawals</p>
+                    </div>
+                    <button disabled={!canEdit} onClick={() => setPayFuelEnabled(v => !v)}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${payFuelEnabled ? "bg-green" : "bg-red"} disabled:opacity-40`}>
+                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${payFuelEnabled ? "left-5" : "left-0.5"}`} />
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-xs text-textMuted block mb-1">Max per txn (R)</label>
+                    <Input type="number" min="0" value={payFuelMaxPerTxn} onChange={e => setPayFuelMaxPerTxn(e.target.value)} disabled={!canEdit} placeholder="500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-textMuted block mb-1">Daily limit per driver (R)</label>
+                    <Input type="number" min="0" value={payFuelDailyLimit} onChange={e => setPayFuelDailyLimit(e.target.value)} disabled={!canEdit} placeholder="1000" />
+                  </div>
+                </div>
+              </div>
+              {canEdit ? (
+                <div className="flex justify-end border-t border-border pt-3">
+                  <Button onClick={save} disabled={saving}><Save size={12} /> {saving ? "Saving…" : "Save Settings"}</Button>
+                </div>
+              ) : (
+                <p className="text-xs text-textDim text-center">Finance / CEO / Superadmin permission required to edit.</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function getStatusTone(status: string) {
   if (status === "approved" || status === "paid" || status === "completed") return "green";
@@ -33,7 +151,11 @@ export default function WithdrawalsPage() {
   const [maxAmt, setMaxAmt] = useState("");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "largest">("oldest");
   const [processing, setProcessing] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"withdrawals" | "payouts">("withdrawals");
+  const [activeTab, setActiveTab] = useState<"withdrawals" | "payouts" | "settings">("withdrawals");
+  const [payoutSearch, setPayoutSearch] = useState("");
+  const [payoutStatus, setPayoutStatus] = useState("all");
+  const [payoutFrom, setPayoutFrom] = useState("");
+  const [payoutTo, setPayoutTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkApproving, setBulkApproving] = useState(false);
   const superAdmin = isSuperAdmin();
@@ -232,8 +354,9 @@ export default function WithdrawalsPage() {
         {/* Tabs */}
         <div className="flex gap-2 border-b border-border pb-2">
           {[
-            { key: "withdrawals", label: "Withdrawal Requests" },
+            { key: "withdrawals", label: `Withdrawal Requests${pendingCount > 0 ? ` (${pendingCount})` : ""}` },
             { key: "payouts", label: `Payout History (${payouts.length})` },
+            { key: "settings", label: "⚙ Payout Settings" },
           ].map(t => (
             <button key={t.key} onClick={() => setActiveTab(t.key as any)}
               className={`px-4 py-2 text-sm font-bold rounded-t-lg transition-all ${
@@ -392,44 +515,68 @@ export default function WithdrawalsPage() {
           </>
         )}
 
-        {activeTab === "payouts" && (
-          <div className="space-y-4">
-            <div className="flex justify-end">
-              <button onClick={load} className="flex items-center gap-1 text-xs text-textMuted hover:text-cyan transition-colors">
-                <RefreshCw size={12} /> Refresh
-              </button>
+        {activeTab === "payouts" && (() => {
+          const filteredPayouts = payouts.filter(p => {
+            if (payoutStatus !== "all" && p.status !== payoutStatus) return false;
+            if (payoutSearch) {
+              const q = payoutSearch.toLowerCase();
+              if (!p.driver_name?.toLowerCase().includes(q) && !p.phone_number?.includes(q)) return false;
+            }
+            if (payoutFrom && new Date(p.initiated_at || p.created_at) < new Date(payoutFrom)) return false;
+            if (payoutTo && new Date(p.initiated_at || p.created_at) > new Date(payoutTo + "T23:59:59")) return false;
+            return true;
+          });
+          const totalPaidOut = filteredPayouts.filter(p => p.status === "completed" || p.status === "paid").reduce((s: number, p: any) => s + (p.net_amount ?? p.amount), 0);
+          return (
+            <div className="space-y-3">
+              <div className="flex gap-3 flex-wrap items-center">
+                <Input placeholder="Search driver or phone..." value={payoutSearch} onChange={e => setPayoutSearch(e.target.value)} className="flex-1 min-w-0" />
+                <Input type="date" value={payoutFrom} onChange={e => setPayoutFrom(e.target.value)} className="w-36" />
+                <span className="text-textDim text-xs">to</span>
+                <Input type="date" value={payoutTo} onChange={e => setPayoutTo(e.target.value)} className="w-36" />
+                {(payoutSearch || payoutFrom || payoutTo) && (
+                  <Button variant="ghost" onClick={() => { setPayoutSearch(""); setPayoutFrom(""); setPayoutTo(""); }}><X size={13} /> Clear</Button>
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2 flex-wrap">
+                  {["all", "completed", "paid", "pending", "failed"].map(s => (
+                    <button key={s} onClick={() => setPayoutStatus(s)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all capitalize ${payoutStatus === s ? "bg-cyanDim text-cyan border-cyan/20" : "bg-bg2 text-textMuted border-border hover:text-text"}`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-xs text-textMuted">{filteredPayouts.length} payouts · {formatZAR(totalPaidOut)} paid</span>
+              </div>
+              {loading ? <Spinner /> : filteredPayouts.length === 0 ? (
+                <div className="text-center py-12 text-textMuted text-sm">No payouts found</div>
+              ) : (
+                <Table headers={["Driver", "Phone", "Requested", "Fee", "Net Paid", "Bank", "Account", "Status", "Stitch ID", "Date"]} empty={false}>
+                  {filteredPayouts.map((p: any) => (
+                    <Tr key={p.id}>
+                      <Td className="font-semibold">{p.driver_name || "—"}</Td>
+                      <Td className="font-mono text-xs text-textMuted">{p.phone_number || "—"}</Td>
+                      <Td className="font-bold">{formatZAR(p.amount)}</Td>
+                      <Td className="text-red text-xs">R{(p.fee ?? 0).toFixed(2)}</Td>
+                      <Td className="text-green font-bold">{formatZAR(p.net_amount ?? p.amount)}</Td>
+                      <Td className="text-textMuted text-xs">{p.bank_name || "—"}</Td>
+                      <Td className="font-mono text-xs text-textMuted">{p.account_number || "—"}</Td>
+                      <Td>
+                        <Badge label={p.status} tone={getStatusTone(p.status)} />
+                        {p.failure_reason && <p className="text-[10px] text-red mt-0.5">{p.failure_reason}</p>}
+                      </Td>
+                      <Td><span className="font-mono text-[10px] text-textDim">{p.stitch_disbursement_id?.slice(0, 16) || "—"}</span></Td>
+                      <Td className="text-textMuted text-xs">{formatDate(p.initiated_at || p.created_at)}</Td>
+                    </Tr>
+                  ))}
+                </Table>
+              )}
             </div>
-            {loading ? <Spinner /> : payouts.length === 0 ? (
-              <div className="text-center py-12 text-textMuted">No payouts yet</div>
-            ) : (
-              <Table
-                headers={["Driver", "Phone", "Requested", "Fee", "Net Paid", "Bank", "Account", "Status", "Stitch ID", "Date"]}
-                empty={false}>
-                {payouts.map((p: any) => (
-                  <Tr key={p.id}>
-                    <Td className="font-semibold">{p.driver_name}</Td>
-                    <Td className="font-mono text-xs text-textMuted">{p.phone_number}</Td>
-                    <Td className="font-bold">{formatZAR(p.amount)}</Td>
-                    <Td className="text-red text-xs">R{p.fee?.toFixed(2)}</Td>
-                    <Td className="text-green font-bold">{formatZAR(p.net_amount)}</Td>
-                    <Td className="text-textMuted text-xs">{p.bank_name}</Td>
-                    <Td className="font-mono text-xs text-textMuted">{p.account_number}</Td>
-                    <Td>
-                      <Badge label={p.status} tone={getStatusTone(p.status)} />
-                      {p.failure_reason && <p className="text-[10px] text-red mt-0.5">{p.failure_reason}</p>}
-                    </Td>
-                    <Td>
-                      <span className="font-mono text-[10px] text-textDim">
-                        {p.stitch_disbursement_id?.slice(0, 16) || "—"}
-                      </span>
-                    </Td>
-                    <Td className="text-textMuted text-xs">{formatDate(p.initiated_at)}</Td>
-                  </Tr>
-                ))}
-              </Table>
-            )}
-          </div>
-        )}
+          );
+        })()}
+
+        {activeTab === "settings" && <PayoutSettingsPanel />}
       </div>
     </AdminShell>
   );

@@ -43,6 +43,8 @@ export default function UsersPage() {
   const [flagReason, setFlagReason] = useState("");
   const [blockModal, setBlockModal] = useState<User | null>(null);
   const [blockReason, setBlockReason] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBlocking, setBulkBlocking] = useState(false);
   const [pinModal, setPinModal] = useState<{ name: string; pin: string } | null>(null);
   const superAdmin = isSuperAdmin();
   const dangerPin = useDangerPin();
@@ -153,23 +155,62 @@ export default function UsersPage() {
           )}
         </div>
 
-        {/* Results bar */}
-        <div className="flex items-center justify-between">
+        {/* Results bar + bulk actions */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <p className="text-xs text-textMuted">
             {loading ? "Loading…" : `${filtered.length} user${filtered.length !== 1 ? "s" : ""}${query ? ` matching "${query}"` : ""}`}
+            {selectedIds.size > 0 && <span className="ml-2 text-cyan font-bold">{selectedIds.size} selected</span>}
           </p>
-          <Button variant="secondary" onClick={() => api.exportUsers()}>
-            <Download size={13} /> Export CSV
-          </Button>
+          <div className="flex gap-2 items-center flex-wrap">
+            {selectedIds.size > 0 && (
+              <>
+                <Button variant="danger" loading={bulkBlocking} onClick={async () => {
+                  if (!confirm(`Block ${selectedIds.size} selected users?`)) return;
+                  setBulkBlocking(true);
+                  let done = 0;
+                  for (const id of Array.from(selectedIds)) {
+                    try { await api.blockUser(id, "Bulk block action"); done++; } catch {}
+                  }
+                  toast.success(`${done} users blocked`);
+                  setSelectedIds(new Set());
+                  setBulkBlocking(false);
+                  load();
+                }}>
+                  <ShieldOff size={13} /> Block {selectedIds.size}
+                </Button>
+                <Button variant="ghost" onClick={() => setSelectedIds(new Set())}><X size={13} /> Clear</Button>
+              </>
+            )}
+            <Button variant="secondary" onClick={() => api.exportUsers()}>
+              <Download size={13} /> Export CSV
+            </Button>
+          </div>
         </div>
 
         {loading ? <Spinner /> : (
           <Table
-            headers={["Name", "Phone", "Role", "Status", "Joined", "Actions"]}
+            headers={[
+              <input key="chk-all" type="checkbox" className="w-3.5 h-3.5 accent-cyan"
+                checked={filtered.length > 0 && filtered.every(u => selectedIds.has(u.id))}
+                onChange={() => {
+                  if (filtered.every(u => selectedIds.has(u.id))) setSelectedIds(new Set());
+                  else setSelectedIds(new Set(filtered.map(u => u.id)));
+                }} />,
+              "Name", "Phone", "Role", "Status", "Joined", "Actions"
+            ]}
             empty={!filtered.length}
           >
             {filtered.map((u: any) => (
               <Tr key={u.id}>
+                <Td>
+                  <input type="checkbox" className="w-3.5 h-3.5 accent-cyan"
+                    checked={selectedIds.has(u.id)}
+                    onChange={() => setSelectedIds(prev => {
+                      const next = new Set(prev);
+                      next.has(u.id) ? next.delete(u.id) : next.add(u.id);
+                      return next;
+                    })} />
+                </Td>
                 <Td>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-semibold">{u.full_name}</span>
