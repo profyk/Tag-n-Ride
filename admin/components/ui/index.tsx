@@ -151,17 +151,18 @@ export function Td({ children, className, colSpan }: { children: React.ReactNode
 }
 
 export function Modal({
-  open, onClose, title, children,
+  open, onClose, title, children, size,
 }: {
-  open: boolean; onClose: () => void; title: string; children: React.ReactNode;
+  open: boolean; onClose: () => void; title: string; children: React.ReactNode; size?: "sm" | "md" | "lg" | "xl";
 }) {
+  const maxW = size === "lg" ? "max-w-2xl" : size === "xl" ? "max-w-4xl" : size === "sm" ? "max-w-sm" : "max-w-md";
   if (!open) return null;
   return (
     <div
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
       onClick={onClose}>
       <div
-        className="bg-bg2 border border-border rounded-xl p-6 w-full max-w-md shadow-2xl"
+        className={`bg-bg2 border border-border rounded-xl p-6 w-full ${maxW} shadow-2xl`}
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-text font-bold text-lg">{title}</h3>
