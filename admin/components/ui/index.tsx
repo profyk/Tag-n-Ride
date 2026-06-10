@@ -98,15 +98,15 @@ export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInp
 }
 
 export function Select({
-  className, children, ...props
-}: React.SelectHTMLAttributes<HTMLSelectElement> & { children: React.ReactNode }) {
+  className, children, options, ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement> & { children?: React.ReactNode; options?: { label: string; value: string }[] }) {
   return (
     <select {...props} className={cn(
       "bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm",
       "focus:outline-none focus:border-cyan transition-colors",
       className
     )}>
-      {children}
+      {options ? options.map(o => <option key={o.value} value={o.value}>{o.label}</option>) : children}
     </select>
   );
 }
