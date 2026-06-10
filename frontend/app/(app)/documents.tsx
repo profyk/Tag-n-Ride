@@ -339,7 +339,7 @@ export default function DocumentsScreen() {
                     <View style={s.cardBtnRow}>
                       <TouchableOpacity
                         style={[s.viewChip, { backgroundColor: bg, borderColor: color + "50" }]}
-                        onPress={() => handleOpen(doc)}>
+                        onPress={() => router.push(`/(app)/document-view?id=${doc.id}` as any)}>
                         <Ionicons name="eye-outline" size={13} color={color} />
                         <Text style={[s.viewChipText, { color }]}>View</Text>
                       </TouchableOpacity>
