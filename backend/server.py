@@ -13389,6 +13389,137 @@ async def intelligence_leaderboard(admin: dict = Depends(require_superadmin)):
 
 
 # ════════════════════════════════════════════════════════════════
+# Support Tickets
+# ════════════════════════════════════════════════════════════════
+
+class TicketCreateIn(BaseModel):
+    user_id: Optional[str] = None
+    channel: str = Field(default="app")
+    subject: str = Field(min_length=3, max_length=200)
+    message: str = Field(min_length=5)
+    priority: str = Field(default="normal")
+
+    @field_validator("channel")
+    @classmethod
+    def val_channel(cls, v):
+        if v not in ("whatsapp", "email", "call", "app"): raise ValueError("Invalid channel")
+        return v
+
+    @field_validator("priority")
+    @classmethod
+    def val_priority(cls, v):
+        if v not in ("low", "normal", "high", "urgent"): raise ValueError("Invalid priority")
+        return v
+
+class TicketUpdateIn(BaseModel):
+    status: Optional[str] = None
+    assigned_to: Optional[str] = None
+    resolution_note: Optional[str] = None
+    priority: Optional[str] = None
+
+def _ticket_num():
+    import random, string
+    return "TKT-" + "".join(random.choices(string.digits, k=6))
+
+@api.get("/admin/support/tickets")
+async def list_tickets(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    channel: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+    admin: dict = Depends(require_admin),
+):
+    async with pool.acquire() as conn:
+        conditions = ["1=1"]
+        args: list = []
+        i = 1
+        if status:
+            conditions.append(f"t.status=${ i}"); args.append(status); i += 1
+        if priority:
+            conditions.append(f"t.priority=${i}"); args.append(priority); i += 1
+        if channel:
+            conditions.append(f"t.channel=${i}"); args.append(channel); i += 1
+        if search:
+            conditions.append(
+                f"(u.full_name ILIKE ${i} OR u.phone_number ILIKE ${i} OR t.subject ILIKE ${i} OR t.ticket_number ILIKE ${i})"
+            ); args.append(f"%{search}%"); i += 1
+        where = " AND ".join(conditions)
+        rows = await conn.fetch(
+            f"""SELECT t.*, u.full_name as user_name, u.phone_number,
+                       a.full_name as assigned_to_name
+                FROM support_tickets t
+                LEFT JOIN users u ON u.id=t.user_id
+                LEFT JOIN users a ON a.id=t.assigned_to
+                WHERE {where}
+                ORDER BY t.created_at DESC LIMIT ${i}""",
+            *args, min(limit, 500)
+        )
+    return [{**dict(r), "created_at": iso(r["created_at"]), "updated_at": iso(r.get("updated_at")),
+             "resolved_at": iso(r["resolved_at"]) if r.get("resolved_at") else None} for r in rows]
+
+@api.post("/admin/support/tickets")
+async def create_ticket(body: TicketCreateIn, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        ticket_id = str(uuid.uuid4())
+        ticket_num = _ticket_num()
+        await conn.execute(
+            """INSERT INTO support_tickets
+               (id, ticket_number, user_id, channel, subject, message, status, priority, assigned_to)
+               VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8)""",
+            ticket_id, ticket_num, body.user_id, body.channel,
+            body.subject, body.message, body.priority, admin["id"]
+        )
+    return {"ok": True, "id": ticket_id, "ticket_number": ticket_num}
+
+@api.patch("/admin/support/tickets/{ticket_id}")
+async def update_ticket(ticket_id: str, body: TicketUpdateIn, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        ticket = await conn.fetchrow("SELECT id FROM support_tickets WHERE id=$1", ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        updates = {}
+        if body.status: updates["status"] = body.status
+        if body.assigned_to: updates["assigned_to"] = body.assigned_to
+        if body.resolution_note: updates["resolution_note"] = body.resolution_note
+        if body.priority: updates["priority"] = body.priority
+        if body.status in ("resolved", "closed"):
+            updates["resolved_at"] = "NOW()"
+            updates["resolved_by"] = admin["id"]
+        if updates:
+            set_parts = []
+            vals = []
+            idx = 1
+            for k, v in updates.items():
+                if v == "NOW()":
+                    set_parts.append(f"{k}=NOW()")
+                else:
+                    set_parts.append(f"{k}=${idx}"); vals.append(v); idx += 1
+            set_parts.append(f"updated_at=NOW()")
+            await conn.execute(
+                f"UPDATE support_tickets SET {', '.join(set_parts)} WHERE id=${idx}",
+                *vals, ticket_id
+            )
+    return {"ok": True}
+
+@api.get("/admin/support/tickets/stats")
+async def ticket_stats(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        open_ct = await conn.fetchval("SELECT COUNT(*) FROM support_tickets WHERE status='open'")
+        in_progress = await conn.fetchval("SELECT COUNT(*) FROM support_tickets WHERE status='in_progress'")
+        waiting = await conn.fetchval("SELECT COUNT(*) FROM support_tickets WHERE status='waiting_user'")
+        resolved_today = await conn.fetchval(
+            "SELECT COUNT(*) FROM support_tickets WHERE status IN ('resolved','closed') AND DATE(resolved_at)=CURRENT_DATE"
+        )
+        urgent = await conn.fetchval("SELECT COUNT(*) FROM support_tickets WHERE priority='urgent' AND status='open'")
+        overdue = await conn.fetchval(
+            "SELECT COUNT(*) FROM support_tickets WHERE status='open' AND created_at < NOW()-INTERVAL '24 hours'"
+        )
+    return {"open": int(open_ct), "in_progress": int(in_progress), "waiting_user": int(waiting),
+            "resolved_today": int(resolved_today), "urgent_open": int(urgent), "overdue": int(overdue)}
+
+
+# ════════════════════════════════════════════════════════════════
 # Must be last line
 # ════════════════════════════════════════════════════════════════
 app.include_router(api)

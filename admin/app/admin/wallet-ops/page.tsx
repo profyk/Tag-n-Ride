@@ -198,7 +198,7 @@ export default function WalletOpsPage() {
                 if (!token) return;
                 let done = 0;
                 for (const w of frozenList) {
-                  try { await api.unfreezeWallet(w.user_id, token); done++; } catch {}
+                  try { await api.unfreezeWalletAdmin(w.user_id); done++; } catch {}
                 }
                 toast.success(`${done}/${frozenList.length} wallets unfrozen`);
                 const r = await api.wallets(); setAllWallets(r.data);

@@ -15,7 +15,7 @@ import {
   Globe, Star, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
-  Bell, Landmark, ClipboardList,
+  Landmark, ClipboardList,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -92,6 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
     color: "text-green",
     items: [
       { label: "Treasury",                href: "/admin/treasury",       icon: Landmark,     permission: "view_ledger" },
+      { label: "Settlement Center",     href: "/admin/settlement",     icon: Scale,        permission: "view_ledger" },
       { label: "Withdrawals & Payouts", href: "/admin/withdrawals",    icon: Wallet,       permission: "approve_withdrawals" },
       { label: "Revenue & Fees",        href: "/admin/revenue",        icon: TrendingUp,   permission: "view_analytics" },
       { label: "Ledger",                href: "/admin/ledger",         icon: BookOpen,     permission: "view_ledger" },
