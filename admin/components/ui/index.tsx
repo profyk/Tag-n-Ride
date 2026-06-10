@@ -49,9 +49,9 @@ export function Badge({ label, tone = "muted", children }: { label?: string; ton
   );
 }
 
-export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+export function Card({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div className={cn("bg-bg2 border border-border rounded-xl p-5", className)}>
+    <div className={cn("bg-bg2 border border-border rounded-xl p-5", className)} onClick={onClick}>
       {children}
     </div>
   );
