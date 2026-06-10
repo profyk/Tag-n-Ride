@@ -335,24 +335,37 @@ export default function DocumentsScreen() {
                     <Text style={s.ref}>{doc.reference_number}</Text>
                   ) : null}
                   <Text style={s.date}>{formatDate(doc.created_at)}</Text>
-                </View>
-                <View style={s.cardActions}>
                   {canDownload && (
-                    <TouchableOpacity onPress={() => handleDownload(doc)} style={s.actionBtn} disabled={downloading === doc.id}>
-                      {downloading === doc.id
-                        ? <ActivityIndicator color={color} size="small" />
-                        : <Ionicons name="download-outline" size={18} color={color} />}
-                    </TouchableOpacity>
+                    <View style={s.cardBtnRow}>
+                      <TouchableOpacity
+                        style={[s.viewChip, { backgroundColor: bg, borderColor: color + "50" }]}
+                        onPress={() => handleOpen(doc)}>
+                        <Ionicons name="eye-outline" size={13} color={color} />
+                        <Text style={[s.viewChipText, { color }]}>View</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={s.dlChip}
+                        onPress={(e) => { e.stopPropagation?.(); handleDownload(doc); }}
+                        disabled={downloading === doc.id}>
+                        {downloading === doc.id
+                          ? <ActivityIndicator color={colors.textMuted} size="small" style={{ width: 13, height: 13 }} />
+                          : <Ionicons name="download-outline" size={13} color={colors.textMuted} />}
+                        <Text style={s.dlChipText}>PDF</Text>
+                      </TouchableOpacity>
+                      {doc.document_type === "payslip" && (
+                        <TouchableOpacity
+                          style={s.dlChip}
+                          onPress={(e) => { e.stopPropagation?.(); handleShare(doc); }}>
+                          <Ionicons name="share-outline" size={13} color={colors.textMuted} />
+                          <Text style={s.dlChipText}>Share</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   )}
-                  {doc.document_type === "payslip" && (
-                    <TouchableOpacity onPress={() => handleShare(doc)} style={s.actionBtn}>
-                      <Ionicons name="share-outline" size={18} color={colors.cyan} />
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity onPress={() => handleDelete(doc)} style={s.actionBtn}>
-                    <Ionicons name="trash-outline" size={18} color={colors.red} />
-                  </TouchableOpacity>
                 </View>
+                <TouchableOpacity onPress={() => handleDelete(doc)} style={s.actionBtn}>
+                  <Ionicons name="trash-outline" size={18} color={colors.red} />
+                </TouchableOpacity>
               </TouchableOpacity>
             );
           }}
@@ -505,7 +518,7 @@ export default function DocumentsScreen() {
                         onPress={() => { setSelected(null); handleDownload(selected); }}
                         disabled={downloading === selected.id}>
                         <Ionicons name="download-outline" size={18} color="#fff" />
-                        <Text style={s.sheetActionBtnText}>Download PDF</Text>
+                        <Text style={s.sheetActionBtnText}>Download / Print PDF</Text>
                       </TouchableOpacity>
                     )}
                     {selected.document_type === "payslip" && (
@@ -577,6 +590,11 @@ const makeStyles = (colors: any) => StyleSheet.create({
   date: { color: colors.textDim, fontSize: 10, marginTop: 4 },
   cardActions: { flexDirection: "column", gap: 8, alignItems: "center" },
   actionBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
+  cardBtnRow: { flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" },
+  viewChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, borderWidth: 1 },
+  viewChipText: { fontSize: 11, fontWeight: "800" },
+  dlChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  dlChipText: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
   empty: { paddingTop: 60, alignItems: "center", paddingHorizontal: 24 },
   emptyTitle: { color: colors.text, fontWeight: "700", fontSize: 16, marginTop: 12 },
   emptyText: { color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 19 },
