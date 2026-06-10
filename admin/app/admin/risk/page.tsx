@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ShieldAlert, UserX, Eye, Snowflake, RefreshCw, AlertTriangle, Zap } from "lucide-react";
+import { ShieldAlert, UserX, Eye, Snowflake, RefreshCw, AlertTriangle, Zap, Download, Info } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, RiskUser } from "@/lib/api";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
@@ -151,7 +151,31 @@ export default function RiskPage() {
               <Button variant="secondary" onClick={load} disabled={loading}>
                 <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               </Button>
+              <Button variant="secondary" onClick={() => {
+                const rows = [
+                  ["Name", "Phone", "Role", "Risk Score", "24h Txns", "24h Volume", "Failed Txns", "Disputes", "Frozen", "Flagged", "Joined"],
+                  ...filteredUsers.map(u => [
+                    u.full_name, u.phone_number, u.role, u.risk_score,
+                    u.txns_24h, formatZAR(u.volume_24h), u.failed_txns, u.dispute_count,
+                    u.is_frozen ? "Yes" : "No", u.flagged ? "Yes" : "No", u.created_at?.slice(0, 10),
+                  ]),
+                ];
+                const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+                const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                a.download = `risk-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+              }}>
+                <Download size={13} /> Export
+              </Button>
             </div>
+          </div>
+
+          {/* Score explanation */}
+          <div className="mb-4 p-3 bg-bg border border-border rounded-lg flex items-start gap-2">
+            <Info size={12} className="text-cyan flex-shrink-0 mt-0.5" />
+            <p className="text-textDim text-[10px] leading-relaxed">
+              Risk score (0–100) is computed from: high-frequency transactions, failed payment attempts, open disputes, high 24h volume, flagged status, and account age.
+              {" "}<span className="text-red font-bold">≥75 = High risk</span>, <span className="text-yellow font-bold">50–74 = Medium</span>, <span className="text-green font-bold">&lt;50 = Normal</span>.
+            </p>
           </div>
 
           {loading ? <Spinner /> : (

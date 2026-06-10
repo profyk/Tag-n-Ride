@@ -15,6 +15,7 @@ import {
   Globe, Star, MessageCircle,
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
+  Bell, Landmark, ClipboardList,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,7 @@ type NavGroup = {
 
 const CORE_NAV: NavItem[] = [
   { label: "Dashboard",    href: "/admin/dashboard",    icon: LayoutDashboard, permission: null },
+  { label: "Alerts",       href: "/admin/alerts",       icon: Bell,            permission: null },
   { label: "Transactions", href: "/admin/transactions",  icon: ArrowLeftRight,  permission: null },
   { label: "Audit Log",    href: "/admin/audit",         icon: FileText,        permission: "view_audit" },
 ];
@@ -89,6 +91,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: DollarSign,
     color: "text-green",
     items: [
+      { label: "Treasury",                href: "/admin/treasury",       icon: Landmark,     permission: "view_ledger" },
       { label: "Withdrawals & Payouts", href: "/admin/withdrawals",    icon: Wallet,       permission: "approve_withdrawals" },
       { label: "Revenue & Fees",        href: "/admin/revenue",        icon: TrendingUp,   permission: "view_analytics" },
       { label: "Ledger",                href: "/admin/ledger",         icon: BookOpen,     permission: "view_ledger" },
@@ -135,6 +138,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: ShieldCheck,
     color: "text-yellow",
     items: [
+      { label: "Regulatory & FICA",  href: "/admin/regulatory", icon: ClipboardList, permission: "view_audit" },
       { label: "Compliance & Risk", href: "/admin/compliance", icon: AlertTriangle, permission: "view_audit" },
       { label: "Risk & Fraud",      href: "/admin/risk",       icon: ShieldAlert,   permission: "view_risk" },
       { label: "Disputes",          href: "/admin/disputes",   icon: Scale,         permission: "manage_users" },

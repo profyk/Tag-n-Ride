@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import { CheckCircle, Clock, TrendingDown, AlertTriangle, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import toast from "react-hot-toast";
 
@@ -67,13 +68,37 @@ export default function OnboardingPage() {
 
         {/* Action needed banner */}
         {stuckInKyc.length > 0 && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-yellow/10 border border-yellow/20">
-            <AlertTriangle size={14} className="text-yellow" />
-            <p className="text-sm text-yellow font-semibold">
-              {stuckInKyc.length} driver{stuckInKyc.length !== 1 ? "s have" : " has"} been stuck in KYC for over 3 days — review pending submissions.
-            </p>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-yellow/10 border border-yellow/20 flex-wrap">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="text-yellow" />
+              <p className="text-sm text-yellow font-semibold">
+                {stuckInKyc.length} driver{stuckInKyc.length !== 1 ? "s have" : " has"} been stuck in KYC for over 3 days.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <a href="/admin/kyc">
+                <button className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border border-yellow/30 text-yellow hover:bg-yellow/10 transition-colors">
+                  Review KYC →
+                </button>
+              </a>
+            </div>
           </div>
         )}
+
+        {/* Summary bar */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 px-3 py-2 bg-bg2 border border-border rounded-lg">
+            <Clock size={12} className="text-textMuted" />
+            <span className="text-textMuted text-xs">Funnel conversion: </span>
+            <span className={`text-xs font-bold ${conversionRate >= 70 ? "text-green" : conversionRate >= 40 ? "text-yellow" : "text-red"}`}>
+              {conversionRate}%
+            </span>
+            <span className="text-textDim text-[10px]">registered → verified</span>
+          </div>
+          <button onClick={load} className="flex items-center gap-1.5 text-xs text-textMuted hover:text-cyan px-2 py-2 transition-colors">
+            <RefreshCw size={12} /> Refresh
+          </button>
+        </div>
 
         {/* Funnel */}
         {funnel && (

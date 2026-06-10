@@ -59,6 +59,38 @@ export default function RevenuePage() {
               <StatCard label="Transactions" value={daily.reduce((s: number, d: any) => s + (d.count || 0), 0).toLocaleString()} />
             </div>
 
+            {/* Revenue projection */}
+            {daily.length >= 7 && (() => {
+              const days = daily.length;
+              const avgDailyFee = totalFees / days;
+              const avgDailyVol = totalVolume / days;
+              const now = new Date();
+              const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+              const dayOfMonth = now.getDate();
+              const daysLeft = daysInMonth - dayOfMonth;
+              const thisMonthData = daily.filter((d: any) => {
+                const dDate = new Date(d.date ?? d.day ?? "");
+                return dDate.getMonth() === now.getMonth() && dDate.getFullYear() === now.getFullYear();
+              });
+              const mtdFees = thisMonthData.reduce((s: number, d: any) => s + (d.fees || 0), 0);
+              const mtdVol = thisMonthData.reduce((s: number, d: any) => s + (d.amount || 0), 0);
+              const projectedFees = mtdFees + avgDailyFee * daysLeft;
+              const projectedVol = mtdVol + avgDailyVol * daysLeft;
+              return (
+                <div className="bg-bg2 border border-cyan/10 rounded-xl p-4">
+                  <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <TrendingUp size={10} className="text-cyan" /> Month-to-Date & Projection
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div><p className="text-textDim text-[10px]">MTD Volume</p><p className="text-cyan font-black text-xl">{formatZAR(mtdVol)}</p></div>
+                    <div><p className="text-textDim text-[10px]">MTD Fees</p><p className="text-green font-black text-xl">{formatZAR(mtdFees)}</p></div>
+                    <div><p className="text-textDim text-[10px]">Days remaining</p><p className="text-yellow font-black text-xl">{daysLeft}</p></div>
+                    <div><p className="text-textDim text-[10px]">Projected month fees</p><p className="text-purple font-black text-xl">{formatZAR(projectedFees)}</p></div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">

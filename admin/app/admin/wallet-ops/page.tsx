@@ -179,6 +179,36 @@ export default function WalletOpsPage() {
           <StatCard label="Active Wallets" value={String(allWallets.length - frozenList.length)} tone="cyan" />
         </div>
 
+        {frozenList.length > 0 && (
+          <div className="flex items-center justify-between p-4 bg-red/5 border border-red/20 rounded-xl">
+            <div className="flex items-center gap-3">
+              <Lock size={15} className="text-red" />
+              <div>
+                <p className="text-red text-sm font-bold">{frozenList.length} wallet{frozenList.length !== 1 ? "s" : ""} frozen</p>
+                <p className="text-textMuted text-xs">{formatZAR(frozenBalance)} total locked balance</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setFilterFrozen("frozen")}>
+                <Lock size={13} /> View Frozen
+              </Button>
+              <Button variant="danger" onClick={async () => {
+                if (!confirm(`Unfreeze all ${frozenList.length} frozen wallets?`)) return;
+                const token = await dangerPin.request();
+                if (!token) return;
+                let done = 0;
+                for (const w of frozenList) {
+                  try { await api.unfreezeWallet(w.user_id, token); done++; } catch {}
+                }
+                toast.success(`${done}/${frozenList.length} wallets unfrozen`);
+                const r = await api.wallets(); setAllWallets(r.data);
+              }}>
+                <Unlock size={13} /> Bulk Unfreeze All
+              </Button>
+            </div>
+          </div>
+        )}
+
         <Card>
           {/* Header row */}
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
