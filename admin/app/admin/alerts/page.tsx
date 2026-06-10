@@ -97,11 +97,11 @@ export default function AlertsPage() {
       const criticalRisk = riskUsers.filter(u => u.risk_score >= 90);
       const highRisk = riskUsers.filter(u => u.risk_score >= 75 && u.risk_score < 90);
 
-      const built: AlertItem[] = [
+      const built: AlertItem[] = ([
         // ── CRITICAL ─────────────────────────────────────────────────
         {
           id: "failed-payouts",
-          severity: "critical",
+          severity: "critical" as const,
           icon: Zap,
           title: "Failed Payouts",
           description: "Driver payouts that failed to reach their bank accounts. Money is in limbo — needs immediate retry or manual intervention.",
@@ -111,7 +111,7 @@ export default function AlertsPage() {
         },
         {
           id: "incidents",
-          severity: "critical",
+          severity: "critical" as const,
           icon: Shield,
           title: "Active Safety Incidents",
           description: "Unresolved SOS or safety incidents on the platform. Drivers or passengers may be in danger.",
@@ -121,7 +121,7 @@ export default function AlertsPage() {
         },
         {
           id: "critical-risk",
-          severity: "critical",
+          severity: "critical" as const,
           icon: BadgeAlert,
           title: "Critical Risk Accounts",
           description: "Users with risk score ≥ 90. Likely fraudulent or compromised accounts requiring immediate freeze.",
@@ -133,7 +133,7 @@ export default function AlertsPage() {
         // ── HIGH PRIORITY ────────────────────────────────────────────
         {
           id: "pending-withdrawals",
-          severity: "high",
+          severity: "high" as const,
           icon: Zap,
           title: "Pending Withdrawal Requests",
           description: "Drivers waiting for their payout to be approved. Delays damage trust — approve or reject today.",
@@ -143,7 +143,7 @@ export default function AlertsPage() {
         },
         {
           id: "overdue-disputes",
-          severity: "high",
+          severity: "high" as const,
           icon: Scale,
           title: "Overdue Disputes (>7 days)",
           description: "Open disputes that have been waiting over a week without resolution. SLA breached.",
@@ -153,7 +153,7 @@ export default function AlertsPage() {
         },
         {
           id: "flagged-accounts",
-          severity: "high",
+          severity: "high" as const,
           icon: ShieldAlert,
           title: "Flagged Accounts",
           description: "User accounts flagged for suspicious activity, reports, or manual review.",
@@ -165,7 +165,7 @@ export default function AlertsPage() {
         // ── MEDIUM ───────────────────────────────────────────────────
         {
           id: "pending-kyc",
-          severity: "medium",
+          severity: "medium" as const,
           icon: Fingerprint,
           title: "Pending KYC Reviews",
           description: "Driver identity documents waiting for admin review and approval. Drivers can't receive payments until verified.",
@@ -175,7 +175,7 @@ export default function AlertsPage() {
         },
         {
           id: "pending-drivers",
-          severity: "medium",
+          severity: "medium" as const,
           icon: Users,
           title: "Unverified Drivers",
           description: "Drivers who have completed onboarding but haven't been verified yet.",
@@ -185,7 +185,7 @@ export default function AlertsPage() {
         },
         {
           id: "open-disputes",
-          severity: "medium",
+          severity: "medium" as const,
           icon: Scale,
           title: "Open Disputes (all)",
           description: "All open payment/service disputes requiring resolution.",
@@ -195,7 +195,7 @@ export default function AlertsPage() {
         },
         {
           id: "high-risk",
-          severity: "medium",
+          severity: "medium" as const,
           icon: ShieldAlert,
           title: "High Risk Users",
           description: "Users with risk score 75–89. Monitor closely and consider restricting transaction limits.",
@@ -207,7 +207,7 @@ export default function AlertsPage() {
         // ── INFO ─────────────────────────────────────────────────────
         {
           id: "new-signups-today",
-          severity: "info",
+          severity: "info" as const,
           icon: Users,
           title: "New Signups Today",
           description: "Users who registered today. Review for any unusual registration patterns.",
@@ -217,7 +217,7 @@ export default function AlertsPage() {
         },
         {
           id: "transactions-today",
-          severity: "info",
+          severity: "info" as const,
           icon: Activity,
           title: "Transactions Today",
           description: "Total payments processed today.",
@@ -225,7 +225,7 @@ export default function AlertsPage() {
           href: "/admin/transactions",
           actionLabel: "View Transactions",
         },
-      ].filter(a => a.count > 0);
+      ] as AlertItem[]).filter(a => a.count > 0);
 
       setAlerts(built);
       setLastRefreshed(new Date());
