@@ -128,6 +128,7 @@ function AppTabs() {
       <Tabs.Screen name="statement" options={{ href: null }} />
       <Tabs.Screen name="payslip" options={{ href: null }} />
       <Tabs.Screen name="documents" options={{ href: null }} />
+      <Tabs.Screen name="document-view" options={{ href: null }} />
       <Tabs.Screen name="safety" options={{ href: null }} />
       <Tabs.Screen name="saferide-trip" options={{ href: null }} />
     </Tabs>

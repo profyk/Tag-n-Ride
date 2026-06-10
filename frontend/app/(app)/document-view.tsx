@@ -77,7 +77,10 @@ export default function DocumentViewScreen() {
         const docMeta = await api.documentGet(id);
         setDoc(docMeta);
 
-        const meta = docMeta.metadata || {};
+        const rawMeta = docMeta.metadata;
+        const meta: Record<string, any> = !rawMeta ? {} :
+          typeof rawMeta === "string" ? (() => { try { return JSON.parse(rawMeta); } catch { return {}; } })() :
+          rawMeta;
         const isPassenger = meta.statement_type === "passenger" ||
           (docMeta.document_type === "statement" && !!meta.statement_id && !meta.payslip_id && meta.statement_type !== "owner");
         const isOwner = meta.statement_type === "owner";

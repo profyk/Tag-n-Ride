@@ -133,7 +133,10 @@ export default function DocumentsScreen() {
     }
     setContentLoading(true);
     setFullContent(null);
-    const meta = selected.metadata || {};
+    const rawMeta = selected.metadata;
+    const meta: Record<string, any> = !rawMeta ? {} :
+      typeof rawMeta === "string" ? (() => { try { return JSON.parse(rawMeta); } catch { return {}; } })() :
+      rawMeta;
     const isPassenger = meta.statement_type === "passenger" ||
       (selected.document_type === "statement" && !!meta.statement_id && !meta.payslip_id && meta.statement_type !== "owner");
     const isOwner = meta.statement_type === "owner";
@@ -200,7 +203,10 @@ export default function DocumentsScreen() {
   const handleDownload = async (doc: UserDocument) => {
     setDownloading(doc.id);
     try {
-      const meta = doc.metadata || {};
+      const rawMeta = doc.metadata;
+      const meta: Record<string, any> = !rawMeta ? {} :
+        typeof rawMeta === "string" ? (() => { try { return JSON.parse(rawMeta); } catch { return {}; } })() :
+        rawMeta;
       let html = "";
       let fileName = "TagNRide-Document.pdf";
 

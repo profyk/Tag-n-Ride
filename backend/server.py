@@ -358,7 +358,11 @@ CREATE TABLE IF NOT EXISTS flagged_accounts (
 async def lifespan(app: FastAPI):
     global pool
     try:
-        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+        import json as _json_codec
+        async def _init_conn(conn):
+            await conn.set_type_codec("jsonb", encoder=_json_codec.dumps, decoder=_json_codec.loads, schema="pg_catalog")
+            await conn.set_type_codec("json",  encoder=_json_codec.dumps, decoder=_json_codec.loads, schema="pg_catalog")
+        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, init=_init_conn)
         async with pool.acquire() as conn:
             await conn.execute(CREATE_TABLES_SQL)
         print("DB pool created, tables ready")
