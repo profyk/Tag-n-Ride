@@ -366,6 +366,14 @@ export default function DocumentsScreen() {
                           <Text style={s.dlChipText}>Share</Text>
                         </TouchableOpacity>
                       )}
+                      {doc.document_type === "statement" && (
+                        <TouchableOpacity
+                          style={[s.dlChip, { borderColor: colors.red + "40" }]}
+                          onPress={(e) => { e.stopPropagation?.(); handleDelete(doc); }}>
+                          <Ionicons name="trash-outline" size={13} color={colors.red} />
+                          <Text style={[s.dlChipText, { color: colors.red }]}>Delete</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </View>
@@ -381,7 +389,15 @@ export default function DocumentsScreen() {
               <Text style={s.emptyTitle}>No documents</Text>
               <Text style={s.emptyText}>
                 {tab === "all"
-                  ? "Documents will appear here when you generate statements, payslips, or when account events happen."
+                  ? "All your documents appear here — statements, top-up receipts, KYC, and notices."
+                  : tab === "statements"
+                  ? "Your expense statements appear here. Generate one from your profile."
+                  : tab === "financial"
+                  ? "Wallet top-up confirmations and withdrawal receipts appear here automatically."
+                  : tab === "identity"
+                  ? "Your KYC / identity verification documents appear here."
+                  : tab === "notices"
+                  ? "Important notices and policy documents from Tag n Ride appear here."
                   : `No ${tab} documents yet.`}
               </Text>
               {tab === "statements" && (

@@ -487,6 +487,9 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         )}
         <Row icon="receipt-outline" label="Transaction history"
           onPress={() => router.push("/(app)/transactions")} testID="row-history" colors={colors} />
+        <Row icon="alert-circle-outline" label="My Disputes"
+          sub="Raise or track a payment dispute"
+          onPress={() => router.push("/(app)/transactions")} testID="row-disputes" colors={colors} />
         {(isDriver || isPassenger) && (
           <PayslipStatementRow
             isDriver={isDriver}
