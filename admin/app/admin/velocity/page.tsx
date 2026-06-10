@@ -85,7 +85,7 @@ function RuleCard({
             />
             <Badge
               label={rule.active ? "Active" : "Inactive"}
-              tone={rule.active ? "green" : "default"}
+              tone={rule.active ? "green" : "muted"}
             />
           </div>
           {rule.description && <p className="text-textDim text-xs mt-0.5">{rule.description}</p>}
