@@ -161,7 +161,11 @@ export default function PassengerStatementScreen() {
       if (fee > 0 && freshBalance < fee) {
         Alert.alert(
           "Insufficient Balance",
-          `You need ${formatR(fee)} to generate this statement.\n\nYour balance: ${formatR(freshBalance)}\n\nPlease top up your wallet first.`
+          `You need ${formatR(fee - freshBalance)} more to generate this statement.\n\nCurrent balance: ${formatR(freshBalance)}`,
+          [
+            { text: "Not Now", style: "cancel" },
+            { text: "Top Up Wallet", onPress: () => router.push("/topup" as any) },
+          ]
         );
         return;
       }
@@ -309,7 +313,7 @@ export default function PassengerStatementScreen() {
                     (!canAfford && fee > 0) && s.getBtnDisabled,
                   ]}
                   onPress={handleGetStatement}
-                  disabled={loading || (!canAfford && fee > 0)}
+                  disabled={loading}
                   activeOpacity={0.8}
                 >
                   {loading ? (
