@@ -13,7 +13,7 @@ import {
   AlertTriangle, CheckCircle, XCircle, Zap,
   Brain, Car, Wallet, FileText, Search,
   Clock, ArrowUp,
-  ChevronDown, Star,
+  ChevronDown, Star, Trash2,
 } from "lucide-react";
 import client, { isSuperAdmin } from "@/lib/api";
 import { AdminShell } from "@/components/layout/AdminShell";
@@ -257,6 +257,13 @@ const SUGGESTED_QUESTIONS = [
 
 const MEDAL_COLORS = ["#FFD700", "#C0C0C0", "#CD7F32"];
 
+const INITIAL_AI_MESSAGE: ChatMsg = {
+  role: "ai",
+  text: "Hello. I am your Tag n Ride System Intelligence AI.\n\nI have access to all your live platform data. I can explain anything about how your system works, analyse your numbers, identify issues and help you make better decisions.\n\nWhat would you like to know?",
+  timestamp: new Date(),
+  followups: SUGGESTED_QUESTIONS[0].qs,
+};
+
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function IntelligencePage() {
   const router = useRouter();
@@ -272,14 +279,12 @@ export default function IntelligencePage() {
   const [question, setQuestion] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<{ package_installed: boolean; key_set: boolean; key_preview: string | null; ready: boolean } | null>(null);
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    {
-      role: "ai",
-      text: "Hello. I am your Tag n Ride System Intelligence AI.\n\nI have access to all your live platform data. I can explain anything about how your system works, analyse your numbers, identify issues and help you make better decisions.\n\nWhat would you like to know?",
-      timestamp: new Date(),
-      followups: SUGGESTED_QUESTIONS[0].qs,
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMsg[]>([INITIAL_AI_MESSAGE]);
+
+  const clearChat = () => {
+    setMessages([{ ...INITIAL_AI_MESSAGE, timestamp: new Date() }]);
+    setQuestion("");
+  };
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const fetchData = useCallback(async (silent = false) => {
@@ -820,6 +825,24 @@ export default function IntelligencePage() {
               <p className="text-green text-xs font-bold">AI ready · key: {aiStatus.key_preview}</p>
             </div>
           )}
+          {/* Chat header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Brain size={14} className="text-purple" />
+              <span className="text-xs font-bold text-textMuted uppercase tracking-widest">Conversation</span>
+              <span className="text-[10px] text-textDim">({messages.length - 1} message{messages.length !== 2 ? "s" : ""})</span>
+            </div>
+            {messages.length > 1 && (
+              <button
+                onClick={clearChat}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-bg2 border border-border rounded-lg text-xs text-textMuted hover:text-red hover:border-red/40 transition-colors"
+              >
+                <Trash2 size={12} />
+                New Chat
+              </button>
+            )}
+          </div>
+
           {/* Chat history */}
           <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
             {messages.map((msg, i) => (
@@ -898,9 +921,6 @@ export default function IntelligencePage() {
             >
               <Search size={16} />
             </button>
-          </div>
-          <div className="flex justify-end">
-            <button onClick={() => setMessages(messages.slice(0, 1))} className="text-[10px] text-textDim hover:text-textMuted">Clear history</button>
           </div>
         </div>
       )}
