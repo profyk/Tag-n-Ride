@@ -13198,6 +13198,21 @@ async def intelligence_overview(admin: dict = Depends(require_superadmin)):
     return data
 
 
+@api.get("/admin/intelligence/ai-status")
+async def intelligence_ai_status(admin: dict = Depends(require_superadmin)):
+    """Diagnostic: check whether the AI service is ready."""
+    package_ok = _anthropic is not None
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    key_set = bool(key)
+    key_preview = (key[:12] + "...") if key_set else None
+    return {
+        "package_installed": package_ok,
+        "key_set": key_set,
+        "key_preview": key_preview,
+        "ready": package_ok and key_set,
+    }
+
+
 @api.post("/admin/intelligence/ask")
 async def intelligence_ask(body: IntelligenceAskIn, admin: dict = Depends(require_superadmin)):
     async with pool.acquire() as conn:
@@ -13236,24 +13251,17 @@ async def intelligence_ask(body: IntelligenceAskIn, admin: dict = Depends(requir
     try:
         ai_client = _anthropic.Anthropic(api_key=anthropic_key)
         message = ai_client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-haiku-4-5-20251001",
             max_tokens=1024,
-            system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Here is the current system data:\n\n{context_text}", "cache_control": {"type": "ephemeral"}},
-                    {"type": "text", "text": f"\n\nQuestion from admin: {body.question}"},
-                ],
-            }],
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
         )
         answer = message.content[0].text if message.content else "No response generated."
-    except _anthropic.AuthenticationError:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is invalid. Check the key value in Railway — it must start with sk-ant-...")
-    except _anthropic.NotFoundError:
-        raise HTTPException(status_code=502, detail="AI model not found. Contact support.")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI service error: {str(e)}")
+        err = str(e)
+        if "401" in err or "authentication" in err.lower() or "api_key" in err.lower() or "invalid x-api-key" in err.lower():
+            raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is invalid. Verify the key value in Railway Variables — it must start with sk-ant-...")
+        raise HTTPException(status_code=502, detail=f"AI service error: {err}")
 
     suggested = [
         "What is my projected monthly revenue?",

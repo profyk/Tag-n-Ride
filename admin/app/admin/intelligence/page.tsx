@@ -271,6 +271,7 @@ export default function IntelligencePage() {
   const [countdown, setCountdown] = useState(30);
   const [question, setQuestion] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiStatus, setAiStatus] = useState<{ package_installed: boolean; key_set: boolean; key_preview: string | null; ready: boolean } | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([
     {
       role: "ai",
@@ -303,6 +304,7 @@ export default function IntelligencePage() {
   useEffect(() => {
     if (!isSuperAdmin()) { router.replace("/admin/dashboard"); return; }
     fetchData();
+    client.get("/api/admin/intelligence/ai-status").then(r => setAiStatus(r.data)).catch(() => {});
   }, []);
 
   // Auto-refresh every 30s
@@ -799,6 +801,25 @@ export default function IntelligencePage() {
       {/* ══════════════ TAB: ASK AI ═══════════════════════════ */}
       {tab === "ai" && (
         <div className="flex flex-col gap-4 max-w-3xl mx-auto">
+          {/* AI status banner */}
+          {aiStatus && !aiStatus.ready && (
+            <div className="bg-red/10 border border-red/30 rounded-xl p-4 flex flex-col gap-2">
+              <p className="text-red text-sm font-bold">AI Service Not Ready</p>
+              <div className="text-xs text-textMuted space-y-1">
+                <p>• Anthropic package installed: <span className={aiStatus.package_installed ? "text-green font-bold" : "text-red font-bold"}>{aiStatus.package_installed ? "YES" : "NO"}</span></p>
+                <p>• ANTHROPIC_API_KEY set: <span className={aiStatus.key_set ? "text-green font-bold" : "text-red font-bold"}>{aiStatus.key_set ? `YES (${aiStatus.key_preview})` : "NO — missing"}</span></p>
+              </div>
+              {!aiStatus.key_set && (
+                <p className="text-xs text-yellow">Go to Railway → your backend service → Variables → add <code className="bg-bg3 px-1 rounded">ANTHROPIC_API_KEY</code> = your key starting with <code className="bg-bg3 px-1 rounded">sk-ant-</code></p>
+              )}
+            </div>
+          )}
+          {aiStatus?.ready && (
+            <div className="bg-green/10 border border-green/30 rounded-xl px-4 py-2 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green animate-pulse" />
+              <p className="text-green text-xs font-bold">AI ready · key: {aiStatus.key_preview}</p>
+            </div>
+          )}
           {/* Chat history */}
           <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
             {messages.map((msg, i) => (
