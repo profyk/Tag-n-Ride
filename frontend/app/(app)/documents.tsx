@@ -188,7 +188,7 @@ export default function DocumentsScreen() {
 
   const handleShare = async (doc: UserDocument) => {
     if (doc.reference_number) {
-      const url = `https://tagnride.com/verify?ref=${doc.reference_number}`;
+      const url = `https://tag-n-ride-admin.vercel.app/verify?ref=${doc.reference_number}`;
       try {
         await Share.share({ message: `View my payslip: ${url}`, url });
       } catch {}
