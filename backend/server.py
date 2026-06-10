@@ -3183,12 +3183,16 @@ CREATE TABLE IF NOT EXISTS disputes (
     transaction_id TEXT REFERENCES transactions(id),
     user_id TEXT NOT NULL REFERENCES users(id),
     reason TEXT NOT NULL,
+    category TEXT,
     status TEXT DEFAULT 'open',
     resolved_by TEXT REFERENCES users(id),
     resolution TEXT,
+    admin_notes TEXT,
     resolved_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS admin_notes TEXT;
 
 CREATE TABLE IF NOT EXISTS blacklist (
     id TEXT PRIMARY KEY,
@@ -4326,9 +4330,12 @@ class SignedDocMetaIn(BaseModel):
 class DisputeIn(BaseModel):
     transaction_id: str
     reason: str = Field(min_length=10, max_length=500)
+    category: Optional[str] = None
 
 class ResolveDisputeIn(BaseModel):
     resolution: str = Field(min_length=5, max_length=500)
+    admin_notes: Optional[str] = None
+    notify_user: bool = True
 
 # ── Driver Transfer Models ─────────────────────────────────────
 class TransferRequestIn(BaseModel):
@@ -4774,8 +4781,11 @@ async def resolve_velocity_alert(alert_id: int, request: Request, admin: dict = 
 async def admin_disputes(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT d.*,u.full_name as user_name,u.phone_number,
-                   t.reference,t.amount,t.type as txn_type,
+            SELECT d.id, d.transaction_id, d.user_id, d.reason, d.category,
+                   d.status, d.resolution, d.admin_notes, d.resolved_by,
+                   d.resolved_at, d.created_at,
+                   u.full_name as user_name, u.phone_number,
+                   t.reference, t.amount, t.type as txn_type,
                    rb.full_name as resolved_by_name
             FROM disputes d
             JOIN users u ON u.id=d.user_id
@@ -4783,15 +4793,38 @@ async def admin_disputes(admin: dict = Depends(require_admin)):
             LEFT JOIN users rb ON rb.id=d.resolved_by
             ORDER BY d.created_at DESC
         """)
-    return [{**dict(r), "amount": float(r["amount"] or 0), "created_at": iso(r["created_at"]), "resolved_at": iso(r["resolved_at"]) if r["resolved_at"] else None} for r in rows]
+    return [
+        {
+            **dict(r),
+            "amount": float(r["amount"] or 0),
+            "created_at": iso(r["created_at"]),
+            "resolved_at": iso(r["resolved_at"]) if r["resolved_at"] else None,
+        }
+        for r in rows
+    ]
 
 @api.post("/admin/disputes/{dispute_id}/resolve")
 async def resolve_dispute(dispute_id: str, body: ResolveDisputeIn, request: Request, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
+        dispute = await conn.fetchrow("SELECT user_id FROM disputes WHERE id=$1", dispute_id)
+        if not dispute:
+            raise HTTPException(status_code=404, detail="Dispute not found")
         await conn.execute(
-            "UPDATE disputes SET status='resolved',resolved_by=$1,resolution=$2,resolved_at=NOW() WHERE id=$3",
-            admin["id"], body.resolution, dispute_id
+            "UPDATE disputes SET status='resolved',resolved_by=$1,resolution=$2,admin_notes=$3,resolved_at=NOW() WHERE id=$4",
+            admin["id"], body.resolution, body.admin_notes, dispute_id
         )
+        if body.notify_user and dispute["user_id"]:
+            notif_id = str(uuid.uuid4())
+            await conn.execute(
+                "INSERT INTO notifications (id,title,message,type,target,target_user_id,sent_by) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+                notif_id,
+                "Your dispute has been resolved",
+                f"Resolution: {body.resolution}",
+                "info",
+                "user",
+                dispute["user_id"],
+                admin["id"],
+            )
         await audit(conn, admin["id"], "RESOLVE_DISPUTE", dispute_id, "dispute", {"resolution": body.resolution}, request.client.host)
     return {"ok": True}
 
@@ -4805,10 +4838,28 @@ async def submit_dispute(body: DisputeIn, user: dict = Depends(get_current_user)
         if existing:
             raise HTTPException(status_code=400, detail="Dispute already open for this transaction")
         await conn.execute(
-            "INSERT INTO disputes (id,transaction_id,user_id,reason) VALUES ($1,$2,$3,$4)",
-            str(uuid.uuid4()), body.transaction_id, user["id"], body.reason
+            "INSERT INTO disputes (id,transaction_id,user_id,reason,category) VALUES ($1,$2,$3,$4,$5)",
+            str(uuid.uuid4()), body.transaction_id, user["id"], body.reason, body.category
         )
     return {"ok": True}
+
+@api.get("/wallet/disputes")
+async def my_disputes(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT d.id, d.transaction_id, d.reason, d.category, d.status, d.resolution, d.created_at, d.resolved_at
+            FROM disputes d
+            WHERE d.user_id=$1
+            ORDER BY d.created_at DESC
+        """, user["id"])
+    return [
+        {
+            **dict(r),
+            "created_at": iso(r["created_at"]),
+            "resolved_at": iso(r["resolved_at"]) if r["resolved_at"] else None,
+        }
+        for r in rows
+    ]
 
 # ── 4. NOTIFICATIONS ─────────────────────────────────────────
 @api.post("/admin/notifications/send")

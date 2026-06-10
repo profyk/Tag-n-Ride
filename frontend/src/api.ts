@@ -142,6 +142,14 @@ export const api = {
 
   transactions: () => request<Txn[]>("/api/wallet/transactions"),
 
+  submitDispute: (body: { transaction_id: string; reason: string; category?: string }) =>
+    request<{ ok: boolean }>("/api/wallet/dispute", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  myDisputes: () => request<Dispute[]>("/api/wallet/disputes"),
+
   withdraw: (body: {
     amount: number;
     bank_name?: string;
@@ -761,6 +769,17 @@ export type Txn = {
   platform_fee?: number;
   driver_net?: number;
   gross_amount?: number;
+};
+
+export type Dispute = {
+  id: string;
+  transaction_id: string | null;
+  reason: string;
+  category?: string;
+  status: "open" | "resolved";
+  resolution?: string;
+  created_at: string;
+  resolved_at?: string;
 };
 
 export type DriverInfo = {

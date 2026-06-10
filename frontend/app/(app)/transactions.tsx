@@ -1,14 +1,14 @@
 import React, { useCallback, useState } from "react";
 import {
   View, Text, StyleSheet, FlatList, RefreshControl,
-  TouchableOpacity, Alert, Modal, ScrollView, Pressable,
+  TouchableOpacity, Alert, Modal, ScrollView, Pressable, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api, Txn } from "../../src/api";
+import { api, Txn, Dispute } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { Pill } from "../../src/ui";
@@ -16,6 +16,15 @@ import { formatZAR, formatDate, radius } from "../../src/theme";
 
 type Filter = "all" | "in" | "out" | "topup" | "withdrawal";
 const HIDDEN_KEY = "tnr_hidden_transactions";
+
+const DISPUTE_CATEGORIES = [
+  "Incorrect amount",
+  "Service not provided",
+  "Duplicate charge",
+  "Unauthorised transaction",
+  "Driver did not arrive",
+  "Other",
+];
 
 async function getHidden(): Promise<string[]> {
   try {
@@ -42,12 +51,18 @@ export default function Transactions() {
   const [selected, setSelected] = useState<Txn | null>(null);
   const [undoId, setUndoId] = useState<string | null>(null);
   const undoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeCategory, setDisputeCategory] = useState("");
+  const [disputeReason, setDisputeReason] = useState("");
+  const [disputeSubmitting, setDisputeSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [t, h] = await Promise.all([api.transactions(), getHidden()]);
+      const [t, h, d] = await Promise.all([api.transactions(), getHidden(), api.myDisputes().catch(() => [])]);
       setItems(t);
       setHidden(h);
+      setDisputes(d);
     } catch {}
     finally { setRefreshing(false); setLoading(false); }
   }, []);
@@ -75,6 +90,29 @@ export default function Transactions() {
       await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(ids.filter(i => i !== id)));
       setHidden(prev => prev.filter(i => i !== id));
     } catch {}
+  };
+
+  const handleSubmitDispute = async () => {
+    if (!selected || !disputeReason.trim() || disputeReason.trim().length < 10) return;
+    setDisputeSubmitting(true);
+    try {
+      await api.submitDispute({
+        transaction_id: selected.id,
+        reason: disputeReason.trim(),
+        category: disputeCategory || undefined,
+      });
+      const updated = await api.myDisputes().catch(() => disputes);
+      setDisputes(updated);
+      setDisputeOpen(false);
+      setDisputeCategory("");
+      setDisputeReason("");
+      Alert.alert("Dispute submitted", "Your dispute has been logged. Our team will review it within 24–48 hours.");
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e?.message || "Failed to submit dispute";
+      Alert.alert("Error", msg);
+    } finally {
+      setDisputeSubmitting(false);
+    }
   };
 
   const handleClearAll = () => {
@@ -268,6 +306,45 @@ export default function Transactions() {
                     ) : null}
                   </View>
 
+                  {(() => {
+                    const canDispute = selected.type === "payment" && selected.status === "completed";
+                    const existingDispute = disputes.find(d => d.transaction_id === selected.id);
+                    if (!canDispute) return null;
+                    if (existingDispute) {
+                      const isResolved = existingDispute.status === "resolved";
+                      return (
+                        <View style={[s.disputeStatus, {
+                          backgroundColor: isResolved ? colors.greenDim : colors.cyanDim,
+                          borderColor: isResolved ? colors.green + "40" : colors.cyan + "40",
+                        }]}>
+                          <Ionicons
+                            name={isResolved ? "checkmark-circle-outline" : "time-outline"}
+                            size={15}
+                            color={isResolved ? colors.green : colors.cyan}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: isResolved ? colors.green : colors.cyan, fontWeight: "700", fontSize: 13 }}>
+                              {isResolved ? "Dispute resolved" : "Dispute under review"}
+                            </Text>
+                            {isResolved && existingDispute.resolution ? (
+                              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{existingDispute.resolution}</Text>
+                            ) : !isResolved ? (
+                              <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>Our team is reviewing your dispute</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
+                    }
+                    return (
+                      <TouchableOpacity
+                        onPress={() => setDisputeOpen(true)}
+                        style={[s.disputeBtn, { borderColor: colors.red + "30", backgroundColor: colors.redDim }]}>
+                        <Ionicons name="alert-circle-outline" size={15} color={colors.red} />
+                        <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>Raise a Dispute</Text>
+                      </TouchableOpacity>
+                    );
+                  })()}
+
                   <TouchableOpacity
                     onPress={() => handleHide(selected.id)}
                     style={s.hideSheetBtn}>
@@ -277,6 +354,88 @@ export default function Transactions() {
                 </ScrollView>
               );
             })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Dispute modal */}
+      <Modal visible={disputeOpen} transparent animationType="slide" onRequestClose={() => setDisputeOpen(false)}>
+        <Pressable style={s.backdrop} onPress={() => setDisputeOpen(false)}>
+          <Pressable style={[s.sheet, { paddingBottom: 48 }]} onPress={() => {}}>
+            <View style={s.sheetHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <View>
+                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 18 }}>Raise a Dispute</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                  {selected?.reference ? `Ref: ${selected.reference}` : ""}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setDisputeOpen(false)} style={s.closeBtn}>
+                <Ionicons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
+              Category
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {DISPUTE_CATEGORIES.map(cat => (
+                  <TouchableOpacity
+                    key={cat}
+                    onPress={() => setDisputeCategory(cat)}
+                    style={{
+                      paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+                      borderWidth: 1,
+                      borderColor: disputeCategory === cat ? colors.cyan : colors.border,
+                      backgroundColor: disputeCategory === cat ? colors.cyanDim : colors.bg,
+                    }}>
+                    <Text style={{ color: disputeCategory === cat ? colors.cyan : colors.textMuted, fontWeight: "700", fontSize: 12 }}>
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
+              Describe the issue
+            </Text>
+            <TextInput
+              value={disputeReason}
+              onChangeText={setDisputeReason}
+              placeholder="What went wrong? (minimum 10 characters)"
+              placeholderTextColor={colors.textDim}
+              multiline
+              numberOfLines={4}
+              style={{
+                backgroundColor: colors.bg,
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 12,
+                padding: 14,
+                color: colors.text,
+                fontSize: 14,
+                minHeight: 100,
+                textAlignVertical: "top",
+                marginBottom: 16,
+              }}
+            />
+
+            <TouchableOpacity
+              onPress={handleSubmitDispute}
+              disabled={disputeSubmitting || disputeReason.trim().length < 10}
+              style={{
+                backgroundColor: disputeReason.trim().length >= 10 ? colors.red : colors.bg3 ?? colors.border,
+                borderRadius: 12, paddingVertical: 14,
+                alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
+                opacity: disputeSubmitting ? 0.6 : 1,
+              }}>
+              <Ionicons name="alert-circle-outline" size={16} color={disputeReason.trim().length >= 10 ? "#fff" : colors.textDim} />
+              <Text style={{ color: disputeReason.trim().length >= 10 ? "#fff" : colors.textDim, fontWeight: "800", fontSize: 14 }}>
+                {disputeSubmitting ? "Submitting…" : "Submit Dispute"}
+              </Text>
+            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -390,6 +549,17 @@ const makeStyles = (colors: any) => StyleSheet.create({
     paddingVertical: 12, justifyContent: "center",
     borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.md, backgroundColor: colors.bg,
+    marginBottom: 8,
   },
   hideSheetBtnText: { fontSize: 13, fontWeight: "600" },
+  disputeBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 12, justifyContent: "center",
+    borderWidth: 1, borderRadius: radius.md, marginBottom: 8,
+  },
+  disputeStatus: {
+    flexDirection: "row", alignItems: "flex-start", gap: 10,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderRadius: radius.md, marginBottom: 8,
+  },
 });
