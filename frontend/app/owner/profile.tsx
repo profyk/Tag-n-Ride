@@ -275,14 +275,14 @@ export default function OwnerProfile() {
           </View>
         ) : null}
 
-        {/* Statement */}
-        <TouchableOpacity style={styles.stmtBtn} onPress={() => router.push("/owner/statement")}>
-          <View style={[styles.menuIcon, { backgroundColor: "#FFD60A22" }]}>
-            <Ionicons name="document-text-outline" size={20} color="#FFD60A" />
+        {/* Documents */}
+        <TouchableOpacity style={styles.stmtBtn} onPress={() => router.push("/owner/documents")}>
+          <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
+            <Ionicons name="folder-outline" size={20} color={colors.cyan} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.menuTitle}>Fleet Statement</Text>
-            <Text style={styles.menuSub}>Download monthly earnings & cashup breakdown</Text>
+            <Text style={styles.menuTitle}>My Documents</Text>
+            <Text style={styles.menuSub}>View and download fleet statements & documents</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>

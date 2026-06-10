@@ -10,6 +10,51 @@ import { api } from "../../src/api";
 import { formatZAR, radius } from "../../src/theme";
 import { useTheme } from "../../src/ThemeContext";
 
+export function buildOwnerStatementPDF(d: any, reference: string): string {
+  const genDate = new Date().toLocaleDateString("en-ZA");
+  const driversHtml = (d.drivers ?? []).length > 0
+    ? `<div class="section"><div class="section-title">Fleet (${d.drivers.length} Drivers)</div>
+      ${d.drivers.map((dr: any) =>
+        `<div class="row"><span class="label">${dr.name} · ${dr.vehicle_plate || "No plate"}</span><span class="value green">R ${Number(dr.total_earnings).toFixed(2)}</span></div>`
+      ).join("")}</div>` : "";
+  const cashupHtml = (d.cashup_records ?? []).length > 0
+    ? `<div class="section"><div class="section-title">Cashup Records</div>
+      ${d.cashup_records.map((r: any) =>
+        `<div class="row"><span class="label">${r.driver} · ${(r.date || "").slice(0, 10)}</span><span class="value green">R ${Number(r.owner_received).toFixed(2)}</span></div>`
+      ).join("")}</div>` : "";
+  const sm = d.summary ?? {};
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<style>* { margin:0;padding:0;box-sizing:border-box; } body { font-family:Arial,sans-serif;font-size:12px;color:#222;padding:32px; }
+.header { text-align:center;padding-bottom:20px;border-bottom:3px solid #00D4FF;margin-bottom:24px; }
+.brand { font-size:28px;font-weight:900;color:#00D4FF;letter-spacing:2px; }
+.doc-title { font-size:14px;font-weight:700;color:#444;margin-top:6px; }
+.doc-meta { color:#888;font-size:11px;margin-top:4px; }
+.section { background:#f5f5f5;border-radius:10px;padding:16px;margin-bottom:18px; }
+.section-title { font-size:11px;font-weight:800;letter-spacing:1.2px;color:#888;text-transform:uppercase;margin-bottom:10px; }
+.row { display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e5e5e5; }
+.row:last-child { border-bottom:none; } .label { color:#555; } .value { font-weight:700; }
+.green { color:#22c55e; } .red { color:#e53e3e; }
+.footer { text-align:center;color:#aaa;font-size:10px;border-top:1px solid #e5e5e5;padding-top:16px;margin-top:8px; }
+</style></head><body>
+<div class="header"><div class="brand">TAG N RIDE</div>
+<div class="doc-title">FLEET EARNINGS STATEMENT</div>
+<div class="doc-meta">${d.business_name || d.owner_name || "Owner"}</div>
+<div class="doc-meta">${d.period_start ?? ""} to ${d.period_end ?? ""} · Generated ${genDate}</div>
+${reference ? `<div class="doc-meta">Ref: ${reference}</div>` : ""}
+</div>
+<div class="section"><div class="section-title">Earnings Summary</div>
+<div class="row"><span class="label">Cashup received from drivers</span><span class="value green">R ${Number(sm.total_cashup_received ?? 0).toFixed(2)}</span></div>
+<div class="row"><span class="label">Fuel deducted</span><span class="value red">- R ${Number(sm.total_fuel_deducted ?? 0).toFixed(2)}</span></div>
+<div class="row"><span class="label">Driver profit paid out</span><span class="value red">- R ${Number(sm.total_driver_profit ?? 0).toFixed(2)}</span></div>
+<div class="row"><span class="label">Subscription fees</span><span class="value red">- R ${Number(sm.subscription_fees_paid ?? 0).toFixed(2)}</span></div>
+<div class="row"><span class="label">Withdrawals / payouts</span><span class="value red">- R ${Number(sm.total_payouts ?? 0).toFixed(2)}</span></div>
+<div class="row"><span class="label" style="font-weight:700">Net earnings</span><span class="value ${(sm.net_earnings ?? 0) >= 0 ? "green" : "red"}">R ${Number(sm.net_earnings ?? 0).toFixed(2)}</span></div>
+</div>
+${driversHtml}${cashupHtml}
+<div class="footer">Tag n Ride · Verified fleet statement · ${reference}</div>
+</body></html>`;
+}
+
 const MONTHS = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",

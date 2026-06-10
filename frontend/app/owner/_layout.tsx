@@ -47,6 +47,7 @@ export default function OwnerTabLayout() {
         }}
       />
       <Tabs.Screen name="driver-mode" options={{ href: null }} />
+      <Tabs.Screen name="documents" options={{ href: null }} />
     </Tabs>
   );
 }

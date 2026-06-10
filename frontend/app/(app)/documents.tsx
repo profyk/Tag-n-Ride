@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View, Text, StyleSheet, FlatList, RefreshControl,
   TouchableOpacity, Modal, ScrollView, Pressable, Alert,
@@ -16,6 +16,7 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { buildStatementPDF, buildFormalPayslipPDF } from "./payslip";
 import { buildPassengerStatementPDF } from "./statement";
+import { buildOwnerStatementPDF } from "../owner/statement";
 
 type FilterTab = "all" | "payslips" | "statements" | "financial" | "identity" | "notices";
 
@@ -72,6 +73,17 @@ function formatAmount(amount: number): string {
   return `R ${amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 }
 
+function ContentRow({ label, value, colors, green = false, bold = false }: {
+  label: string; value: string; colors: any; green?: boolean; bold?: boolean;
+}) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border + "55" }}>
+      <Text style={{ color: colors.textMuted, fontSize: 12, flex: 1 }}>{label}</Text>
+      <Text style={{ color: green ? colors.green : colors.text, fontSize: 12, fontWeight: bold ? "800" : "600", maxWidth: "55%", textAlign: "right" }}>{value}</Text>
+    </View>
+  );
+}
+
 export default function DocumentsScreen() {
   const { colors } = useTheme();
   const { state } = useAuth();
@@ -85,6 +97,8 @@ export default function DocumentsScreen() {
   const [tab, setTab] = useState<FilterTab>("all");
   const [selected, setSelected] = useState<UserDocument | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [fullContent, setFullContent] = useState<{ type: string; data: any } | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
 
   const isDriver = state.status === "authed" && state.user.role === "driver";
 
@@ -111,6 +125,36 @@ export default function DocumentsScreen() {
       } catch {}
     }
   };
+
+  useEffect(() => {
+    if (!selected || (selected.document_type !== "payslip" && selected.document_type !== "statement")) {
+      setFullContent(null);
+      return;
+    }
+    setContentLoading(true);
+    setFullContent(null);
+    const meta = selected.metadata || {};
+    const isPassenger = meta.statement_type === "passenger" ||
+      (selected.document_type === "statement" && !!meta.statement_id && !meta.payslip_id && meta.statement_type !== "owner");
+    const isOwner = meta.statement_type === "owner";
+
+    if (isPassenger) {
+      api.getPassengerStatement(meta.statement_id ?? selected.id)
+        .then(r => setFullContent({ type: "passenger", data: typeof r.data === "string" ? JSON.parse(r.data) : r.data }))
+        .catch(() => {})
+        .finally(() => setContentLoading(false));
+    } else if (isOwner) {
+      api.getOwnerStatement(meta.statement_id ?? selected.id)
+        .then(r => setFullContent({ type: "owner", data: typeof r.data === "string" ? JSON.parse(r.data) : r.data }))
+        .catch(() => {})
+        .finally(() => setContentLoading(false));
+    } else {
+      api.payslipGet(meta.payslip_id ?? selected.id)
+        .then(data => setFullContent({ type: "payslip", data }))
+        .catch(() => {})
+        .finally(() => setContentLoading(false));
+    }
+  }, [selected?.id]);
 
   const handleMarkAllRead = async () => {
     try {
@@ -160,10 +204,10 @@ export default function DocumentsScreen() {
       let html = "";
       let fileName = "TagNRide-Document.pdf";
 
-      // Detect passenger expense statement: explicit type flag OR has statement_id but no payslip_id
       const isPassengerStatement =
         meta.statement_type === "passenger" ||
-        (doc.document_type === "statement" && !!meta.statement_id && !meta.payslip_id);
+        (doc.document_type === "statement" && !!meta.statement_id && !meta.payslip_id && meta.statement_type !== "owner");
+      const isOwnerStatement = meta.statement_type === "owner";
 
       if (isPassengerStatement) {
         const stmtId = meta.statement_id ?? doc.id;
@@ -172,8 +216,14 @@ export default function DocumentsScreen() {
         html = buildPassengerStatementPDF(stmtData, res.reference ?? "");
         const safePeriod = (doc.period_label || res.reference || "Statement").replace(/[^a-zA-Z0-9]/g, "-");
         fileName = `TagNRide-Expense-Statement-${safePeriod}.pdf`;
+      } else if (isOwnerStatement) {
+        const stmtId = meta.statement_id ?? doc.id;
+        const res = await api.getOwnerStatement(stmtId);
+        const stmtData = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
+        html = buildOwnerStatementPDF(stmtData, res.reference ?? "");
+        const safePeriod = (doc.period_label || "Fleet-Statement").replace(/[^a-zA-Z0-9]/g, "-");
+        fileName = `TagNRide-Fleet-Statement-${safePeriod}.pdf`;
       } else {
-        // Driver earnings statement or formal payslip
         const payslipId = meta.payslip_id ?? doc.id;
         const data = await api.payslipGet(payslipId);
         const isPayslip = doc.document_type === "payslip" || (data.document_type ?? "") === "payslip";
@@ -384,6 +434,70 @@ export default function DocumentsScreen() {
                       <Text style={[s.detailValue, { fontFamily: "monospace", color: colors.cyan }]}>{selected.reference_number}</Text>
                     </View>
                   ) : null}
+                  {/* Full document content */}
+                  {(selected.document_type === "payslip" || selected.document_type === "statement") && (
+                    <View style={[s.contentBlock, { borderColor: color + "30" }]}>
+                      <Text style={[s.contentBlockTitle, { color }]}>Document Contents</Text>
+                      {contentLoading ? (
+                        <View style={{ alignItems: "center", paddingVertical: 12 }}>
+                          <ActivityIndicator color={color} size="small" />
+                          <Text style={s.contentLoading}>Loading…</Text>
+                        </View>
+                      ) : fullContent ? (
+                        (() => {
+                          const fc = fullContent;
+                          if (fc.type === "payslip") {
+                            const d = fc.data;
+                            return (
+                              <>
+                                {d.driver_name ? <ContentRow label="Driver" value={d.driver_name} colors={colors} /> : null}
+                                {d.period_label ? <ContentRow label="Period" value={d.period_label} colors={colors} /> : null}
+                                <ContentRow label="Gross Earnings" value={formatAmount(d.gross_earnings ?? 0)} colors={colors} green />
+                                <ContentRow label="Platform Fee" value={`-${formatAmount(d.platform_fee ?? 0)}`} colors={colors} />
+                                {(d.owner_payouts ?? 0) > 0 && <ContentRow label="Owner Payouts" value={`-${formatAmount(d.owner_payouts)}`} colors={colors} />}
+                                <ContentRow label="Net Earnings" value={formatAmount(d.driver_net_earnings ?? d.total_net ?? 0)} colors={colors} green bold />
+                                {(d.total_trips ?? 0) > 0 && <ContentRow label="Total Trips" value={String(d.total_trips)} colors={colors} />}
+                                {(d.rating_count ?? 0) > 0 && <ContentRow label="Rating" value={`⭐ ${Number(d.rating_avg).toFixed(1)} (${d.rating_count})`} colors={colors} />}
+                              </>
+                            );
+                          }
+                          if (fc.type === "passenger") {
+                            const d = fc.data;
+                            const s2 = d.summary ?? {};
+                            return (
+                              <>
+                                {d.passenger_name ? <ContentRow label="Passenger" value={d.passenger_name} colors={colors} /> : null}
+                                {(d.period_start || d.period_end) ? <ContentRow label="Period" value={`${d.period_start ?? ""} – ${d.period_end ?? ""}`} colors={colors} /> : null}
+                                <ContentRow label="Total Rides" value={String(s2.total_trips ?? 0)} colors={colors} />
+                                <ContentRow label="Total Spent" value={`-${formatAmount(s2.total_spent ?? 0)}`} colors={colors} />
+                                <ContentRow label="Wallet Top-Ups" value={`+${formatAmount(s2.total_topups ?? 0)}`} colors={colors} green />
+                                <ContentRow label="Avg Trip Cost" value={formatAmount(s2.average_trip ?? 0)} colors={colors} />
+                              </>
+                            );
+                          }
+                          if (fc.type === "owner") {
+                            const d = fc.data;
+                            const sm = d.summary ?? {};
+                            return (
+                              <>
+                                {(d.business_name || d.owner_name) ? <ContentRow label="Owner" value={d.business_name || d.owner_name} colors={colors} /> : null}
+                                {(d.period_start || d.period_end) ? <ContentRow label="Period" value={`${d.period_start ?? ""} – ${d.period_end ?? ""}`} colors={colors} /> : null}
+                                {sm.total_cashup_received != null && <ContentRow label="Cashup Received" value={formatAmount(sm.total_cashup_received)} colors={colors} green bold />}
+                                {sm.total_fuel_deducted != null && <ContentRow label="Fuel Deducted" value={`-${formatAmount(sm.total_fuel_deducted)}`} colors={colors} />}
+                                {sm.total_driver_profit != null && <ContentRow label="Driver Profit Paid" value={`-${formatAmount(sm.total_driver_profit)}`} colors={colors} />}
+                                {sm.net_earnings != null && <ContentRow label="Net Earnings" value={formatAmount(sm.net_earnings)} colors={colors} green={sm.net_earnings >= 0} bold />}
+                                {(d.drivers?.length ?? 0) > 0 && <ContentRow label="Drivers" value={String(d.drivers.length)} colors={colors} />}
+                              </>
+                            );
+                          }
+                          return null;
+                        })()
+                      ) : (
+                        <Text style={s.contentLoading}>Content unavailable</Text>
+                      )}
+                    </View>
+                  )}
+
                   <View style={{ gap: 10, marginTop: 16 }}>
                     {canDownload && (
                       <TouchableOpacity
@@ -485,4 +599,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
   sheetActionBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   deleteBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, justifyContent: "center", borderWidth: 1, borderColor: colors.red + "30", borderRadius: radius.md, backgroundColor: colors.redDim ?? colors.red + "10" },
   deleteBtnText: { fontSize: 13, fontWeight: "700" },
+  contentBlock: { borderWidth: 1, borderRadius: radius.md, padding: 14, marginTop: 12 },
+  contentBlockTitle: { fontSize: 10, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 10 },
+  contentLoading: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 4 },
 });

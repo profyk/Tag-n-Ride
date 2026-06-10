@@ -487,16 +487,6 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         )}
         <Row icon="receipt-outline" label="Transaction history"
           onPress={() => router.push("/(app)/transactions")} testID="row-history" colors={colors} />
-        {isDriver && (
-          <Row icon="document-text-outline" label="Earnings Statements"
-            sub="Request and download your official earnings documents"
-            onPress={() => router.push("/(app)/payslip")} testID="row-payslip" colors={colors} />
-        )}
-        {isPassenger && (
-          <Row icon="document-text-outline" label="Monthly Expense Statement"
-            sub="Track your ride spending — small fee applies"
-            onPress={() => router.push("/(app)/statement")} testID="row-statement" colors={colors} />
-        )}
         <Row icon="lock-closed-outline" label="Change PIN"
           onPress={() => setPinModal(true)} testID="row-change-pin" colors={colors} />
 
