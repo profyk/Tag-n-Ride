@@ -487,6 +487,13 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         )}
         <Row icon="receipt-outline" label="Transaction history"
           onPress={() => router.push("/(app)/transactions")} testID="row-history" colors={colors} />
+        {(isDriver || isPassenger) && (
+          <PayslipStatementRow
+            isDriver={isDriver}
+            colors={colors}
+            onPress={() => router.push(isDriver ? "/(app)/payslip" : "/(app)/statement")}
+          />
+        )}
         <Row icon="lock-closed-outline" label="Change PIN"
           onPress={() => setPinModal(true)} testID="row-change-pin" colors={colors} />
 
@@ -633,6 +640,40 @@ const APP_VERSION = "1.0.0";export default function Profile() {
     </SafeAreaView>
   );
 }
+
+const PayslipStatementRow: React.FC<{
+  isDriver: boolean; colors: any; onPress: () => void;
+}> = ({ isDriver, colors, onPress }) => (
+  <TouchableOpacity
+    style={{
+      flexDirection: "row", alignItems: "center",
+      backgroundColor: colors.bg2, borderRadius: radius.md,
+      borderWidth: 1.5, borderColor: colors.cyan + "40",
+      padding: 16, gap: 12, marginBottom: 10,
+    }}
+    onPress={onPress}
+    testID="row-payslip-statement"
+    activeOpacity={0.7}>
+    <View style={{
+      width: 40, height: 40, borderRadius: 20,
+      backgroundColor: colors.cyanDim,
+      alignItems: "center", justifyContent: "center",
+    }}>
+      <Ionicons name="document-text-outline" size={20} color={colors.cyan} />
+    </View>
+    <View style={{ flex: 1 }}>
+      <Text style={{ color: colors.text, fontWeight: "700", fontSize: 15 }}>
+        Payslip & Statement
+      </Text>
+      <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
+        {isDriver
+          ? "Download your earnings payslip"
+          : "Download your expense statement"}
+      </Text>
+    </View>
+    <Ionicons name="chevron-forward" size={16} color={colors.cyan} />
+  </TouchableOpacity>
+);
 
 const Row: React.FC<{
   icon: any; label: string; sub?: string; onPress: () => void; testID?: string; colors: any;
