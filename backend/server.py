@@ -13342,7 +13342,7 @@ async def intelligence_leaderboard(admin: dict = Depends(require_superadmin)):
                COALESCE(SUM(cr.cashup_amount),0) as fleet_revenue
                FROM fleet_owners fo
                JOIN users u ON u.id=fo.user_id
-               LEFT JOIN owner_drivers od ON od.owner_user_id=fo.user_id
+               LEFT JOIN owner_drivers od ON od.owner_id=fo.id
                LEFT JOIN cashup_records cr ON cr.owner_user_id=fo.user_id
                AND DATE_TRUNC('month',cr.created_at)=DATE_TRUNC('month',NOW())
                GROUP BY u.id, u.full_name, u.phone_number
