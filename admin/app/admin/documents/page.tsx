@@ -11,6 +11,7 @@ import {
   AlertTriangle, Copy, CheckCheck, Users, Crown,
   Plus, Pencil, Trash2, Save, Upload, Database,
   Printer, Share2, PenLine, FileSignature, RotateCcw,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -867,6 +868,176 @@ function DeleteConfirm({ file, onConfirm, onCancel, deleting }: {
   );
 }
 
+// ── Generate Payslip Modal ────────────────────────────────────
+
+type StaffMember = { id: string; full_name: string; role_title: string; department: string; gross_salary: number };
+
+function GeneratePayslipModal({ onClose }: { onClose: () => void }) {
+  const token = getToken();
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(true);
+  const [staffId, setStaffId] = useState("");
+  const [periodMonth, setPeriodMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("https://tag-n-ride-production.up.railway.app/api/admin/hr/staff", {
+      headers: authHeaders(token),
+    })
+      .then(r => r.json())
+      .then((d: any[]) => {
+        const active = d.filter((s: any) => s.status === "active" || !s.status);
+        setStaff(active);
+        if (active.length > 0) setStaffId(active[0].id);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingStaff(false));
+  }, [token]);
+
+  const selected = staff.find(s => s.id === staffId);
+
+  const handleGenerate = async () => {
+    if (!staffId) { setError("Please select a staff member"); return; }
+    if (!periodMonth) { setError("Please select a pay period"); return; }
+    setGenerating(true); setError(null);
+    try {
+      const res = await fetch("https://tag-n-ride-production.up.railway.app/api/admin/hr/payslip/generate", {
+        method: "POST",
+        headers: { ...authHeaders(token), "Content-Type": "application/json" },
+        body: JSON.stringify({ staff_id: staffId, period_month: periodMonth }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || d.error || "Failed to generate payslip");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const cd = res.headers.get("Content-Disposition") || "";
+      const fnMatch = cd.match(/filename=([^;]+)/);
+      a.download = fnMatch ? fnMatch[1].replace(/"/g, "") : `payslip-${periodMonth}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      onClose();
+    } catch (e: any) {
+      setError(e.message || "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-bg2 border border-border rounded-2xl shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-green/10 flex items-center justify-center">
+              <Receipt size={15} className="text-green" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-text">Generate Staff Payslip</p>
+              <p className="text-[11px] text-textMuted">Downloads a formatted HTML payslip</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-bg3 text-textDim hover:text-text transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-red/10 border border-red/20 rounded-lg">
+              <AlertTriangle size={13} className="text-red flex-shrink-0" />
+              <p className="text-xs text-red">{error}</p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-extrabold uppercase tracking-wider text-textDim mb-1.5">
+              Staff Member *
+            </label>
+            {loadingStaff ? (
+              <div className="flex items-center gap-2 px-3 py-2 bg-bg border border-border rounded-lg">
+                <Spinner /><span className="text-xs text-textMuted">Loading staff...</span>
+              </div>
+            ) : staff.length === 0 ? (
+              <p className="text-xs text-red px-3 py-2 bg-red/10 border border-red/20 rounded-lg">
+                No active staff found. Add staff members in the HR page first.
+              </p>
+            ) : (
+              <select
+                value={staffId}
+                onChange={e => setStaffId(e.target.value)}
+                className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan transition-colors"
+              >
+                {staff.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name} — {s.role_title || s.department}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {selected && (
+            <div className="grid grid-cols-2 gap-2 px-3 py-2.5 bg-bg border border-border rounded-lg">
+              <div>
+                <p className="text-[9px] font-bold text-textDim uppercase tracking-widest">Department</p>
+                <p className="text-xs font-semibold text-text mt-0.5">{selected.department || "—"}</p>
+              </div>
+              <div>
+                <p className="text-[9px] font-bold text-textDim uppercase tracking-widest">Gross Salary</p>
+                <p className="text-xs font-semibold text-green mt-0.5">
+                  R {Number(selected.gross_salary).toLocaleString("en-ZA", { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-extrabold uppercase tracking-wider text-textDim mb-1.5">
+              Pay Period *
+            </label>
+            <input
+              type="month"
+              value={periodMonth}
+              onChange={e => setPeriodMonth(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan transition-colors"
+            />
+            <p className="text-[10px] text-textDim mt-1">
+              If a payroll run exists for this period, the payslip will use those figures. Otherwise it estimates from the gross salary.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg border border-border text-xs font-medium text-textMuted hover:text-text transition-all">
+            Cancel
+          </button>
+          <button
+            onClick={handleGenerate}
+            disabled={generating || loadingStaff || !staffId}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-green/10 border border-green/30 hover:bg-green/20 text-xs font-bold text-green transition-all disabled:opacity-50">
+            {generating
+              ? <><Spinner /><span>Generating...</span></>
+              : <><Receipt size={12} />Generate & Download</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────
 
 const EDITOR_BLANK: EditorState = {
@@ -896,6 +1067,7 @@ export default function DocumentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<DocFile | null>(null);
   const [deleting,     setDeleting]     = useState(false);
   const [signTarget,   setSignTarget]   = useState<DocFile | null>(null);
+  const [payslipOpen,  setPayslipOpen]  = useState(false);
 
   useEffect(() => {
     if (!isHR && !isExec) router.replace("/admin/dashboard");
@@ -1069,6 +1241,9 @@ export default function DocumentsPage() {
             onSaved={() => setSignTarget(null)}
           />
         )}
+        {payslipOpen && (
+          <GeneratePayslipModal onClose={() => setPayslipOpen(false)} />
+        )}
 
         {/* Banner */}
         <div className={cn(
@@ -1088,6 +1263,13 @@ export default function DocumentsPage() {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="text-xs font-bold opacity-70">{totalDocs} documents</span>
+            {isHR && (
+              <button
+                onClick={() => setPayslipOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all bg-green/10 border-green/30 hover:bg-green/20 text-green">
+                <Receipt size={12} />Generate Payslip
+              </button>
+            )}
             {canEdit && (
               <button
                 onClick={() => openCreate()}

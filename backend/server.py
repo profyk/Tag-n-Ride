@@ -9578,6 +9578,185 @@ async def hr_export(
     )
 
 
+@api.post("/admin/hr/payslip/generate")
+async def hr_generate_payslip(
+    body: dict,
+    request: Request,
+    admin: dict = Depends(require_admin),
+):
+    if admin["role"] not in HR_ROLES:
+        raise HTTPException(status_code=403, detail="Access restricted to HR roles")
+    staff_id    = body.get("staff_id")
+    period_month = body.get("period_month")  # e.g. "2025-06"
+    if not staff_id or not period_month:
+        raise HTTPException(status_code=400, detail="staff_id and period_month are required")
+
+    async with pool.acquire() as conn:
+        staff = await conn.fetchrow(
+            """SELECT id, full_name, role_title, department, employment_type,
+                      gross_salary, email, phone, id_number, tax_ref,
+                      bank_name, account_number, account_type, branch_code, start_date
+               FROM staff WHERE id=$1""",
+            staff_id,
+        )
+        if not staff:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+
+        # Existing payroll run for this period?
+        run_line = await conn.fetchrow(
+            """SELECT pli.gross_salary, pli.paye, pli.uif_employee, pli.uif_employer,
+                      pli.sdl, pli.net_pay, pr.status as run_status
+               FROM payroll_line_items pli
+               JOIN payroll_runs pr ON pr.id = pli.run_id
+               WHERE pli.staff_id=$1 AND pr.period_month=$2
+               ORDER BY pr.created_at DESC LIMIT 1""",
+            staff_id, period_month,
+        )
+        await audit(conn, admin["id"], "GENERATE_PAYSLIP", staff_id, "staff",
+                    {"period": period_month, "staff": staff["full_name"]}, request.client.host)
+
+    g     = float(run_line["gross_salary"] if run_line else staff["gross_salary"])
+    paye  = float(run_line["paye"]         if run_line else _calc_paye(g))
+    uif_e = float(run_line["uif_employee"] if run_line else _calc_uif(g))
+    uif_r = float(run_line["uif_employer"] if run_line else _calc_uif(g))
+    sdl   = float(run_line["sdl"]          if run_line else _calc_sdl(g))
+    net   = float(run_line["net_pay"]      if run_line else g - paye - uif_e)
+
+    try:
+        year, month = period_month.split("-")
+        import calendar as cal
+        month_name = cal.month_name[int(month)]
+        period_label = f"{month_name} {year}"
+    except Exception:
+        period_label = period_month
+
+    run_status = run_line["run_status"] if run_line else "preview"
+    status_note = {
+        "executed": "PAID — Salary disbursed",
+        "approved": "APPROVED — Pending payment",
+        "submitted": "SUBMITTED — Awaiting approval",
+        "draft": "DRAFT",
+        "preview": "ESTIMATED — Not from a payroll run",
+    }.get(run_status, run_status.upper())
+
+    def fmt(v: float) -> str:
+        return f"R {v:,.2f}"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Payslip — {staff['full_name']} — {period_label}</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #1a1a1a; margin: 0; background: #f5f5f5; }}
+  .page {{ max-width: 780px; margin: 32px auto; background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }}
+  .header {{ background: #0a0a14; color: #fff; padding: 28px 32px; display: flex; justify-content: space-between; align-items: center; }}
+  .brand {{ font-size: 22px; font-weight: 900; color: #00e5ff; letter-spacing: -0.5px; }}
+  .brand-sub {{ font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px; letter-spacing: 2px; text-transform: uppercase; }}
+  .payslip-title {{ text-align: right; }}
+  .payslip-title h1 {{ font-size: 18px; font-weight: 800; margin: 0; color: #fff; }}
+  .payslip-title .period {{ font-size: 12px; color: #00e5ff; margin-top: 4px; }}
+  .status-bar {{ background: {'#14532d' if run_status == 'executed' else '#1c1c0a' if run_status in ('draft','preview') else '#0a2340'}; padding: 8px 32px; font-size: 11px; font-weight: 700; color: {'#4ade80' if run_status == 'executed' else '#fde047' if run_status in ('draft','preview') else '#60a5fa'}; letter-spacing: 1px; text-transform: uppercase; }}
+  .body {{ padding: 28px 32px; }}
+  .employee-section {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #e5e5e5; }}
+  .section-label {{ font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; color: #888; margin-bottom: 8px; }}
+  .info-row {{ display: flex; justify-content: space-between; margin-bottom: 4px; }}
+  .info-label {{ color: #666; }}
+  .info-value {{ font-weight: 600; text-align: right; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+  thead tr {{ background: #f8f8f8; }}
+  th {{ padding: 9px 12px; text-align: left; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #666; border-bottom: 2px solid #e5e5e5; }}
+  th:last-child {{ text-align: right; }}
+  td {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }}
+  td:last-child {{ text-align: right; font-weight: 600; }}
+  .credit {{ color: #16a34a; }}
+  .debit {{ color: #dc2626; }}
+  .total-row td {{ font-weight: 800; background: #f8f8f8; border-top: 2px solid #e5e5e5; border-bottom: 2px solid #e5e5e5; font-size: 14px; }}
+  .net-row td {{ font-weight: 900; background: #0a0a14; color: #00e5ff; font-size: 15px; }}
+  .footer {{ border-top: 1px solid #e5e5e5; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; background: #fafafa; }}
+  .footer-note {{ font-size: 10px; color: #888; }}
+  .stamp {{ font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #bbb; }}
+  @media print {{ body {{ background: #fff; }} .page {{ margin: 0; border: none; border-radius: 0; box-shadow: none; }} }}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="brand">Tag-n-Ride</div>
+      <div class="brand-sub">Employee Payslip</div>
+    </div>
+    <div class="payslip-title">
+      <h1>PAYSLIP</h1>
+      <div class="period">{period_label}</div>
+    </div>
+  </div>
+  <div class="status-bar">{status_note}</div>
+  <div class="body">
+    <div class="employee-section">
+      <div>
+        <div class="section-label">Employee Details</div>
+        <div class="info-row"><span class="info-label">Name</span><span class="info-value">{staff['full_name']}</span></div>
+        <div class="info-row"><span class="info-label">Role</span><span class="info-value">{staff['role_title'] or '—'}</span></div>
+        <div class="info-row"><span class="info-label">Department</span><span class="info-value">{staff['department'] or '—'}</span></div>
+        <div class="info-row"><span class="info-label">Employment Type</span><span class="info-value">{staff['employment_type'] or '—'}</span></div>
+        {'<div class="info-row"><span class="info-label">Start Date</span><span class="info-value">' + str(staff['start_date'])[:10] + '</span></div>' if staff['start_date'] else ''}
+      </div>
+      <div>
+        <div class="section-label">Payment Details</div>
+        <div class="info-row"><span class="info-label">Period</span><span class="info-value">{period_label}</span></div>
+        {'<div class="info-row"><span class="info-label">Bank</span><span class="info-value">' + (staff['bank_name'] or '—') + '</span></div>' if staff['bank_name'] else ''}
+        {'<div class="info-row"><span class="info-label">Account</span><span class="info-value">•••• ' + str(staff['account_number'] or '')[-4:] + '</span></div>' if staff['account_number'] else ''}
+        {'<div class="info-row"><span class="info-label">Account Type</span><span class="info-value">' + (staff['account_type'] or '—') + '</span></div>' if staff['account_type'] else ''}
+        {'<div class="info-row"><span class="info-label">Tax Ref</span><span class="info-value">' + (staff['tax_ref'] or '—') + '</span></div>' if staff['tax_ref'] else ''}
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Description</th><th>Type</th><th>Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Basic Salary</td><td>Earnings</td><td class="credit">{fmt(g)}</td></tr>
+        <tr><td>PAYE Income Tax</td><td>Deduction</td><td class="debit">−{fmt(paye)}</td></tr>
+        <tr><td>UIF Contribution (Employee)</td><td>Deduction</td><td class="debit">−{fmt(uif_e)}</td></tr>
+        <tr class="total-row"><td colspan="2">Gross Earnings</td><td>{fmt(g)}</td></tr>
+        <tr class="total-row"><td colspan="2">Total Deductions</td><td class="debit">−{fmt(paye + uif_e)}</td></tr>
+        <tr class="net-row"><td colspan="2">NET PAY</td><td>{fmt(net)}</td></tr>
+      </tbody>
+    </table>
+
+    <table>
+      <thead>
+        <tr><th>Employer Contributions</th><th>Rate</th><th>Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>UIF Employer Contribution</td><td>1%</td><td>{fmt(uif_r)}</td></tr>
+        <tr><td>SDL (Skills Development Levy)</td><td>1%</td><td>{fmt(sdl)}</td></tr>
+        <tr class="total-row"><td colspan="2">Total Employer Cost</td><td>{fmt(g + uif_r + sdl)}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="footer">
+    <div class="footer-note">
+      Generated by Tag-n-Ride Admin · {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')}<br>
+      This is a computer-generated payslip and does not require a signature.
+    </div>
+    <div class="stamp">CONFIDENTIAL</div>
+  </div>
+</div>
+<script>window.print && window.print();</script>
+</body>
+</html>"""
+
+    filename = f"payslip-{staff['full_name'].lower().replace(' ', '-')}-{period_month}.html"
+    return StreamingResponse(
+        io.BytesIO(html.encode()),
+        media_type="text/html",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
 # ════════════════════════════════════════════════════════════════
 # Salary Payments (trust account → employee bank account)
 # ════════════════════════════════════════════════════════════════
