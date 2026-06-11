@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Alert, ActivityIndicator,
@@ -105,6 +105,7 @@ function formatR(val: number) {
 export default function PassengerStatementScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const scrollRef = useRef<ScrollView>(null);
   const now = new Date();
   const [year, setYear]       = useState(now.getFullYear());
   const [month, setMonth]     = useState(now.getMonth() === 0 ? 11 : now.getMonth() - 1);
@@ -140,43 +141,29 @@ export default function PassengerStatementScreen() {
   const periodEnd = `${year}-${String(month + 1).padStart(2, "0")}-${lastDay}`;
 
   const handleGetStatement = async () => {
+    if (loading) return;
     setLoading(true);
     try {
-      // Refresh pricing and balance right before submitting
-      const [p, w] = await Promise.all([
-        api.passengerStatementPricing().catch(() => null),
-        api.wallet().catch(() => null),
-      ]);
-      const freshPricing = p ?? pricing;
-      const freshBalance = w?.balance ?? walletBalance;
-      if (p) setPricing(p);
-      if (w) setWalletBalance(w.balance);
-
-      if (freshPricing && !freshPricing.enabled) {
-        Alert.alert("Unavailable", "Expense statements are currently disabled. Please try again later.");
-        return;
-      }
-
-      const fee = freshPricing?.price ?? 0;
-      if (fee > 0 && freshBalance < fee) {
+      const res = await api.requestPassengerStatement(periodStart, periodEnd);
+      setData(res.data);
+      setStmtRef(res.reference ?? "");
+      setCharged(res.amount_charged ?? 0);
+      setGenerated(true);
+      setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+    } catch (e: any) {
+      const msg: string = e?.message || "Could not generate statement. Please try again.";
+      if (msg.toLowerCase().includes("insufficient") || msg.toLowerCase().includes("balance")) {
         Alert.alert(
           "Insufficient Balance",
-          `You need ${formatR(fee - freshBalance)} more to generate this statement.\n\nCurrent balance: ${formatR(freshBalance)}`,
+          `${msg}\n\nCurrent balance: ${formatR(walletBalance)}`,
           [
             { text: "Not Now", style: "cancel" },
             { text: "Top Up Wallet", onPress: () => router.push("/topup" as any) },
           ]
         );
-        return;
+      } else {
+        Alert.alert("Could Not Generate", msg);
       }
-
-      const res = await api.requestPassengerStatement(periodStart, periodEnd);
-      setData(res.data);
-      setStmtRef(res.reference);
-      setCharged(res.amount_charged);
-      setGenerated(true);
-    } catch (e: any) {
-      Alert.alert("Failed", e?.message || "Could not generate statement.");
     } finally {
       setLoading(false);
     }
@@ -212,11 +199,11 @@ export default function PassengerStatementScreen() {
   const s = makeStyles(colors);
   const d = data;
   const fee = pricing?.price ?? 0;
-  const canAfford = walletBalance >= fee;
+  const canAfford = walletBalance >= fee;  // used for inline top-up CTA
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 56 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 20, paddingBottom: 56 }}>
 
         {/* Header */}
         <View style={s.headerRow}>
@@ -297,43 +284,54 @@ export default function PassengerStatementScreen() {
                   </View>
                 </View>
 
-                {!canAfford && fee > 0 && (
-                  <View style={s.insufficientBox}>
-                    <Ionicons name="warning-outline" size={14} color={colors.red} />
-                    <Text style={s.insufficientText}>
-                      You need {formatR(fee - walletBalance)} more to generate this statement.
-                    </Text>
-                  </View>
-                )}
-
-                {/* Get Statement button */}
-                <TouchableOpacity
-                  style={[
-                    s.getBtn,
-                    (!canAfford && fee > 0) && s.getBtnDisabled,
-                  ]}
-                  onPress={handleGetStatement}
-                  disabled={loading}
-                  activeOpacity={0.8}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <>
-                      <Ionicons name="document-text" size={20} color="#fff" />
+                {!canAfford && fee > 0 ? (
+                  // Balance insufficient — show top-up CTA instead of a fake-disabled button
+                  <View style={{ width: "100%", gap: 10 }}>
+                    <View style={s.insufficientBox}>
+                      <Ionicons name="warning-outline" size={14} color={colors.red} />
+                      <Text style={s.insufficientText}>
+                        You need {formatR(fee - walletBalance)} more to generate this statement.
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => router.push("/topup" as any)}
+                      style={[s.getBtn, { backgroundColor: colors.green ?? "#22c55e" }]}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="add-circle-outline" size={20} color="#fff" />
                       <View style={s.getBtnTextWrap}>
-                        <Text style={s.getBtnText}>Get Statement</Text>
-                        {fee > 0 && (
-                          <Text style={s.getBtnSub}>{formatR(fee)} will be deducted</Text>
-                        )}
-                        {fee === 0 && (
-                          <Text style={s.getBtnSub}>No charge · generates instantly</Text>
-                        )}
+                        <Text style={s.getBtnText}>Top Up Wallet</Text>
+                        <Text style={s.getBtnSub}>Need {formatR(fee - walletBalance)} more</Text>
                       </View>
                       <Ionicons name="arrow-forward" size={18} color="rgba(255,255,255,0.7)" />
-                    </>
-                  )}
-                </TouchableOpacity>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  // Balance sufficient — show get statement button
+                  <TouchableOpacity
+                    style={s.getBtn}
+                    onPress={handleGetStatement}
+                    disabled={loading}
+                    activeOpacity={0.8}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="document-text" size={20} color="#fff" />
+                        <View style={s.getBtnTextWrap}>
+                          <Text style={s.getBtnText}>Get Statement</Text>
+                          {fee > 0 ? (
+                            <Text style={s.getBtnSub}>{formatR(fee)} will be deducted</Text>
+                          ) : (
+                            <Text style={s.getBtnSub}>No charge · generates instantly</Text>
+                          )}
+                        </View>
+                        <Ionicons name="arrow-forward" size={18} color="rgba(255,255,255,0.7)" />
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>
