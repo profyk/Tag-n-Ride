@@ -5,8 +5,9 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Select } from "@/components/ui";
 import { api, Driver } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff, RefreshCw, FileText } from "lucide-react";
+import { ExternalLink, CheckCircle, Star, X, Download, Printer, QrCode, ImageOff, RefreshCw, FileText, AlertTriangle, ShieldAlert } from "lucide-react";
 import toast from "react-hot-toast";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
 const KYC_TONE: Record<string, any> = { approved: "green", pending: "yellow", rejected: "red" };
 
@@ -18,6 +19,12 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
   const [generating, setGenerating] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
+  // Regenerate security flow
+  const [regenModal, setRegenModal] = useState(false);
+  const [regenReason, setRegenReason] = useState<"compromised" | "vehicle_change" | "">("");
+  const [regenAcknowledged, setRegenAcknowledged] = useState(false);
+  const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
+
   // qr_code may be a Cloudinary/HTTP URL, a data: URI, or raw base64 without prefix
   const qrSrc = (() => {
     const v = currentQr;
@@ -26,7 +33,8 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
     return `data:image/png;base64,${v}`;
   })();
 
-  const handleGenerate = async () => {
+  // First-time generation — no existing QR to invalidate
+  const handleFirstGenerate = async () => {
     setGenerating(true);
     try {
       const res = await api.generateDriverQR(driver.user_id);
@@ -37,6 +45,34 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
       toast.success("QR code generated");
     } catch (e: any) {
       toast.error(e.message || "Failed to generate QR code");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Opens the security confirmation modal for regeneration
+  const handleRegenClick = () => {
+    setRegenReason("");
+    setRegenAcknowledged(false);
+    setRegenModal(true);
+  };
+
+  // Executes regeneration after reason + acknowledgment + PIN
+  const doRegenerate = async () => {
+    if (!regenReason || !regenAcknowledged) return;
+    setRegenModal(false);
+    const token = await requestPin();
+    if (!token) return;
+    setGenerating(true);
+    try {
+      const res = await api.generateDriverQR(driver.user_id);
+      const newQr = res.data.qr_code;
+      setCurrentQr(newQr);
+      setImgStatus("loading");
+      onQrGenerated(newQr);
+      toast.success("QR code regenerated — old code is now permanently invalid");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to regenerate QR code");
     } finally {
       setGenerating(false);
     }
@@ -152,11 +188,11 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
                   {!qrSrc ? "No QR code yet" : "Failed to load QR code"}
                 </p>
                 <button
-                  onClick={handleGenerate}
+                  onClick={currentQr ? handleRegenClick : handleFirstGenerate}
                   disabled={generating}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
                   {generating ? <RefreshCw size={11} className="animate-spin" /> : <QrCode size={11} />}
-                  {generating ? "Generating…" : "Generate QR"}
+                  {generating ? "Generating…" : (currentQr ? "Regenerate QR" : "Generate QR")}
                 </button>
               </div>
             ) : (
@@ -198,10 +234,121 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
           </Button>
         </div>
 
+        {/* Regenerate — only shown when a QR already exists */}
+        {currentQr && (
+          <button
+            onClick={handleRegenClick}
+            disabled={generating}
+            className="w-full mt-3 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold text-red/70 border border-red/20 bg-red/5 hover:bg-red/10 hover:text-red transition-all disabled:opacity-40">
+            <RefreshCw size={11} />
+            Regenerate QR Code
+          </button>
+        )}
+
         <p className="text-textDim text-[10px] text-center mt-3">
           Phone number is excluded from this QR code for driver privacy.
         </p>
       </div>
+
+      {/* ── Regenerate Security Confirmation ─────────────────────────────── */}
+      {regenModal && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setRegenModal(false)}>
+          <div
+            className="bg-bg2 border border-red/30 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red/10 border border-red/20 flex items-center justify-center flex-shrink-0">
+                <ShieldAlert size={18} className="text-red" />
+              </div>
+              <div>
+                <h3 className="text-text font-bold text-base">Regenerate QR Code</h3>
+                <p className="text-textMuted text-xs mt-0.5">{driver.full_name}</p>
+              </div>
+            </div>
+
+            {/* Warning */}
+            <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+              <AlertTriangle size={14} className="text-red flex-shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <p className="text-red font-semibold">The driver's current printed QR code will be permanently invalidated.</p>
+                <p className="text-textMuted">Passengers scanning the old QR will receive an error. A new QR must be physically reprinted and handed to the driver before they can accept payments.</p>
+              </div>
+            </div>
+
+            {/* Reason selection */}
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">Reason for regeneration <span className="text-red">*</span></p>
+              {([
+                { value: "compromised", label: "QR code reported as compromised or stolen", sub: "Someone may have photographed or duplicated the driver's QR" },
+                { value: "vehicle_change", label: "Driver has changed taxi / vehicle", sub: "New vehicle requires a new QR linked to the correct plate" },
+              ] as const).map(({ value, label, sub }) => (
+                <label
+                  key={value}
+                  className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                    regenReason === value
+                      ? "bg-cyan/5 border-cyan/30"
+                      : "border-border hover:border-cyan/20"
+                  }`}>
+                  <input
+                    type="radio"
+                    name="regenReason"
+                    value={value}
+                    checked={regenReason === value}
+                    onChange={() => setRegenReason(value)}
+                    className="mt-0.5 accent-cyan"
+                  />
+                  <div>
+                    <p className="text-text text-sm font-semibold">{label}</p>
+                    <p className="text-textDim text-[11px] mt-0.5">{sub}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {/* Acknowledgment */}
+            <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+              regenAcknowledged ? "bg-yellow/5 border-yellow/30" : "border-border hover:border-yellow/20"
+            }`}>
+              <input
+                type="checkbox"
+                checked={regenAcknowledged}
+                onChange={e => setRegenAcknowledged(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-yellow"
+              />
+              <p className="text-textMuted text-xs">
+                I confirm that the current printed QR code will be <strong className="text-text">destroyed and replaced</strong>. The driver has been informed and the old code will no longer function.
+              </p>
+            </label>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setRegenModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-bg3 border border-border text-textMuted text-sm font-bold hover:text-text transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={doRegenerate}
+                disabled={!regenReason || !regenAcknowledged}
+                className="flex-1 py-2.5 rounded-xl bg-red/20 border border-red/30 text-red text-sm font-bold disabled:opacity-40 hover:bg-red/30 transition-colors flex items-center justify-center gap-2">
+                <RefreshCw size={13} />
+                Regenerate QR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <DangerPinModal
+        open={pinOpen}
+        onSuccess={pinSuccess}
+        onCancel={pinCancel}
+        actionLabel="regenerate this driver's QR code"
+      />
     </div>
   );
 }
