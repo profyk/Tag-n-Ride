@@ -52,6 +52,7 @@ export default function Transactions() {
   const [undoId, setUndoId] = useState<string | null>(null);
   const undoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
+  const [disputeFor, setDisputeFor] = useState<Txn | null>(null);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeCategory, setDisputeCategory] = useState("");
   const [disputeReason, setDisputeReason] = useState("");
@@ -93,17 +94,18 @@ export default function Transactions() {
   };
 
   const handleSubmitDispute = async () => {
-    if (!selected || !disputeReason.trim() || disputeReason.trim().length < 10) return;
+    if (!disputeFor || !disputeReason.trim() || disputeReason.trim().length < 10) return;
     setDisputeSubmitting(true);
     try {
       await api.submitDispute({
-        transaction_id: selected.id,
+        transaction_id: disputeFor.id,
         reason: disputeReason.trim(),
         category: disputeCategory || undefined,
       });
       const updated = await api.myDisputes().catch(() => disputes);
       setDisputes(updated);
       setDisputeOpen(false);
+      setDisputeFor(null);
       setDisputeCategory("");
       setDisputeReason("");
       Alert.alert("Dispute submitted", "Your dispute has been logged. Our team will review it within 24–48 hours.");
@@ -124,10 +126,9 @@ export default function Transactions() {
         {
           text: "Delete all", style: "destructive",
           onPress: async () => {
-            const allIds = items.map(t => t.id);
+            const allIds = filtered.map(t => t.id);
             await addHidden(allIds);
-            setItems([]);
-            setHidden(allIds);
+            setHidden(prev => [...new Set([...prev, ...allIds])]);
             setSelected(null);
           },
         },
@@ -154,7 +155,7 @@ export default function Transactions() {
     <SafeAreaView style={s.root} edges={["top"]} testID="transactions-screen">
       <View style={s.header}>
         <Text style={s.title}>Transactions</Text>
-        {items.length > 0 && (
+        {filtered.length > 0 && (
           <TouchableOpacity onPress={handleClearAll} style={s.clearBtn}>
             <Ionicons name="trash-outline" size={14} color={colors.red} />
             <Text style={s.clearText}>Clear all</Text>
@@ -337,7 +338,7 @@ export default function Transactions() {
                     }
                     return (
                       <TouchableOpacity
-                        onPress={() => setDisputeOpen(true)}
+                        onPress={() => { setDisputeFor(selected); setSelected(null); setDisputeOpen(true); }}
                         style={[s.disputeBtn, { borderColor: colors.red + "30", backgroundColor: colors.redDim }]}>
                         <Ionicons name="alert-circle-outline" size={15} color={colors.red} />
                         <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>Raise a Dispute</Text>
@@ -359,18 +360,18 @@ export default function Transactions() {
       </Modal>
 
       {/* Dispute modal */}
-      <Modal visible={disputeOpen} transparent animationType="slide" onRequestClose={() => setDisputeOpen(false)}>
-        <Pressable style={s.backdrop} onPress={() => setDisputeOpen(false)}>
+      <Modal visible={disputeOpen} transparent animationType="slide" onRequestClose={() => { setDisputeOpen(false); setDisputeFor(null); }}>
+        <Pressable style={s.backdrop} onPress={() => { setDisputeOpen(false); setDisputeFor(null); }}>
           <Pressable style={[s.sheet, { paddingBottom: 48 }]} onPress={() => {}}>
             <View style={s.sheetHandle} />
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <View>
                 <Text style={{ color: colors.text, fontWeight: "800", fontSize: 18 }}>Raise a Dispute</Text>
                 <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-                  {selected?.reference ? `Ref: ${selected.reference}` : ""}
+                  {disputeFor?.reference ? `Ref: ${disputeFor.reference}` : ""}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setDisputeOpen(false)} style={s.closeBtn}>
+              <TouchableOpacity onPress={() => { setDisputeOpen(false); setDisputeFor(null); }} style={s.closeBtn}>
                 <Ionicons name="close" size={20} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
