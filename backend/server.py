@@ -4290,6 +4290,10 @@ async def create_new_tables():
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id, status)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_trips_plate ON trips(vehicle_plate)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_plate ON incidents(vehicle_plate)")
+                await conn.execute("ALTER TABLE passenger_safety_profiles ADD COLUMN IF NOT EXISTS passport_number TEXT")
+                await conn.execute("ALTER TABLE passenger_safety_profiles ADD COLUMN IF NOT EXISTS dead_man_code TEXT")
+                await conn.execute("ALTER TABLE sos_requests ADD COLUMN IF NOT EXISTS is_dead_man BOOLEAN DEFAULT FALSE")
+                await conn.execute("ALTER TABLE sos_requests ADD COLUMN IF NOT EXISTS dead_man_triggered_at TIMESTAMPTZ")
 
         except Exception as e:
             print("New tables error:", e)
@@ -12290,7 +12294,7 @@ async def admin_send_notice(body: SendNoticeIn, request: Request, admin: dict = 
 # ════════════════════════════════════════════════════════════════
 
 SAFETY_FIELDS = [
-    "full_name", "id_number", "date_of_birth", "blood_type", "home_address",
+    "full_name", "id_number", "passport_number", "date_of_birth", "blood_type", "home_address",
     "medical_conditions", "allergies",
     "emergency_contact_1_name", "emergency_contact_1_phone", "emergency_contact_1_relationship",
     "emergency_contact_2_name", "emergency_contact_2_phone", "emergency_contact_2_relationship",
@@ -12300,6 +12304,7 @@ SAFETY_FIELDS = [
 class SafetyProfileIn(BaseModel):
     full_name: Optional[str] = None
     id_number: Optional[str] = None
+    passport_number: Optional[str] = None
     date_of_birth: Optional[str] = None
     blood_type: Optional[str] = None
     home_address: Optional[str] = None
@@ -12314,6 +12319,24 @@ class SafetyProfileIn(BaseModel):
     next_of_kin_name: Optional[str] = None
     next_of_kin_phone: Optional[str] = None
     next_of_kin_relationship: Optional[str] = None
+
+class DeadManCodeIn(BaseModel):
+    dead_man_code: str   # 4–6 digit code
+    current_pin: str     # user's real PIN to authorise change
+
+class TripEndPinIn(BaseModel):
+    trip_id: str
+    pin: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class SosCancelPinIn(BaseModel):
+    sos_id: str
+    pin: str
+
+class GhostPingIn(BaseModel):
+    latitude: float
+    longitude: float
 
 class TripStartIn(BaseModel):
     latitude: Optional[float] = None
@@ -12386,9 +12409,11 @@ async def get_safety_profile(user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
     if not row:
-        return {"profile_complete": False, "user_id": user["id"]}
+        return {"profile_complete": False, "user_id": user["id"], "dead_man_code_set": False}
     p = dict(row)
     p["profile_complete"] = bool(p.get("profile_complete"))
+    p["dead_man_code_set"] = bool(p.get("dead_man_code"))
+    p.pop("dead_man_code", None)  # never expose hash
     if p.get("created_at"): p["created_at"] = iso(p["created_at"])
     if p.get("updated_at"): p["updated_at"] = iso(p["updated_at"])
     return p
@@ -12990,6 +13015,147 @@ async def panic_button(body: PanicIn, user: dict = Depends(get_current_user)):
         "message": f"SOS sent to {notifications_sent} emergency contact(s)",
     }
 
+# ── POST /api/saferide/deadman-code ── set / update dead man code
+@api.post("/saferide/deadman-code")
+async def set_dead_man_code(body: DeadManCodeIn, user: dict = Depends(get_current_user)):
+    if len(body.dead_man_code) < 4 or not body.dead_man_code.isdigit():
+        raise HTTPException(400, "Dead man code must be 4–6 digits")
+    if body.dead_man_code == body.current_pin:
+        raise HTTPException(400, "Dead man code must differ from your regular PIN")
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
+        if not user_row or not verify_pin(body.current_pin, user_row["pin_hash"]):
+            raise HTTPException(401, "Incorrect PIN")
+        hashed = hash_pin(body.dead_man_code)
+        existing = await conn.fetchrow("SELECT id FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if existing:
+            await conn.execute(
+                "UPDATE passenger_safety_profiles SET dead_man_code=$1, updated_at=NOW() WHERE user_id=$2",
+                hashed, user["id"]
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO passenger_safety_profiles (id,user_id,dead_man_code,created_at,updated_at) VALUES (gen_random_uuid()::text,$1,$2,NOW(),NOW())",
+                user["id"], hashed
+            )
+    return {"ok": True}
+
+
+async def _trigger_dead_man(conn, user: dict, latitude=None, longitude=None, context: str = "trip_end"):
+    """Create a dead man alert and notify all admins. Returns the new sos_request id."""
+    sos_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    await conn.execute(
+        "INSERT INTO sos_requests (id,user_id,user_name,user_phone,emergency_type,latitude,longitude,status,is_dead_man,dead_man_triggered_at) "
+        "VALUES ($1,$2,$3,$4,'dead_man',$5,$6,'active',true,$7)",
+        sos_id, user["id"], user.get("full_name"), user.get("phone_number"), latitude, longitude, now
+    )
+    if latitude and longitude:
+        await conn.execute(
+            "INSERT INTO sos_locations (id,sos_id,latitude,longitude) VALUES (gen_random_uuid()::text,$1,$2,$3)",
+            sos_id, latitude, longitude
+        )
+    maps_url = f"https://maps.google.com/?q={latitude},{longitude}" if latitude and longitude else "No location"
+    admins = await conn.fetch(
+        "SELECT id FROM users WHERE role IN ('superadmin','admin','ceo','cto') AND is_active=true"
+    )
+    for au in admins:
+        await notify_user(
+            conn, "🚨 DEAD MAN ALERT",
+            f"{user.get('full_name') or 'User'} ({user.get('phone_number','')}) may be under duress ({context}). "
+            f"Dead man code entered. Location: {maps_url}",
+            "dead_man_alert", au["id"]
+        )
+    return sos_id
+
+
+# ── POST /api/saferide/trip/end-pin ── PIN-protected trip end (dead-man aware)
+@api.post("/saferide/trip/end-pin")
+async def end_trip_with_pin(body: TripEndPinIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
+        profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if not user_row:
+            raise HTTPException(401, "User not found")
+        real_ok     = verify_pin(body.pin, user_row["pin_hash"])
+        dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
+        if not real_ok and not dead_man_ok:
+            raise HTTPException(401, "Incorrect PIN")
+        if dead_man_ok:
+            await _trigger_dead_man(conn, user, body.latitude, body.longitude, "trip_end")
+            # return success illusion — caller sees a normal end
+            return {"ok": True, "ended": True, "stealth": True}
+        # Real PIN: end the trip
+        trip = await conn.fetchrow(
+            "SELECT id FROM trips WHERE id=$1 AND driver_id=$2 AND status='active'",
+            body.trip_id, user["id"]
+        )
+        if not trip:
+            raise HTTPException(404, "Active trip not found")
+        now = datetime.now(timezone.utc)
+        update_parts = ["status='ended'", "ended_at=$2"]
+        vals: List[Any] = [body.trip_id, now]
+        if body.latitude is not None:
+            update_parts.append(f"end_latitude=${len(vals)+1}"); vals.append(body.latitude)
+        if body.longitude is not None:
+            update_parts.append(f"end_longitude=${len(vals)+1}"); vals.append(body.longitude)
+        await conn.execute(f"UPDATE trips SET {', '.join(update_parts)} WHERE id=$1", *vals)
+    return {"ok": True, "ended": True, "stealth": False}
+
+
+# ── POST /api/saferide/sos/cancel-pin ── PIN-protected SOS cancel (dead-man aware)
+@api.post("/saferide/sos/cancel-pin")
+async def cancel_sos_with_pin(body: SosCancelPinIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
+        profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if not user_row:
+            raise HTTPException(401, "User not found")
+        real_ok     = verify_pin(body.pin, user_row["pin_hash"])
+        dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
+        if not real_ok and not dead_man_ok:
+            raise HTTPException(401, "Incorrect PIN")
+        if dead_man_ok:
+            # Escalate existing SOS to dead man — don't actually cancel it
+            sos = await conn.fetchrow("SELECT id,latitude,longitude FROM sos_requests WHERE id=$1 AND user_id=$2", body.sos_id, user["id"])
+            lat = float(sos["latitude"]) if sos and sos["latitude"] else None
+            lng = float(sos["longitude"]) if sos and sos["longitude"] else None
+            new_id = await _trigger_dead_man(conn, user, lat, lng, "sos_cancel")
+            # Mark original SOS as dead man escalation (keep active)
+            await conn.execute(
+                "UPDATE sos_requests SET is_dead_man=true, dead_man_triggered_at=NOW() WHERE id=$1",
+                body.sos_id
+            )
+            return {"ok": True, "cancelled": True, "stealth": True}
+        # Real PIN: cancel SOS
+        await conn.execute(
+            "UPDATE sos_requests SET status='resolved', resolved_at=NOW() WHERE id=$1 AND user_id=$2",
+            body.sos_id, user["id"]
+        )
+    return {"ok": True, "cancelled": True, "stealth": False}
+
+
+# ── POST /api/saferide/ghost-ping ── stealth location ping after dead man trigger
+@api.post("/saferide/ghost-ping")
+async def ghost_ping(body: GhostPingIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        sos = await conn.fetchrow(
+            "SELECT id FROM sos_requests WHERE user_id=$1 AND is_dead_man=true AND status='active' ORDER BY created_at DESC LIMIT 1",
+            user["id"]
+        )
+        if not sos:
+            return {"ok": False, "continue": False}
+        await conn.execute(
+            "INSERT INTO sos_locations (id,sos_id,latitude,longitude) VALUES (gen_random_uuid()::text,$1,$2,$3)",
+            sos["id"], body.latitude, body.longitude
+        )
+        await conn.execute(
+            "UPDATE sos_requests SET latitude=$1,longitude=$2 WHERE id=$3",
+            body.latitude, body.longitude, sos["id"]
+        )
+    return {"ok": True, "continue": True}
+
+
 # ── POST /api/saferide/sos ── user triggers SOS distress signal
 @api.post("/saferide/sos")
 async def create_sos_request(body: SosRequestIn, user: dict = Depends(get_current_user)):
@@ -13082,7 +13248,7 @@ async def sos_user_received(sos_id: str, user: dict = Depends(get_current_user))
     return {"ok": True}
 
 
-# ── GET /api/admin/saferide/sos ── list all SOS requests
+# ── GET /api/admin/saferide/sos ── list all SOS requests (excludes dead man — use /deadman for those)
 @api.get("/admin/saferide/sos")
 async def admin_list_sos(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
@@ -13090,12 +13256,35 @@ async def admin_list_sos(admin: dict = Depends(require_admin)):
             "SELECT s.*, "
             "(SELECT latitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lat, "
             "(SELECT longitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lng "
-            "FROM sos_requests s ORDER BY s.created_at DESC LIMIT 100"
+            "FROM sos_requests s WHERE COALESCE(s.is_dead_man, false)=false ORDER BY s.created_at DESC LIMIT 100"
         )
     result = []
     for r in rows:
         d = dict(r)
-        for k in ("created_at", "dispatched_at", "resolved_at"):
+        for k in ("created_at", "dispatched_at", "resolved_at", "dead_man_triggered_at"):
+            if d.get(k):
+                d[k] = iso(d[k])
+        for k in ("latitude", "longitude", "latest_lat", "latest_lng", "price"):
+            if d.get(k) is not None:
+                d[k] = float(d[k])
+        result.append(d)
+    return result
+
+
+# ── GET /api/admin/saferide/deadman ── list dead man alerts
+@api.get("/admin/saferide/deadman")
+async def admin_list_dead_man(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT s.*, "
+            "(SELECT latitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lat, "
+            "(SELECT longitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lng "
+            "FROM sos_requests s WHERE s.is_dead_man=true ORDER BY s.created_at DESC LIMIT 100"
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        for k in ("created_at", "dispatched_at", "resolved_at", "dead_man_triggered_at"):
             if d.get(k):
                 d[k] = iso(d[k])
         for k in ("latitude", "longitude", "latest_lat", "latest_lng", "price"):

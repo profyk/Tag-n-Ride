@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, Share,
+  Alert, ActivityIndicator, Share, Modal, Pressable, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -26,6 +26,13 @@ export default function SafeRideTripScreen() {
   const [trip, setTrip] = useState<any>(null);
   const [passengers, setPassengers] = useState<any[]>([]);
   const locationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ghostTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // PIN modal for Stop Tracking
+  const [pinModal, setPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinChecking, setPinChecking] = useState(false);
 
   const loadActive = useCallback(async () => {
     try {
@@ -41,7 +48,10 @@ export default function SafeRideTripScreen() {
       router.replace("/(app)/");
     }
     loadActive();
-    return () => stopTracking();
+    return () => {
+      stopTracking();
+      if (ghostTimerRef.current) clearInterval(ghostTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -77,6 +87,22 @@ export default function SafeRideTripScreen() {
       clearInterval(locationTimerRef.current);
       locationTimerRef.current = null;
     }
+  };
+
+  const startGhostPing = () => {
+    if (ghostTimerRef.current) clearInterval(ghostTimerRef.current);
+    ghostTimerRef.current = setInterval(async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const res = await api.ghostPing({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        if (!res.continue) {
+          clearInterval(ghostTimerRef.current!);
+          ghostTimerRef.current = null;
+        }
+      } catch {}
+    }, 30000);
   };
 
   const handleStartTrip = async () => {
@@ -119,19 +145,15 @@ export default function SafeRideTripScreen() {
   };
 
   const handleEndTrip = () => {
-    Alert.alert(
-      "End Trip?",
-      "This will stop GPS tracking and close the passenger manifest.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "End Trip", style: "destructive", onPress: doEndTrip },
-      ]
-    );
+    setPinInput("");
+    setPinError("");
+    setPinModal(true);
   };
 
-  const doEndTrip = async () => {
-    if (!trip?.id) return;
-    setEnding(true);
+  const doEndTripWithPin = async () => {
+    if (!trip?.id || !pinInput) return;
+    setPinChecking(true);
+    setPinError("");
     try {
       let lat: number | undefined;
       let lng: number | undefined;
@@ -140,13 +162,25 @@ export default function SafeRideTripScreen() {
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;
       } catch {}
-      await api.tripsEnd({ trip_id: trip.id, latitude: lat, longitude: lng });
+      const res = await api.tripsEndPin({ trip_id: trip.id, pin: pinInput, latitude: lat, longitude: lng });
+      setPinModal(false);
+      setPinInput("");
       stopTracking();
       setTrip(null);
       setPassengers([]);
+      if (res.stealth) {
+        // Dead man mode — silently continue ghost pinging
+        startGhostPing();
+      }
     } catch (e: any) {
-      Alert.alert("Failed to end", e?.message || "Could not end trip");
-    } finally { setEnding(false); }
+      const msg = e?.message || "Could not stop tracking";
+      if (msg.toLowerCase().includes("incorrect") || msg.toLowerCase().includes("pin")) {
+        setPinError("Incorrect PIN. Try again.");
+      } else {
+        setPinModal(false);
+        Alert.alert("Failed", msg);
+      }
+    } finally { setPinChecking(false); }
   };
 
   if (state.status !== "authed") return null;
@@ -274,7 +308,7 @@ export default function SafeRideTripScreen() {
               <Text style={s.refreshText}>Refresh passengers</Text>
             </TouchableOpacity>
 
-            {/* End trip */}
+            {/* Stop Tracking (PIN-protected) */}
             <TouchableOpacity
               style={[s.endBtn, ending && { opacity: 0.6 }]}
               onPress={handleEndTrip}
@@ -285,13 +319,56 @@ export default function SafeRideTripScreen() {
               ) : (
                 <>
                   <Ionicons name="stop-circle-outline" size={22} color="#fff" />
-                  <Text style={s.endBtnText}>End Trip</Text>
+                  <Text style={s.endBtnText}>Stop Tracking</Text>
                 </>
               )}
             </TouchableOpacity>
           </>
         )}
       </ScrollView>
+
+      {/* PIN modal */}
+      <Modal visible={pinModal} transparent animationType="fade" onRequestClose={() => setPinModal(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" }} onPress={() => setPinModal(false)}>
+          <Pressable style={{ backgroundColor: colors.bg2, borderRadius: 20, padding: 28, width: "88%", borderWidth: 1, borderColor: colors.border }} onPress={() => {}}>
+            <View style={{ alignItems: "center", marginBottom: 16 }}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.redDim ?? "#ef444420", borderWidth: 1, borderColor: colors.red + "40", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                <Ionicons name="lock-closed-outline" size={24} color={colors.red} />
+              </View>
+              <Text style={{ color: colors.text, fontWeight: "900", fontSize: 18 }}>Stop Tracking</Text>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4, textAlign: "center" }}>
+                Enter your PIN to stop GPS tracking and close this trip.
+              </Text>
+            </View>
+            <TextInput
+              style={{ backgroundColor: colors.bg, borderWidth: 1, borderColor: pinError ? colors.red : colors.border, borderRadius: 12, color: colors.text, fontSize: 22, padding: 16, textAlign: "center", letterSpacing: 6, marginBottom: 8 }}
+              value={pinInput}
+              onChangeText={v => { setPinInput(v.replace(/\D/g, "").slice(0, 6)); setPinError(""); }}
+              placeholder="••••"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+              autoFocus
+            />
+            {pinError ? <Text style={{ color: colors.red, fontSize: 12, textAlign: "center", marginBottom: 8 }}>{pinError}</Text> : null}
+            <TouchableOpacity
+              style={{ backgroundColor: colors.red, borderRadius: 12, padding: 14, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8, opacity: pinChecking ? 0.6 : 1 }}
+              onPress={doEndTripWithPin}
+              disabled={pinChecking || pinInput.length < 4}>
+              {pinChecking
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <>
+                    <Ionicons name="stop-circle-outline" size={18} color="#fff" />
+                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>Confirm Stop</Text>
+                  </>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPinModal(false)} style={{ marginTop: 12, padding: 8, alignItems: "center" }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }

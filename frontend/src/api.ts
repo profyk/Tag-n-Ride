@@ -635,6 +635,24 @@ export const api = {
   tripsEnd: (body: { trip_id: string; latitude?: number; longitude?: number }) =>
     request<any>("/api/trips/end", { method: "POST", body: JSON.stringify(body) }),
 
+  tripsEndPin: (body: { trip_id: string; pin: string; latitude?: number; longitude?: number }) =>
+    request<{ ok: boolean; ended: boolean; stealth: boolean }>("/api/saferide/trip/end-pin", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+
+  setDeadManCode: (body: { dead_man_code: string; current_pin: string }) =>
+    request<{ ok: boolean }>("/api/saferide/deadman-code", { method: "POST", body: JSON.stringify(body) }),
+
+  sosCancelPin: (body: { sos_id: string; pin: string }) =>
+    request<{ ok: boolean; cancelled: boolean; stealth: boolean }>("/api/saferide/sos/cancel-pin", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+
+  ghostPing: (body: { latitude: number; longitude: number }) =>
+    request<{ ok: boolean; continue: boolean }>("/api/saferide/ghost-ping", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+
   tripsLocation: (body: { trip_id: string; latitude: number; longitude: number; speed?: number; heading?: number }) =>
     request<any>("/api/trips/location", { method: "POST", body: JSON.stringify(body) }),
 

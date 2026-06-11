@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import {
-  View, Text, ScrollView, TouchableOpacity,
+  View, Text, ScrollView, TouchableOpacity, Pressable,
   RefreshControl, ActivityIndicator, Alert, TextInput, Modal, StyleSheet, Share,
 } from "react-native";
 import * as Location from "expo-location";
@@ -91,6 +91,13 @@ export default function Home() {
   const sosTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sosLocationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sosHelpComingRef = useRef(false);
+  const ghostPingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // PIN modal for SOS cancel
+  const [sosCancelPinModal, setSosCancelPinModal] = useState(false);
+  const [sosCancelPin, setSosCancelPin] = useState("");
+  const [sosCancelPinError, setSosCancelPinError] = useState("");
+  const [sosCancelPinChecking, setSosCancelPinChecking] = useState(false);
   const [fuelModal, setFuelModal] = useState(false);
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
@@ -223,13 +230,55 @@ export default function Home() {
     sosTapTimerRef.current = setTimeout(() => setSosTapCount(0), 1500);
   };
 
+  const startGhostPing = () => {
+    if (ghostPingRef.current) clearInterval(ghostPingRef.current);
+    ghostPingRef.current = setInterval(async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const res = await api.ghostPing({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        if (!res.continue) {
+          clearInterval(ghostPingRef.current!);
+          ghostPingRef.current = null;
+        }
+      } catch {}
+    }, 15000);
+  };
+
   const cancelActiveSos = () => {
-    if (sosLocationIntervalRef.current) { clearInterval(sosLocationIntervalRef.current); sosLocationIntervalRef.current = null; }
-    setSosActive(false);
-    setActiveSosId(null);
-    setSosHelpComing(false);
-    sosHelpComingRef.current = false;
-    Alert.alert("SOS Cancelled", "Your live tracking has stopped. Contact 10111 or 10177 if you still need help.");
+    setSosCancelPin("");
+    setSosCancelPinError("");
+    setSosCancelPinModal(true);
+  };
+
+  const doConfirmCancelSos = async () => {
+    if (!activeSosId || !sosCancelPin) return;
+    setSosCancelPinChecking(true);
+    setSosCancelPinError("");
+    try {
+      const res = await api.sosCancelPin({ sos_id: activeSosId, pin: sosCancelPin });
+      setSosCancelPinModal(false);
+      setSosCancelPin("");
+      if (sosLocationIntervalRef.current) { clearInterval(sosLocationIntervalRef.current); sosLocationIntervalRef.current = null; }
+      setSosActive(false);
+      setActiveSosId(null);
+      setSosHelpComing(false);
+      sosHelpComingRef.current = false;
+      if (res.stealth) {
+        startGhostPing();
+        // Show normal cancel message — no hint of dead man
+      }
+      Alert.alert("SOS Cancelled", "Your live tracking has stopped. Contact 10111 or 10177 if you still need help.");
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.toLowerCase().includes("incorrect") || msg.toLowerCase().includes("pin")) {
+        setSosCancelPinError("Incorrect PIN. Try again.");
+      } else {
+        setSosCancelPinModal(false);
+        Alert.alert("Error", msg || "Could not cancel SOS");
+      }
+    } finally { setSosCancelPinChecking(false); }
   };
 
   const confirmHelpReceived = async () => {
@@ -1094,6 +1143,42 @@ export default function Home() {
                 <Button label="Pay Out" onPress={handlePayOut} loading={payOutLoading} testID="payout-confirm-btn" />
               </View>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* SOS Cancel PIN Modal */}
+      <Modal visible={sosCancelPinModal} transparent animationType="fade" onRequestClose={() => { setSosCancelPinModal(false); setSosCancelPin(""); setSosCancelPinError(""); }}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <View style={{ backgroundColor: colors.bg2, borderRadius: 20, padding: 28, width: "100%", maxWidth: 360, borderWidth: 1, borderColor: colors.red + "60", alignItems: "center" }}>
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255,59,48,0.12)", borderWidth: 1, borderColor: colors.red + "40", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <Ionicons name="shield-checkmark-outline" size={28} color={colors.red} />
+            </View>
+            <Text style={{ color: colors.text, fontWeight: "900", fontSize: 20, letterSpacing: 0.5, marginBottom: 6 }}>Cancel SOS</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 24 }}>Enter your PIN to cancel the active SOS alert.</Text>
+            <TextInput
+              style={{ width: "100%", backgroundColor: colors.bg, borderRadius: 12, borderWidth: 1, borderColor: sosCancelPinError ? colors.red : colors.border, paddingVertical: 14, paddingHorizontal: 20, color: colors.text, fontSize: 28, fontWeight: "900", letterSpacing: 10, textAlign: "center", marginBottom: 4 }}
+              value={sosCancelPin}
+              onChangeText={t => { setSosCancelPin(t.replace(/\D/g, "")); setSosCancelPinError(""); }}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={6}
+              placeholder="••••"
+              placeholderTextColor={colors.textDim}
+            />
+            {!!sosCancelPinError && <Text style={{ color: colors.red, fontSize: 12, marginBottom: 12, textAlign: "center" }}>{sosCancelPinError}</Text>}
+            <TouchableOpacity
+              onPress={doConfirmCancelSos}
+              disabled={sosCancelPinChecking || !sosCancelPin}
+              style={{ width: "100%", backgroundColor: sosCancelPin ? colors.red : colors.border, borderRadius: 12, paddingVertical: 14, alignItems: "center", marginTop: 12, flexDirection: "row", justifyContent: "center", gap: 8 }}>
+              {sosCancelPinChecking
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <><Ionicons name="close-circle" size={16} color="#fff" /><Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>Confirm Cancel</Text></>
+              }
+            </TouchableOpacity>
+            <Pressable onPress={() => { setSosCancelPinModal(false); setSosCancelPin(""); setSosCancelPinError(""); }} style={{ marginTop: 16 }}>
+              <Text style={{ color: colors.textDim, fontSize: 13 }}>Back to Safety</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>

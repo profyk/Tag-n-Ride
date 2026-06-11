@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Image,
+  TextInput, Alert, ActivityIndicator, Image, Modal, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -50,6 +50,14 @@ export default function SafetyProfileScreen() {
   const [nokPhone, setNokPhone] = useState("");
   const [nokRel, setNokRel] = useState("");
 
+  // Dead man code
+  const [deadManCodeSet, setDeadManCodeSet] = useState(false);
+  const [deadManModal, setDeadManModal] = useState(false);
+  const [deadManCode, setDeadManCode] = useState("");
+  const [deadManCodeConfirm, setDeadManCodeConfirm] = useState("");
+  const [deadManCurrentPin, setDeadManCurrentPin] = useState("");
+  const [deadManSaving, setDeadManSaving] = useState(false);
+
   const loadProfile = useCallback(async () => {
     setLoading(true);
     try {
@@ -76,6 +84,7 @@ export default function SafetyProfileScreen() {
         setNokPhone(p.next_of_kin_phone || "");
         setNokRel(p.next_of_kin_relationship || "");
         setProfileComplete(!!p.profile_complete);
+        setDeadManCodeSet(!!p.dead_man_code_set);
       }
     } catch {}
     finally { setLoading(false); }
@@ -116,6 +125,28 @@ export default function SafetyProfileScreen() {
     } catch (e: any) {
       Alert.alert("Camera error", e?.message || "Could not open camera.");
     }
+  };
+
+  const handleSaveDeadManCode = async () => {
+    if (deadManCode.length < 4 || !/^\d+$/.test(deadManCode)) {
+      Alert.alert("Invalid code", "Dead man code must be 4–6 digits."); return;
+    }
+    if (deadManCode !== deadManCodeConfirm) {
+      Alert.alert("Mismatch", "Codes don't match. Please re-enter."); return;
+    }
+    if (!deadManCurrentPin) {
+      Alert.alert("PIN required", "Enter your current account PIN to confirm."); return;
+    }
+    setDeadManSaving(true);
+    try {
+      await api.setDeadManCode({ dead_man_code: deadManCode, current_pin: deadManCurrentPin });
+      setDeadManCodeSet(true);
+      setDeadManModal(false);
+      setDeadManCode(""); setDeadManCodeConfirm(""); setDeadManCurrentPin("");
+      Alert.alert("Dead Man Code Set", "Your dead man code has been saved securely. Never share it with anyone.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not save code.");
+    } finally { setDeadManSaving(false); }
   };
 
   const handleSave = async () => {
@@ -353,6 +384,36 @@ export default function SafetyProfileScreen() {
                 keyboardType="phone-pad" />
             </View>
 
+            {/* ── SECTION 6: Dead Man Code ── */}
+            <Text style={s.section}>DEAD MAN CODE</Text>
+            <View style={[s.contactCard, { borderColor: colors.red + "40", backgroundColor: colors.redDim ?? colors.red + "10" }]}>
+              <View style={s.infoRow}>
+                <Ionicons name="shield-half-outline" size={14} color={colors.red} />
+                <Text style={[s.infoText, { color: colors.textMuted }]}>
+                  A secret code you enter under duress. It looks like you stopped tracking but silently alerts our team with your live location. Admin will contact police on your behalf.
+                </Text>
+              </View>
+              {deadManCodeSet ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.green} />
+                  <Text style={{ color: colors.green, fontWeight: "700", fontSize: 13 }}>Dead man code is set</Text>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <Ionicons name="warning-outline" size={16} color={colors.red} />
+                  <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>No dead man code set</Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={[s.photoBtn, { borderColor: colors.red + "60", backgroundColor: colors.redDim ?? colors.red + "15" }]}
+                onPress={() => setDeadManModal(true)}>
+                <Ionicons name="key-outline" size={15} color={colors.red} />
+                <Text style={[s.photoBtnText, { color: colors.red }]}>
+                  {deadManCodeSet ? "Change Dead Man Code" : "Set Dead Man Code"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Save */}
             <View style={{ marginTop: 24 }}>
               {saved && (
@@ -363,6 +424,63 @@ export default function SafetyProfileScreen() {
               )}
               <Button label="Save SafeRide Profile" onPress={handleSave} loading={saving} testID="save-safety-btn" />
             </View>
+
+            {/* Dead Man Code Modal */}
+            <Modal visible={deadManModal} transparent animationType="slide" onRequestClose={() => setDeadManModal(false)}>
+              <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => setDeadManModal(false)}>
+                <Pressable style={{ backgroundColor: colors.bg2, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 48 }} onPress={() => {}}>
+                  <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 20 }} />
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    <Ionicons name="shield-half-outline" size={22} color={colors.red} />
+                    <Text style={{ color: colors.text, fontWeight: "900", fontSize: 18 }}>Set Dead Man Code</Text>
+                  </View>
+                  <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 20, lineHeight: 18 }}>
+                    This code must be completely different from your real PIN. Keep it secret — entering it instead of your PIN when stopping tracking will silently alert our team.
+                  </Text>
+                  <Text style={s.label}>NEW DEAD MAN CODE (4–6 digits)</Text>
+                  <TextInput
+                    style={[s.input, { borderColor: colors.red + "60" }]}
+                    value={deadManCode}
+                    onChangeText={setDeadManCode}
+                    placeholder="e.g. 9999"
+                    placeholderTextColor={colors.textDim}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    maxLength={6}
+                  />
+                  <Text style={s.label}>CONFIRM CODE</Text>
+                  <TextInput
+                    style={[s.input, { borderColor: colors.red + "60" }]}
+                    value={deadManCodeConfirm}
+                    onChangeText={setDeadManCodeConfirm}
+                    placeholder="Repeat code"
+                    placeholderTextColor={colors.textDim}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    maxLength={6}
+                  />
+                  <Text style={s.label}>YOUR CURRENT ACCOUNT PIN</Text>
+                  <TextInput
+                    style={s.input}
+                    value={deadManCurrentPin}
+                    onChangeText={setDeadManCurrentPin}
+                    placeholder="Your regular PIN"
+                    placeholderTextColor={colors.textDim}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    maxLength={6}
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: colors.red, borderRadius: radius.md, padding: 16, alignItems: "center", marginTop: 16, opacity: deadManSaving ? 0.6 : 1 }}
+                    onPress={handleSaveDeadManCode}
+                    disabled={deadManSaving}>
+                    {deadManSaving
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>Save Dead Man Code</Text>}
+                  </TouchableOpacity>
+                </Pressable>
+              </Pressable>
+            </Modal>
           </>
         )}
       </ScrollView>

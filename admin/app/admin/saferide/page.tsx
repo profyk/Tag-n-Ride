@@ -30,6 +30,13 @@ export default function SafeRidePage() {
   const sosRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const knownSosIdsRef = useRef<Set<string> | null>(null);
 
+  const [deadManList, setDeadManList] = useState<any[]>([]);
+  const [deadManLoading, setDeadManLoading] = useState(true);
+  const [deadManChargeId, setDeadManChargeId] = useState<string | null>(null);
+  const [deadManChargePrice, setDeadManChargePrice] = useState("");
+  const deadManRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const knownDeadManIdsRef = useRef<Set<string> | null>(null);
+
   const playSosSiren = () => {
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -69,6 +76,14 @@ export default function SafeRidePage() {
     finally { setSosLoading(false); }
   }, []);
 
+  const fetchDeadMan = useCallback(async () => {
+    try {
+      const res = await client.get("/api/admin/saferide/deadman");
+      setDeadManList(res.data || []);
+    } catch {}
+    finally { setDeadManLoading(false); }
+  }, []);
+
   const handleSosAction = async (sosId: string, status: "help_coming" | "dispatched" | "resolved", notes?: string) => {
     setSosActionLoading(sosId + status);
     try {
@@ -105,6 +120,30 @@ export default function SafeRidePage() {
     finally { setSosActionLoading(null); }
   };
 
+  const handleDeadManAction = async (id: string, status: "help_coming" | "resolved") => {
+    setSosActionLoading(id + status);
+    try {
+      await client.patch(`/api/admin/saferide/sos/${id}`, { status });
+      toast.success(status === "resolved" ? "Dead Man alert resolved" : "Marked — help coming");
+      fetchDeadMan();
+    } catch (e: any) { toast.error(e.message || "Failed"); }
+    finally { setSosActionLoading(null); }
+  };
+
+  const handleDeadManCharge = async (id: string) => {
+    const price = parseFloat(deadManChargePrice);
+    if (!price || price <= 0) { toast.error("Enter a valid price"); return; }
+    setSosActionLoading(id + "dmcharge");
+    try {
+      const res = await client.post(`/api/admin/saferide/sos/${id}/charge`, { price });
+      toast.success(res.data.deducted_from_wallet ? `R${price.toFixed(2)} deducted from wallet` : `R${price.toFixed(2)} recorded — follow up manually`);
+      setDeadManChargeId(null);
+      setDeadManChargePrice("");
+      fetchDeadMan();
+    } catch (e: any) { toast.error(e.message || "Failed"); }
+    finally { setSosActionLoading(null); }
+  };
+
   const fetchIncidents = useCallback(async () => {
     try {
       const res = await client.get("/api/admin/incidents");
@@ -125,11 +164,14 @@ export default function SafeRidePage() {
     fetchDriverLocations();
     fetchIncidents();
     fetchSos();
+    fetchDeadMan();
     driverRefTimer.current = setInterval(fetchDriverLocations, 30000);
     sosRefTimer.current = setInterval(fetchSos, 10000);
+    deadManRefTimer.current = setInterval(fetchDeadMan, 10000);
     return () => {
       if (driverRefTimer.current) clearInterval(driverRefTimer.current);
       if (sosRefTimer.current) clearInterval(sosRefTimer.current);
+      if (deadManRefTimer.current) clearInterval(deadManRefTimer.current);
     };
   }, []);
 
@@ -150,6 +192,19 @@ export default function SafeRidePage() {
     if (hasNew) playSosSiren();
     knownSosIdsRef.current = activeIds;
   }, [sosList]);
+
+  useEffect(() => {
+    const activeIds = new Set(
+      deadManList.filter(d => d.status === "active" || d.status === "help_coming").map((d: any) => d.id as string)
+    );
+    if (knownDeadManIdsRef.current === null) {
+      knownDeadManIdsRef.current = activeIds;
+      return;
+    }
+    const hasNew = Array.from(activeIds).some(id => !knownDeadManIdsRef.current!.has(id));
+    if (hasNew) playSosSiren();
+    knownDeadManIdsRef.current = activeIds;
+  }, [deadManList]);
 
   const handleSearch = async () => {
     if (!searchPlate.trim()) return;
@@ -465,6 +520,121 @@ export default function SafeRidePage() {
             </div>
           )}
         </div>
+
+        {/* DEAD MAN ALERTS */}
+        {(() => {
+          const activeDeadMan = deadManList.filter(d => d.status === "active" || d.status === "help_coming");
+          return (
+            <div className={`rounded-xl border p-5 ${activeDeadMan.length > 0 ? "bg-purple-950/30 border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.2)]" : "bg-bg2 border-border"}`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Shield size={16} className={activeDeadMan.length > 0 ? "text-purple-400 animate-pulse" : "text-textMuted"} />
+                  <h2 className="font-extrabold text-text text-sm uppercase tracking-wider">Dead Man Alerts</h2>
+                  {activeDeadMan.length > 0 && (
+                    <span className="animate-pulse bg-purple-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                      {activeDeadMan.length} ACTIVE
+                    </span>
+                  )}
+                  <span className="text-[10px] text-textDim">(refreshes every 10s)</span>
+                </div>
+                <button onClick={fetchDeadMan} className="text-textMuted hover:text-purple-400 transition-colors">
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+
+              {deadManLoading ? (
+                <div className="flex items-center justify-center py-8"><Spinner size={20} /></div>
+              ) : deadManList.length === 0 ? (
+                <p className="text-textMuted text-sm text-center py-6">No dead man alerts</p>
+              ) : (
+                <div className="space-y-3">
+                  {deadManList.map(dm => {
+                    const isActive = dm.status === "active" || dm.status === "help_coming";
+                    const mapsUrl = dm.latest_lat
+                      ? `https://maps.google.com/?q=${dm.latest_lat},${dm.latest_lng}`
+                      : dm.latitude ? `https://maps.google.com/?q=${dm.latitude},${dm.longitude}` : null;
+                    const elapsed = dm.dead_man_triggered_at
+                      ? Math.floor((Date.now() - new Date(dm.dead_man_triggered_at).getTime()) / 60000)
+                      : dm.created_at ? Math.floor((Date.now() - new Date(dm.created_at).getTime()) / 60000) : 0;
+                    return (
+                      <div key={dm.id} className={`rounded-xl border p-4 ${isActive ? "border-purple-500/50 bg-purple-950/20" : "border-border bg-bg"}`}>
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
+                              <Shield size={18} className="text-purple-400" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-extrabold text-text text-sm">{dm.user_name || "Unknown"}</p>
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-purple-500/10 text-purple-400 border-purple-500/20">DEAD MAN</span>
+                                <Badge tone={dm.status === "resolved" ? "green" : "red"}>{dm.status?.toUpperCase()}</Badge>
+                              </div>
+                              <a href={`tel:${dm.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                                <Phone size={10} /> {dm.user_phone || "No phone"}
+                              </a>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-[10px] text-textDim">{formatTime(dm.dead_man_triggered_at || dm.created_at)}</p>
+                            {isActive && <p className="text-[10px] text-purple-400 font-bold">{elapsed}m ago</p>}
+                            {dm.charged && <p className="text-[10px] text-green font-bold">R{dm.price?.toFixed(2)} charged</p>}
+                          </div>
+                        </div>
+
+                        {mapsUrl && (
+                          <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-xs text-purple-400 hover:underline bg-bg border border-purple-500/20 rounded-lg px-3 py-2 mb-3">
+                            <MapPin size={12} />
+                            {dm.latest_lat ? "Live covert location — view on map" : "Last known location — view on map"}
+                          </a>
+                        )}
+
+                        {isActive && (
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            <button
+                              disabled={!!sosActionLoading}
+                              onClick={() => handleDeadManAction(dm.id, "resolved")}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
+                              {sosActionLoading === dm.id + "resolved" ? <Spinner size={10} /> : null}
+                              Mark Resolved
+                            </button>
+                          </div>
+                        )}
+
+                        {dm.status === "resolved" && !dm.charged && (
+                          deadManChargeId === dm.id ? (
+                            <div className="flex items-center gap-2 mt-2">
+                              <input
+                                type="number"
+                                value={deadManChargePrice}
+                                onChange={e => setDeadManChargePrice(e.target.value)}
+                                placeholder="Amount (R)"
+                                className="w-32 bg-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-purple-400"
+                              />
+                              <button
+                                disabled={sosActionLoading === dm.id + "dmcharge"}
+                                onClick={() => handleDeadManCharge(dm.id)}
+                                className="px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-bold rounded-lg hover:bg-purple-500/20 disabled:opacity-50">
+                                {sosActionLoading === dm.id + "dmcharge" ? <Spinner size={10} /> : "Charge User"}
+                              </button>
+                              <button onClick={() => setDeadManChargeId(null)} className="text-textMuted hover:text-text text-xs">Cancel</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setDeadManChargeId(dm.id); setDeadManChargePrice(""); }}
+                              className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-bold rounded-lg hover:bg-purple-500/20 transition-colors">
+                              Set Service Fee
+                            </button>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
