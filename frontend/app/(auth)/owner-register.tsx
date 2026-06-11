@@ -133,6 +133,7 @@ export default function OwnerRegister() {
   const [surname, setSurname] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [businessName, setBusinessName] = useState("");
 
   // Step 2 — Credentials
@@ -225,6 +226,7 @@ export default function OwnerRegister() {
         role: "owner",
         email: email.trim().toLowerCase(),
         password: password,
+        phone_number: phoneNumber.trim() || undefined,
         business_name: businessName.trim() || undefined,
         id_number: idNumber.trim() || undefined,
         driver_mode: driverMode === true,
@@ -278,6 +280,11 @@ export default function OwnerRegister() {
               <TextInput style={s.input} value={email} onChangeText={setEmail}
                 placeholder="jane@example.com" placeholderTextColor={colors.textDim}
                 keyboardType="email-address" autoCapitalize="none" autoComplete="email" />
+
+              <Text style={s.label}>PHONE NUMBER <Text style={{ color: colors.textDim }}>— optional</Text></Text>
+              <TextInput style={s.input} value={phoneNumber} onChangeText={setPhoneNumber}
+                placeholder="+27 83 123 4567" placeholderTextColor={colors.textDim}
+                keyboardType="phone-pad" autoComplete="tel" />
 
               <Text style={s.label}>BUSINESS NAME <Text style={{ color: colors.textDim }}>— optional</Text></Text>
               <TextInput style={s.input} value={businessName} onChangeText={setBusinessName}
