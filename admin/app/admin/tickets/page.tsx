@@ -283,12 +283,14 @@ export default function TicketsPage() {
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <span className="text-textDim text-[10px] whitespace-nowrap">{formatDate(t.created_at)}</span>
                         {!isRes && (
-                          <Button
-                            onClick={e => { e.stopPropagation(); handleResolve(t); }}
-                            loading={resolvingId === t.id}
-                            className="text-xs py-1 px-3">
-                            Resolve
-                          </Button>
+                          <div onClick={ev => ev.stopPropagation()}>
+                            <Button
+                              onClick={() => handleResolve(t)}
+                              loading={resolvingId === t.id}
+                              className="text-xs py-1 px-3">
+                              Resolve
+                            </Button>
+                          </div>
                         )}
                         {isExp ? <ChevronUp size={14} className="text-textDim" /> : <ChevronDown size={14} className="text-textDim" />}
                       </div>
