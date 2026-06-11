@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, Input } from "@/components/ui";
+import { Card, Button, Spinner, Input, Modal } from "@/components/ui";
 import { hasPermission, isSuperAdmin } from "@/lib/api";
-import { Save, ToggleLeft, ToggleRight, FileText, ShieldCheck, Building2, Users, Info, Navigation } from "lucide-react";
+import { Save, ToggleLeft, ToggleRight, FileText, ShieldCheck, Building2, Users, Info, Navigation, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
@@ -94,6 +94,7 @@ export default function DocumentPricingPage() {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [savingPayout, setSavingPayout] = useState<string | null>(null);
+  const [highFeeConfirm, setHighFeeConfirm] = useState<{ label: string; amount: number; proceed: () => void } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,10 +124,16 @@ export default function DocumentPricingPage() {
   useEffect(() => { load(); }, [load]);
 
   // Save a system_config key
-  const saveConfigKey = async (key: string) => {
+  const saveConfigKey = (key: string) => {
     const numVal = parseFloat(edited[key]);
     if (isNaN(numVal) || numVal < 0) { toast.error("Fee must be 0 or more"); return; }
-    if (numVal > 500 && !confirm(`R${numVal.toFixed(2)} is a very high fee. Are you sure?`)) return;
+    if (numVal > 500) {
+      setHighFeeConfirm({ label: key.replace(/_/g, " "), amount: numVal, proceed: () => doSaveConfigKey(key, numVal) });
+      return;
+    }
+    doSaveConfigKey(key, numVal);
+  };
+  const doSaveConfigKey = async (key: string, numVal: number) => {
     setSavingKey(key);
     try {
       const res = await fetch(`${BASE}/api/admin/config/${key}`, {
@@ -142,10 +149,16 @@ export default function DocumentPricingPage() {
   };
 
   // Save a payout_settings field
-  const savePayoutField = async (field: keyof PayoutSettings) => {
+  const savePayoutField = (field: keyof PayoutSettings) => {
     const numVal = parseFloat(String(editedPayout[field]));
     if (isNaN(numVal) || numVal < 0) { toast.error("Fee must be 0 or more"); return; }
-    if (numVal > 500 && !confirm(`R${numVal.toFixed(2)} is a very high fee. Are you sure?`)) return;
+    if (numVal > 500) {
+      setHighFeeConfirm({ label: field.replace(/_/g, " "), amount: numVal, proceed: () => doSavePayoutField(field, numVal) });
+      return;
+    }
+    doSavePayoutField(field, numVal);
+  };
+  const doSavePayoutField = async (field: keyof PayoutSettings, numVal: number) => {
     setSavingPayout(field);
     try {
       const res = await fetch(`${BASE}/api/admin/payout-settings`, {
@@ -404,6 +417,29 @@ export default function DocumentPricingPage() {
         </Card>
 
       </div>
+
+      {/* High Fee Warning Confirmation Modal */}
+      <Modal open={!!highFeeConfirm} onClose={() => setHighFeeConfirm(null)} title="High Fee Warning">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-yellow/5 border border-yellow/20 rounded-xl">
+            <AlertTriangle size={15} className="text-yellow flex-shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="text-yellow font-semibold">This is a very high fee</p>
+              <p className="text-textMuted mt-1">
+                Setting <strong className="text-text">{highFeeConfirm?.label}</strong> to{" "}
+                <strong className="text-yellow">R{highFeeConfirm?.amount.toFixed(2)}</strong> (above R500).
+                Users will be charged this amount. Are you sure?
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setHighFeeConfirm(null)}>Cancel</Button>
+            <Button onClick={() => { highFeeConfirm?.proceed(); setHighFeeConfirm(null); }}>
+              <Save size={12} /> Save Anyway
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </AdminShell>
   );
 }

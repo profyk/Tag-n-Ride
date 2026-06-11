@@ -41,12 +41,26 @@ export default function WalletOpsPage() {
 
   // Freeze form
   const [freezeReason, setFreezeReason] = useState("");
+  const [bulkUnfreezeConfirm, setBulkUnfreezeConfirm] = useState(false);
 
   // Tx history
   const [txLoading, setTxLoading] = useState(false);
   const [walletTxns, setWalletTxns] = useState<Transaction[]>([]);
 
   const dangerPin = useDangerPin();
+
+  const doBulkUnfreeze = async () => {
+    setBulkUnfreezeConfirm(false);
+    const token = await dangerPin.request();
+    if (!token) return;
+    const frozenList = allWallets.filter(w => w.is_frozen);
+    let done = 0;
+    for (const w of frozenList) {
+      try { await api.unfreezeWalletAdmin(w.user_id); done++; } catch {}
+    }
+    toast.success(`${done}/${frozenList.length} wallets unfrozen`);
+    const r = await api.wallets(); setAllWallets(r.data);
+  };
 
   const load = () => {
     setLoading(true);
@@ -192,17 +206,7 @@ export default function WalletOpsPage() {
               <Button variant="secondary" onClick={() => setFilterFrozen("frozen")}>
                 <Lock size={13} /> View Frozen
               </Button>
-              <Button variant="danger" onClick={async () => {
-                if (!confirm(`Unfreeze all ${frozenList.length} frozen wallets?`)) return;
-                const token = await dangerPin.request();
-                if (!token) return;
-                let done = 0;
-                for (const w of frozenList) {
-                  try { await api.unfreezeWalletAdmin(w.user_id); done++; } catch {}
-                }
-                toast.success(`${done}/${frozenList.length} wallets unfrozen`);
-                const r = await api.wallets(); setAllWallets(r.data);
-              }}>
+              <Button variant="danger" onClick={() => setBulkUnfreezeConfirm(true)}>
                 <Unlock size={13} /> Bulk Unfreeze All
               </Button>
             </div>
@@ -567,6 +571,23 @@ export default function WalletOpsPage() {
             <Button variant="secondary" onClick={() => setTxModal(false)}>
               Close
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Unfreeze Confirmation Modal */}
+      <Modal open={bulkUnfreezeConfirm} onClose={() => setBulkUnfreezeConfirm(false)} title="Bulk Unfreeze Wallets">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-yellow/5 border border-yellow/20 rounded-xl">
+            <AlertCircle size={15} className="text-yellow flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-yellow text-sm font-semibold">Unfreeze {allWallets.filter(w => w.is_frozen).length} frozen wallets?</p>
+              <p className="text-textMuted text-xs mt-1">PIN confirmation required. All frozen users will immediately regain full transaction access.</p>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBulkUnfreezeConfirm(false)}>Cancel</Button>
+            <Button onClick={doBulkUnfreeze}><Unlock size={12} /> Unfreeze All</Button>
           </div>
         </div>
       </Modal>

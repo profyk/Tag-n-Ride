@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal, Select } from "@/components/ui";
 import { api, User, hasPermission, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
-import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, Copy, Download, X } from "lucide-react";
+import { Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, Copy, Download, X, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
@@ -46,6 +46,9 @@ export default function UsersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBlocking, setBulkBlocking] = useState(false);
   const [pinModal, setPinModal] = useState<{ name: string; pin: string } | null>(null);
+  const [unblockTarget, setUnblockTarget] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [bulkBlockConfirm, setBulkBlockConfirm] = useState(false);
   const superAdmin = isSuperAdmin();
   const dangerPin = useDangerPin();
 
@@ -67,8 +70,10 @@ export default function UsersPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleUnblock = async (u: User) => {
-    if (!confirm(`Unblock ${u.full_name}?`)) return;
+  const handleUnblock = (u: User) => { setUnblockTarget(u); };
+  const confirmUnblock = async () => {
+    if (!unblockTarget) return;
+    const u = unblockTarget; setUnblockTarget(null);
     try {
       await api.unblockUser(u.id);
       toast.success(`${u.full_name} unblocked`);
@@ -99,8 +104,10 @@ export default function UsersPage() {
     catch (e: any) { toast.error(e.message); }
   };
 
-  const handleDelete = async (u: User) => {
-    if (!confirm(`Delete ${u.full_name}? This requires your danger PIN and cannot be undone.`)) return;
+  const handleDelete = (u: User) => { setDeleteTarget(u); };
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const u = deleteTarget; setDeleteTarget(null);
     const token = await dangerPin.request();
     if (!token) return;
     try {
@@ -110,6 +117,20 @@ export default function UsersPage() {
       toast.success(`${u.full_name} deleted`);
       load(query);
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleBulkBlock = () => { setBulkBlockConfirm(true); };
+  const confirmBulkBlock = async () => {
+    setBulkBlockConfirm(false);
+    setBulkBlocking(true);
+    let done = 0;
+    for (const id of Array.from(selectedIds)) {
+      try { await api.blockUser(id, "Bulk block action"); done++; } catch {}
+    }
+    toast.success(`${done} user${done !== 1 ? "s" : ""} blocked`);
+    setSelectedIds(new Set());
+    setBulkBlocking(false);
+    load();
   };
 
   const doSearch = () => { setQuery(search); load(search); };
@@ -164,18 +185,7 @@ export default function UsersPage() {
           <div className="flex gap-2 items-center flex-wrap">
             {selectedIds.size > 0 && (
               <>
-                <Button variant="danger" loading={bulkBlocking} onClick={async () => {
-                  if (!confirm(`Block ${selectedIds.size} selected users?`)) return;
-                  setBulkBlocking(true);
-                  let done = 0;
-                  for (const id of Array.from(selectedIds)) {
-                    try { await api.blockUser(id, "Bulk block action"); done++; } catch {}
-                  }
-                  toast.success(`${done} users blocked`);
-                  setSelectedIds(new Set());
-                  setBulkBlocking(false);
-                  load();
-                }}>
+                <Button variant="danger" loading={bulkBlocking} onClick={handleBulkBlock}>
                   <ShieldOff size={13} /> Block {selectedIds.size}
                 </Button>
                 <Button variant="ghost" onClick={() => setSelectedIds(new Set())}><X size={13} /> Clear</Button>
@@ -336,6 +346,45 @@ export default function UsersPage() {
             </Button>
           </div>
           <p className="text-xs text-red text-center font-semibold">This PIN is shown only once.</p>
+        </div>
+      </Modal>
+
+      {/* Unblock Confirmation Modal */}
+      <Modal open={!!unblockTarget} onClose={() => setUnblockTarget(null)} title={`Unblock ${unblockTarget?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">This will restore full platform access. The user will be able to log in and transact again.</p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setUnblockTarget(null)}>Cancel</Button>
+            <Button onClick={confirmUnblock}><ShieldCheck size={12} /> Unblock Account</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title={`Delete ${deleteTarget?.full_name}`}>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">This action is <strong>permanent and irreversible</strong>. All user data, wallet balance, and history will be deleted. You will be required to enter your Danger PIN to proceed.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmDelete}><Trash2 size={12} /> Delete Account</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Block Confirmation Modal */}
+      <Modal open={bulkBlockConfirm} onClose={() => setBulkBlockConfirm(false)} title={`Block ${selectedIds.size} Users`}>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">You are about to block <strong>{selectedIds.size} user{selectedIds.size !== 1 ? "s" : ""}</strong>. They will immediately lose access to the platform.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBulkBlockConfirm(false)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmBulkBlock} loading={bulkBlocking}><ShieldOff size={12} /> Block {selectedIds.size} Users</Button>
+          </div>
         </div>
       </Modal>
 

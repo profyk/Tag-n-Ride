@@ -193,6 +193,7 @@ function HRPageInner() {
   const [createSalaryModal, setCreateSalaryModal] = useState(false);
   const [rejectModal, setRejectModal] = useState<SalaryPayment | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [payConfirm, setPayConfirm] = useState<SalaryPayment | null>(null);
   const emptySalaryForm = {
     employee_name: "", bank_name: SA_BANKS[0],
     account_number: "", account_holder: "",
@@ -356,8 +357,11 @@ function HRPageInner() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handlePaySalary = async (sp: SalaryPayment) => {
-    if (!confirm(`Pay ${sp.employee_name} ${formatZAR(sp.net_amount)} for ${sp.pay_period} via gateway?`)) return;
+  const handlePaySalary = (sp: SalaryPayment) => { setPayConfirm(sp); };
+  const doPaySalary = async () => {
+    if (!payConfirm) return;
+    const sp = payConfirm;
+    setPayConfirm(null);
     try {
       await api.paySalary(sp.id);
       toast.success("Salary payment processed via Stitch gateway");
@@ -1016,6 +1020,25 @@ function HRPageInner() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Pay Salary Confirmation Modal */}
+      <Modal open={!!payConfirm} onClose={() => setPayConfirm(null)} title="Process Salary Payment">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-yellow/5 border border-yellow/20 rounded-xl">
+            <AlertTriangle size={15} className="text-yellow flex-shrink-0 mt-0.5" />
+            <div className="text-sm space-y-1">
+              <p className="text-yellow font-semibold">Send payment via Stitch gateway?</p>
+              <p className="text-textMuted">Pay <strong className="text-text">{payConfirm?.employee_name}</strong> {" "}
+                <strong className="text-green">{payConfirm ? formatZAR(payConfirm.net_amount) : ""}</strong> for period <strong className="text-text">{payConfirm?.pay_period}</strong>.</p>
+              <p className="text-textDim text-xs">This will initiate a real bank transfer. Ensure the amount and recipient are correct before proceeding.</p>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setPayConfirm(null)}>Cancel</Button>
+            <Button onClick={doPaySalary}><Wallet size={12} /> Process Payment</Button>
+          </div>
+        </div>
       </Modal>
 
       <style>{`.label-sm { display: block; font-size: 10px; font-weight: 700; color: var(--textMuted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }`}</style>

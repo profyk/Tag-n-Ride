@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Modal, Input, StatCard, Spinner } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { Tag, Plus, Trash2, Copy, ToggleLeft, ToggleRight } from "lucide-react";
+import { Tag, Plus, Trash2, Copy, ToggleLeft, ToggleRight, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, Promotion } from "@/lib/api";
 
@@ -14,6 +14,7 @@ export default function PromotionsPage() {
   const [promos, setPromos] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModal, setCreateModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Promotion | null>(null);
   const [form, setForm] = useState({
     code: "", description: "", discount_type: "percent", discount_value: "",
     min_ride_amount: "0", max_uses: "1000", uses_per_user: "1", valid_from: "", valid_to: "",
@@ -34,8 +35,11 @@ export default function PromotionsPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const remove = async (p: Promotion) => {
-    if (!confirm(`Delete promo code ${p.code}?`)) return;
+  const remove = (p: Promotion) => { setDeleteTarget(p); };
+  const confirmRemove = async () => {
+    if (!deleteTarget) return;
+    const p = deleteTarget;
+    setDeleteTarget(null);
     try {
       await api.deletePromotion(p.id);
       toast.success("Promo deleted");
@@ -187,6 +191,19 @@ export default function PromotionsPage() {
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" onClick={() => setCreateModal(false)}>Cancel</Button>
             <Button onClick={create}><Plus size={13} /> Create Promo</Button>
+          </div>
+        </div>
+      </Modal>
+      {/* Delete Promo Confirmation Modal */}
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Promo Code">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">Delete promo code <strong className="font-mono tracking-widest">{deleteTarget?.code}</strong>? Any users with this code will no longer be able to redeem it.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmRemove}><Trash2 size={12} /> Delete Promo</Button>
           </div>
         </div>
       </Modal>

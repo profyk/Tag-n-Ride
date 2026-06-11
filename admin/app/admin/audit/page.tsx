@@ -85,7 +85,6 @@ export default function AuditPage() {
   const failedCount = filtered.filter(l => !l.success).length;
 
   const handleArchive = async () => {
-    if (!confirm(`Archive all audit logs older than ${archiveMonths} months? They will be moved to the archive (not deleted).`)) return;
     setArchiving(true);
     try {
       const res = await fetch(`${BASE}/api/admin/audit/archive`, {

@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard } from "@/components/ui";
+import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard, Modal } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { ShieldAlert, UserX, Eye, Snowflake, RefreshCw, AlertTriangle, Zap, Download, Info } from "lucide-react";
 import toast from "react-hot-toast";
@@ -32,6 +32,7 @@ export default function RiskPage() {
   const [bulkActing, setBulkActing] = useState(false);
   const [scoreFilter, setScoreFilter] = useState<"all" | "high" | "medium">("all");
   const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
+  const [bulkFreezeConfirm, setBulkFreezeConfirm] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -77,10 +78,14 @@ export default function RiskPage() {
     finally { setFreezing(null); }
   };
 
-  const handleBulkFreezeHigh = async () => {
+  const handleBulkFreezeHigh = () => {
     const highRisk = filteredUsers.filter(u => u.risk_score >= 75 && !u.is_frozen);
     if (!highRisk.length) { toast.error("No unfrozen high-risk users"); return; }
-    if (!confirm(`Freeze wallets for ${highRisk.length} high-risk users (score ≥75)?`)) return;
+    setBulkFreezeConfirm(true);
+  };
+  const doBulkFreezeHigh = async () => {
+    const highRisk = filteredUsers.filter(u => u.risk_score >= 75 && !u.is_frozen);
+    setBulkFreezeConfirm(false);
     const token = await requestPin();
     if (!token) return;
     setBulkActing(true);
@@ -233,6 +238,24 @@ export default function RiskPage() {
           )}
         </Card>
       </div>
+
+      {/* Bulk Freeze Confirmation Modal */}
+      <Modal open={bulkFreezeConfirm} onClose={() => setBulkFreezeConfirm(false)} title="Bulk Freeze High-Risk Wallets">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red text-sm font-semibold">Freeze {filteredUsers.filter(u => u.risk_score >= 75 && !u.is_frozen).length} high-risk wallets (score ≥75)?</p>
+              <p className="text-textMuted text-xs mt-1">PIN confirmation required. Frozen users cannot make transactions until manually unfrozen.</p>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBulkFreezeConfirm(false)}>Cancel</Button>
+            <Button variant="danger" onClick={doBulkFreezeHigh} loading={bulkActing}><Snowflake size={12} /> Freeze Wallets</Button>
+          </div>
+        </div>
+      </Modal>
+
     </AdminShell>
   );
 }

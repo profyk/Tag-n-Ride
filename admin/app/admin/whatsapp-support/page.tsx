@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner } from "@/components/ui";
+import { Badge, Spinner, Modal, Button } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import {
@@ -98,7 +98,9 @@ export default function WhatsAppSupportPage() {
   const [internalNotes, setInternalNotes] = useState<Record<string, { text: string; by: string; at: string }[]>>({});
   const [showNotes, setShowNotes] = useState(false);
   const [blockingPhone, setBlockingPhone] = useState<string | null>(null);
+  const [blockConfirmPhone, setBlockConfirmPhone] = useState<string | null>(null);
   const [bulkResolving, setBulkResolving] = useState(false);
+  const [bulkResolveConfirm, setBulkResolveConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -231,8 +233,10 @@ export default function WhatsAppSupportPage() {
     finally { setSavingNote(false); }
   };
 
-  const handleBlockContact = async (phone: string) => {
-    if (!confirm(`Block ${phone}? They will be unable to message support.`)) return;
+  const handleBlockContact = (phone: string) => { setBlockConfirmPhone(phone); };
+  const doBlockContact = async () => {
+    if (!blockConfirmPhone) return;
+    const phone = blockConfirmPhone; setBlockConfirmPhone(null);
     setBlockingPhone(phone);
     try {
       const res = await fetch(`${BASE}/api/admin/whatsapp/support/block`, {
@@ -248,10 +252,15 @@ export default function WhatsAppSupportPage() {
     finally { setBlockingPhone(null); }
   };
 
-  const handleBulkResolve = async () => {
+  const handleBulkResolve = () => {
     const open = conversations.filter(c => c.status === "open" || c.status === "pending");
     if (!open.length) { toast.error("No open conversations to resolve"); return; }
-    if (!confirm(`Mark ${open.length} open conversations as resolved?`)) return;
+    setBulkResolveConfirm(true);
+  };
+
+  const doBulkResolve = async () => {
+    const open = conversations.filter(c => c.status === "open" || c.status === "pending");
+    setBulkResolveConfirm(false);
     setBulkResolving(true);
     let done = 0;
     for (const c of open) {
@@ -698,6 +707,39 @@ export default function WhatsAppSupportPage() {
           </div>
         )}
       </div>
+      {/* Block Contact Confirmation Modal */}
+      <Modal open={!!blockConfirmPhone} onClose={() => setBlockConfirmPhone(null)} title="Block Contact">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            Block <span className="text-text font-bold font-mono">{blockConfirmPhone}</span> from WhatsApp support?
+            They will be unable to send messages to the support number.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBlockConfirmPhone(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doBlockContact} loading={blockingPhone === blockConfirmPhone}>
+              <Ban size={12} /> Block Contact
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Resolve Confirmation Modal */}
+      <Modal open={bulkResolveConfirm} onClose={() => setBulkResolveConfirm(false)} title="Resolve All Conversations">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            Mark <span className="text-cyan font-bold">
+              {conversations.filter(c => c.status === "open" || c.status === "pending").length}
+            </span> open conversations as resolved?
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBulkResolveConfirm(false)}>Cancel</Button>
+            <Button onClick={doBulkResolve} loading={bulkResolving}>
+              <CheckSquare size={12} /> Resolve All
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
     </AdminShell>
   );
 }

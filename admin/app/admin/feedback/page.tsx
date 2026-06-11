@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard } from "@/components/ui";
+import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard, Modal } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import { Star, Flag, Trash2, Download, TrendingUp, BarChart3, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
@@ -28,6 +28,8 @@ export default function FeedbackPage() {
   const [maxStars, setMaxStars] = useState<number | undefined>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<FeedbackItem | null>(null);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -73,16 +75,21 @@ export default function FeedbackPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const remove = async (item: FeedbackItem) => {
-    if (!confirm("Delete this review permanently?")) return;
+  const remove = (item: FeedbackItem) => { setDeleteTarget(item); };
+  const confirmRemove = async () => {
+    if (!deleteTarget) return;
+    const item = deleteTarget; setDeleteTarget(null);
     try { await api.deleteFeedback(item.id); toast.success("Review deleted"); load(); }
     catch (e: any) { toast.error(e.message); }
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
+    if (!selected.size) return;
+    setBulkDeleteConfirm(true);
+  };
+  const doBulkDelete = async () => {
     const ids = Array.from(selected);
-    if (!ids.length) return;
-    if (!confirm(`Permanently delete ${ids.length} review${ids.length > 1 ? "s" : ""}?`)) return;
+    setBulkDeleteConfirm(false);
     setBulkDeleting(true);
     let done = 0;
     for (const id of ids) {
@@ -158,7 +165,7 @@ export default function FeedbackPage() {
             <div className="flex items-center gap-3">
               <h2 className="text-text font-bold">User Feedback</h2>
               {selected.size > 0 && (
-                <Button variant="danger" loading={bulkDeleting} onClick={handleBulkDelete}>
+                <Button variant="danger" loading={bulkDeleting} onClick={() => setBulkDeleteConfirm(true)}>
                   <Trash2 size={12} /> Delete Selected ({selected.size})
                 </Button>
               )}
@@ -228,6 +235,31 @@ export default function FeedbackPage() {
           )}
         </Card>
       </div>
+
+      {/* Delete Review Modal */}
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Review">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">Permanently delete this review by <strong className="text-text">{deleteTarget?.rater_name}</strong>? This cannot be undone.</p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmRemove}><Trash2 size={12} /> Delete Review</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Delete Modal */}
+      <Modal open={bulkDeleteConfirm} onClose={() => setBulkDeleteConfirm(false)} title="Delete Selected Reviews">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">Permanently delete <strong>{selected.size} review{selected.size !== 1 ? "s" : ""}</strong>? This cannot be undone.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBulkDeleteConfirm(false)}>Cancel</Button>
+            <Button variant="danger" onClick={doBulkDelete} loading={bulkDeleting}><Trash2 size={12} /> Delete {selected.size} Reviews</Button>
+          </div>
+        </div>
+      </Modal>
     </AdminShell>
   );
 }

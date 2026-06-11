@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Badge } from "@/components/ui";
+import { Card, Spinner, Badge, Modal, Button } from "@/components/ui";
 import { hasPermission } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { formatZAR, formatDate } from "@/lib/utils";
@@ -31,6 +31,7 @@ const ROLE_COLORS: Record<string, string> = {
   const [fundingId, setFundingId] = useState<string | null>(null);
   const [fundAmount, setFundAmount] = useState("100");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ userId: string; name: string } | null>(null);
   const [newUser, setNewUser] = useState({
     full_name: "", role: "passenger", initial_balance: 100,
   });
@@ -90,8 +91,11 @@ const ROLE_COLORS: Record<string, string> = {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleDelete = async (userId: string, name: string) => {
-    if (!confirm(`Delete test user "${name}"? This cannot be undone.`)) return;
+  const handleDelete = (userId: string, name: string) => { setDeleteConfirm({ userId, name }); };
+  const doDelete = async () => {
+    if (!deleteConfirm) return;
+    const { userId, name } = deleteConfirm;
+    setDeleteConfirm(null);
     setDeletingId(userId);
     try {
       const res = await fetch(`${BASE}/api/admin/test-users/${userId}`, {
@@ -288,6 +292,20 @@ const ROLE_COLORS: Record<string, string> = {
           </div>
         </div>
       </div>
+
+      {/* Delete Test User Confirmation Modal */}
+      <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Delete Test User">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">Delete test user <strong>"{deleteConfirm?.name}"</strong>? All their test transactions and wallet data will also be removed. This cannot be undone.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doDelete}><Trash2 size={12} /> Delete User</Button>
+          </div>
+        </div>
+      </Modal>
     </AdminShell>
   );
 }

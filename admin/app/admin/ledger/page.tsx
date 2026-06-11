@@ -9,6 +9,7 @@ import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
   ArrowUpRight, ArrowDownLeft, RefreshCw, CheckCircle,
 } from "lucide-react";
+import toast from "react-hot-toast";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
 const authHeaders = () => ({
@@ -106,12 +107,12 @@ export default function LedgerPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Refund failed");
-      alert(`Refund processed successfully for ${refundUserName || refundSearch}.${data?.reference ? ` Reference: ${data.reference}` : ""}`);
+      toast.success(`Refund of ${formatZAR(parseFloat(refundAmount))} processed for ${refundUserName || refundSearch}${data?.reference ? ` · Ref: ${data.reference}` : ""}`);
       setRefundModal(false);
       setRefundSearch(""); setRefundUserName("");
       setRefundAmount(""); setRefundReason("");
       loadAll();
-    } catch (e: any) { alert(e.message); }
+    } catch (e: any) { toast.error(e.message); }
     finally { setRefunding(false); }
   };
 

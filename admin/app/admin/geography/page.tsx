@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Table, Tr, Td, Badge, Button, Modal, Input, StatCard, Spinner } from "@/components/ui";
-import { MapPin, Plus, ToggleLeft, ToggleRight, Trash2, Edit2, Save } from "lucide-react";
+import { MapPin, Plus, ToggleLeft, ToggleRight, Trash2, Edit2, Save, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, CoverageZone } from "@/lib/api";
 
@@ -21,6 +21,7 @@ export default function GeographyPage() {
   const [editTarget, setEditTarget] = useState<CoverageZone | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CoverageZone | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -37,11 +38,13 @@ export default function GeographyPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const remove = async (z: CoverageZone) => {
-    if (!confirm(`Delete zone "${z.name}"? This cannot be undone.`)) return;
+  const remove = (z: CoverageZone) => { setDeleteTarget(z); };
+  const confirmRemove = async () => {
+    if (!deleteTarget) return;
+    const z = deleteTarget; setDeleteTarget(null);
     try {
       await api.deleteZone(z.id);
-      toast.success("Zone deleted");
+      toast.success(`Zone "${z.name}" deleted`);
       load();
     } catch (e: any) { toast.error(e.message); }
   };
@@ -213,6 +216,24 @@ export default function GeographyPage() {
 
       <Modal open={editModal} onClose={() => { setEditModal(false); setEditTarget(null); }} title={`Edit Zone — ${editTarget?.name}`}>
         <ZoneForm onSubmit={saveEdit} submitLabel="Save Changes" />
+      </Modal>
+
+      {/* Delete Zone Confirmation */}
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Zone">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">
+              Delete zone <strong>"{deleteTarget?.name}"</strong>?
+              Any pricing rules linked to this zone will fall back to the default rule.
+              This cannot be undone.
+            </p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmRemove}><Trash2 size={12} /> Delete Zone</Button>
+          </div>
+        </div>
       </Modal>
     </AdminShell>
   );

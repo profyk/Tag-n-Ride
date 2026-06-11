@@ -177,6 +177,7 @@ export default function VelocityPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"rules" | "alerts">("rules");
+  const [deleteRuleTarget, setDeleteRuleTarget] = useState<VelocityRule | null>(null);
   const [form, setForm] = useState<NewRule>({
     name: "", description: "", tx_type: "all",
     window_minutes: 60, max_count: 10, max_amount: 5000, action: "flag",
@@ -233,8 +234,11 @@ export default function VelocityPage() {
     }
   };
 
-  const handleDelete = async (rule: VelocityRule) => {
-    if (!confirm(`Delete rule "${rule.name}"?`)) return;
+  const handleDelete = (rule: VelocityRule) => { setDeleteRuleTarget(rule); };
+  const doDelete = async () => {
+    if (!deleteRuleTarget) return;
+    const rule = deleteRuleTarget;
+    setDeleteRuleTarget(null);
     try {
       await client.delete(`/api/admin/velocity/rules/${rule.id}`);
       setRules(prev => prev.filter(r => r.id !== rule.id));
@@ -560,6 +564,24 @@ export default function VelocityPage() {
         </Modal>
 
       </div>
+
+      {/* Delete Rule Confirmation Modal */}
+      <Modal open={!!deleteRuleTarget} onClose={() => setDeleteRuleTarget(null)} title="Delete Velocity Rule">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red text-sm font-semibold">Delete <strong>"{deleteRuleTarget?.name}"</strong>?</p>
+              <p className="text-textMuted text-xs mt-1">This rule will stop monitoring transactions immediately. This cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteRuleTarget(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doDelete}><Trash2 size={12} /> Delete Rule</Button>
+          </div>
+        </div>
+      </Modal>
+
     </AdminShell>
   );
 }

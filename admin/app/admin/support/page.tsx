@@ -90,6 +90,9 @@ export default function SupportPage() {
   const [refundReason, setRefundReason] = useState("");
   const [refunding, setRefunding] = useState(false);
 
+  // Block/unblock confirm
+  const [blockConfirm, setBlockConfirm] = useState(false);
+
   // Send notification modal
   const [notifModal, setNotifModal] = useState(false);
   const [notifTitle, setNotifTitle] = useState("");
@@ -135,10 +138,14 @@ export default function SupportPage() {
     finally { setActionLoading(null); }
   };
 
-  const handleBlock = async () => {
+  const handleBlock = () => {
+    if (!result?.user?.id) return;
+    setBlockConfirm(true);
+  };
+  const doBlock = async () => {
     if (!result?.user?.id) return;
     const isBlocked = !result.user.is_active;
-    if (!confirm(`${isBlocked ? "Unblock" : "Block"} ${result.user.full_name}?`)) return;
+    setBlockConfirm(false);
     setActionLoading("block");
     try {
       if (isBlocked) {
@@ -783,6 +790,24 @@ export default function SupportPage() {
             <Button variant="secondary" onClick={() => setRefundModal(false)}>Cancel</Button>
             <Button onClick={handleCreateRefund} loading={refunding} disabled={!refundTxnId || !refundAmount || !refundReason}>
               <RotateCcw size={13} /> Submit Refund
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Block/Unblock Confirmation Modal ── */}
+      <Modal open={blockConfirm} onClose={() => setBlockConfirm(false)}
+        title={result?.user?.is_active ? `Block ${result?.user?.full_name}` : `Unblock ${result?.user?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            {result?.user?.is_active
+              ? `Block ${result?.user?.full_name}? They will immediately lose app access.`
+              : `Unblock ${result?.user?.full_name}? They will regain full platform access.`}
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBlockConfirm(false)}>Cancel</Button>
+            <Button variant={result?.user?.is_active ? "danger" : "secondary"} onClick={doBlock} loading={actionLoading === "block"}>
+              {result?.user?.is_active ? <><ShieldAlert size={12} /> Block User</> : <><Unlock size={12} /> Unblock User</>}
             </Button>
           </div>
         </div>

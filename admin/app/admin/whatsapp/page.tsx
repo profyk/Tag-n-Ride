@@ -173,6 +173,7 @@ export default function WhatsAppPage() {
   const [statusLoading, setStatusLoading] = useState(true);
   const [apiTemplates, setApiTemplates] = useState<typeof TEMPLATES | null>(null);
   const [removingOptout, setRemovingOptout] = useState<string | null>(null);
+  const [resubscribeConfirm, setResubscribeConfirm] = useState<string | null>(null);
 
   // Send form
   const [recipientType, setRecipientType] = useState<"phone" | "audience">("phone");
@@ -289,8 +290,11 @@ export default function WhatsAppPage() {
     toast.success("Copied to clipboard");
   };
 
-  const handleRemoveOptout = async (phone: string) => {
-    if (!confirm(`Re-subscribe ${phone}? They will start receiving messages again.`)) return;
+  const handleRemoveOptout = (phone: string) => { setResubscribeConfirm(phone); };
+  const doRemoveOptout = async () => {
+    if (!resubscribeConfirm) return;
+    const phone = resubscribeConfirm;
+    setResubscribeConfirm(null);
     setRemovingOptout(phone);
     try {
       const res = await fetch(`${BASE}/api/admin/whatsapp/optouts/${encodeURIComponent(phone)}`, {
@@ -936,6 +940,23 @@ export default function WhatsAppPage() {
         })()}
 
       </div>
+
+      {/* Re-subscribe Confirmation Modal */}
+      <Modal open={!!resubscribeConfirm} onClose={() => setResubscribeConfirm(null)} title="Re-subscribe Contact">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            Re-subscribe <strong className="text-cyan font-mono">{resubscribeConfirm}</strong> to WhatsApp notifications?
+            They will start receiving messages again.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setResubscribeConfirm(null)}>Cancel</Button>
+            <Button onClick={doRemoveOptout}>
+              <UserCheck size={13} /> Re-subscribe
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
     </AdminShell>
   );
 }

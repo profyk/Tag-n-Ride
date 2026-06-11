@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Card, Input, Select } from "@/components/ui";
+import { Table, Tr, Td, Badge, Button, Spinner, Card, Input, Select, Modal } from "@/components/ui";
 import { api, Withdrawal, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { CheckCircle, XCircle, Snowflake, Zap, RefreshCw, AlertTriangle, Search, X, Download, Settings, Save, ShieldCheck, Fuel } from "lucide-react";
@@ -158,6 +158,10 @@ export default function WithdrawalsPage() {
   const [payoutTo, setPayoutTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [approveConfirm, setApproveConfirm] = useState<Withdrawal | null>(null);
+  const [rejectConfirm, setRejectConfirm] = useState<Withdrawal | null>(null);
+  const [retryConfirm, setRetryConfirm] = useState<string | null>(null);
+  const [bulkApproveModal, setBulkApproveModal] = useState(false);
   const superAdmin = isSuperAdmin();
   const canApprove = hasPermission("approve_withdrawals");
   const canLarge = hasPermission("large_withdrawals");
@@ -177,21 +181,20 @@ export default function WithdrawalsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const handleApprove = async (w: Withdrawal) => {
+  const handleApprove = (w: Withdrawal) => {
     if (w.amount > 10000 && !canLarge) {
       toast.error("Withdrawals over R10,000 require Finance/CFO/CEO approval");
       return;
     }
+    setApproveConfirm(w);
+  };
+
+  const doApprove = async () => {
+    if (!approveConfirm) return;
+    const w = approveConfirm;
+    setApproveConfirm(null);
     const PAYOUT_FEE = 3.50;
     const net = w.amount - PAYOUT_FEE;
-    if (!confirm(
-      `Approve and instantly pay ${w.user_name}?\n\n` +
-      `Requested: ${formatZAR(w.amount)}\n` +
-      `Payout fee: R${PAYOUT_FEE.toFixed(2)}\n` +
-      `Driver receives: ${formatZAR(net)}\n\n` +
-      `Money will be sent instantly to ${w.bank_name} ${w.account_number}`
-    )) return;
-
     setProcessing(w.id);
     try {
       const res = await fetch(`${BASE}/api/admin/withdraw/${w.id}/approve/v2`, {
@@ -207,20 +210,24 @@ export default function WithdrawalsPage() {
     finally { setProcessing(null); }
   };
 
-  const handleReject = async (w: Withdrawal) => {
-    if (!confirm(`Reject withdrawal of ${formatZAR(w.amount)}? Amount will be refunded to wallet.`)) return;
+  const handleReject = (w: Withdrawal) => { setRejectConfirm(w); };
+  const doReject = async () => {
+    if (!rejectConfirm) return;
+    const w = rejectConfirm; setRejectConfirm(null);
     try {
       await api.rejectWithdrawal(w.id);
-      toast.success("Withdrawal rejected and refunded");
+      toast.success("Withdrawal rejected and refunded to wallet");
       load();
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleRetry = async (withdrawalId: string) => {
-    if (!confirm("Retry the payout for this withdrawal?")) return;
-    setProcessing(withdrawalId);
+  const handleRetry = (withdrawalId: string) => { setRetryConfirm(withdrawalId); };
+  const doRetry = async () => {
+    if (!retryConfirm) return;
+    const wId = retryConfirm; setRetryConfirm(null);
+    setProcessing(wId);
     try {
-      const res = await fetch(`${BASE}/api/admin/withdraw/${withdrawalId}/retry-payout`, {
+      const res = await fetch(`${BASE}/api/admin/withdraw/${wId}/retry-payout`, {
         method: "POST", headers: authHeaders(),
       });
       const data = await res.json();
@@ -231,10 +238,15 @@ export default function WithdrawalsPage() {
     finally { setProcessing(null); }
   };
 
-  const handleBulkApprove = async () => {
+  const openBulkApprove = () => {
     const pending = filteredAndSorted.filter(w => selected.has(w.id) && w.status === "pending");
     if (!pending.length) { toast.error("No pending withdrawals selected"); return; }
-    if (!confirm(`Approve ${pending.length} withdrawal${pending.length > 1 ? "s" : ""} totalling ${formatZAR(pending.reduce((s, w) => s + w.amount, 0))}?\n\nMoney will be sent instantly via Stitch.`)) return;
+    setBulkApproveModal(true);
+  };
+
+  const doBulkApprove = async () => {
+    const pending = filteredAndSorted.filter(w => selected.has(w.id) && w.status === "pending");
+    setBulkApproveModal(false);
     setBulkApproving(true);
     let done = 0;
     const failed: { name: string; reason: string }[] = [];
@@ -257,8 +269,8 @@ export default function WithdrawalsPage() {
     setSelected(new Set());
     if (done > 0) toast.success(`${done}/${pending.length} approved ⚡`);
     if (failed.length > 0) {
-      const names = failed.slice(0, 3).map(f => `${f.name} (${f.reason})`).join("\n");
-      toast.error(`${failed.length} failed:\n${names}${failed.length > 3 ? `\n+${failed.length - 3} more` : ""}`, { duration: 10000 });
+      const names = failed.slice(0, 3).map(f => `${f.name} (${f.reason})`).join(", ");
+      toast.error(`${failed.length} failed: ${names}${failed.length > 3 ? ` +${failed.length - 3} more` : ""}`, { duration: 10000 });
     }
     load();
   };
@@ -413,7 +425,7 @@ export default function WithdrawalsPage() {
                   {canApprove && filter === "pending" && filteredAndSorted.length > 0 && (
                     <Button
                       variant="secondary"
-                      onClick={handleBulkApprove}
+                      onClick={openBulkApprove}
                       loading={bulkApproving}
                       disabled={selectedPending.length === 0}>
                       <Zap size={13} className="text-cyan" />
@@ -578,6 +590,106 @@ export default function WithdrawalsPage() {
 
         {activeTab === "settings" && <PayoutSettingsPanel />}
       </div>
+
+      {/* Approve Confirmation Modal */}
+      <Modal open={!!approveConfirm} onClose={() => setApproveConfirm(null)} title="Approve Payout">
+        {approveConfirm && (() => {
+          const PAYOUT_FEE = 3.50;
+          const net = approveConfirm.amount - PAYOUT_FEE;
+          return (
+            <div className="space-y-4">
+              <div className="bg-bg border border-border rounded-xl divide-y divide-border">
+                <div className="flex justify-between px-4 py-2.5">
+                  <span className="text-textMuted text-sm">Driver</span>
+                  <span className="text-text font-semibold">{approveConfirm.user_name}</span>
+                </div>
+                <div className="flex justify-between px-4 py-2.5">
+                  <span className="text-textMuted text-sm">Requested</span>
+                  <span className="text-text font-bold">{formatZAR(approveConfirm.amount)}</span>
+                </div>
+                <div className="flex justify-between px-4 py-2.5">
+                  <span className="text-textMuted text-sm">Payout fee</span>
+                  <span className="text-red font-semibold">- R{PAYOUT_FEE.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between px-4 py-2.5">
+                  <span className="text-textMuted text-sm">Driver receives</span>
+                  <span className="text-green font-extrabold text-lg">{formatZAR(net)}</span>
+                </div>
+                <div className="flex justify-between px-4 py-2.5">
+                  <span className="text-textMuted text-sm">Bank</span>
+                  <span className="text-textMuted text-xs font-mono">{approveConfirm.bank_name} · {approveConfirm.account_number}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 p-3 bg-cyan/5 border border-cyan/20 rounded-xl">
+                <Zap size={13} className="text-cyan flex-shrink-0" />
+                <p className="text-cyan text-xs font-medium">Money will be sent instantly via Stitch</p>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <Button variant="secondary" onClick={() => setApproveConfirm(null)}>Cancel</Button>
+                <Button onClick={doApprove} loading={!!processing}>
+                  <Zap size={13} /> Pay {formatZAR(net)}
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* Reject Confirmation Modal */}
+      <Modal open={!!rejectConfirm} onClose={() => setRejectConfirm(null)} title="Reject Withdrawal">
+        {rejectConfirm && (
+          <div className="space-y-4">
+            <p className="text-textMuted text-sm">
+              Reject withdrawal of{" "}
+              <span className="text-text font-bold">{formatZAR(rejectConfirm.amount)}</span>{" "}
+              for <span className="text-text font-bold">{rejectConfirm.user_name}</span>?
+              The full amount will be refunded to their wallet.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <Button variant="secondary" onClick={() => setRejectConfirm(null)}>Cancel</Button>
+              <Button variant="danger" onClick={doReject}>
+                <XCircle size={13} /> Reject & Refund
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Retry Confirmation Modal */}
+      <Modal open={!!retryConfirm} onClose={() => setRetryConfirm(null)} title="Retry Payout">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">Retry the Stitch payout for this withdrawal? The same bank account will be used.</p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setRetryConfirm(null)}>Cancel</Button>
+            <Button onClick={doRetry} loading={!!processing}>
+              <RefreshCw size={13} /> Retry Payout
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Approve Confirmation Modal */}
+      <Modal open={bulkApproveModal} onClose={() => setBulkApproveModal(false)} title="Bulk Approve Payouts">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            Approve{" "}
+            <span className="text-cyan font-bold">{selectedPending.length} withdrawal{selectedPending.length !== 1 ? "s" : ""}</span>{" "}
+            totalling{" "}
+            <span className="text-cyan font-bold">{formatZAR(selectedPending.reduce((s, w) => s + w.amount, 0))}</span>?
+          </p>
+          <div className="flex items-center gap-2 p-3 bg-cyan/5 border border-cyan/20 rounded-xl">
+            <Zap size={13} className="text-cyan flex-shrink-0" />
+            <p className="text-cyan text-xs">Money will be sent instantly via Stitch. R3.50 fee is deducted per payout.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setBulkApproveModal(false)}>Cancel</Button>
+            <Button onClick={doBulkApprove} loading={bulkApproving}>
+              <Zap size={13} /> Approve All {selectedPending.length}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
     </AdminShell>
   );
 }

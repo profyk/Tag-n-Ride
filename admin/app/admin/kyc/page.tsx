@@ -197,6 +197,7 @@ export default function KYCPage() {
   const [approving, setApproving] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [deletingDocs, setDeletingDocs] = useState(false);
+  const [deleteDocsTarget, setDeleteDocsTarget] = useState<KYCDocument | null>(null);
 
   const [imageTab, setImageTab] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -258,8 +259,10 @@ export default function KYCPage() {
     finally { setRejecting(false); }
   };
 
-  const handleDeleteDocuments = async (doc: KYCDocument) => {
-    if (!confirm(`Delete all KYC documents for ${doc.full_name} from Cloudinary storage? This cannot be undone.`)) return;
+  const handleDeleteDocuments = (doc: KYCDocument) => { setDeleteDocsTarget(doc); };
+  const doDeleteDocuments = async () => {
+    if (!deleteDocsTarget) return;
+    const doc = deleteDocsTarget; setDeleteDocsTarget(null);
     setDeletingDocs(true);
     try {
       await api.deleteKycDocuments(doc.user_id);
@@ -639,6 +642,25 @@ export default function KYCPage() {
           onNext={() => setLightboxIndex(i => (i + 1) % lightboxImages.length)}
         />
       )}
+
+      {/* ── Delete KYC Documents Confirmation ── */}
+      <Modal open={!!deleteDocsTarget} onClose={() => setDeleteDocsTarget(null)} title="Delete KYC Documents">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">
+              Permanently delete all KYC documents for <strong>{deleteDocsTarget?.full_name}</strong> from Cloudinary storage?
+              This removes the selfie, licence front, and licence back. This cannot be undone.
+            </p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteDocsTarget(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doDeleteDocuments} loading={deletingDocs}>
+              <Trash2 size={12} /> Delete All Documents
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ── Reject modal ── */}
       <Modal

@@ -120,6 +120,7 @@ function ConfigTab({ isCeoOrSuper }: { isCeoOrSuper: boolean }) {
   const [saving, setSaving] = useState<string | null>(null);
   const [savingAll, setSavingAll] = useState(false);
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
+  const [dangerSaveConfirm, setDangerSaveConfirm] = useState<{ key: string; from: string; to: string } | null>(null);
 
   useEffect(() => {
     fetch(`${BASE}/api/admin/config`, { headers: authHeaders() })
@@ -139,12 +140,15 @@ function ConfigTab({ isCeoOrSuper }: { isCeoOrSuper: boolean }) {
     [edited, config]
   );
 
-  const handleSave = async (key: string) => {
+  const handleSave = (key: string) => {
     if (!canEdit(key)) { toast.error("Only CEO or Superadmin can edit this setting"); return; }
     if (DANGEROUS_KEYS.includes(key)) {
-      const label = key.replace(/_/g, " ");
-      if (!window.confirm(`You are about to change "${label}" from "${config[key]}" to "${edited[key]}". This takes effect immediately. Proceed?`)) return;
+      setDangerSaveConfirm({ key, from: config[key], to: edited[key] });
+      return;
     }
+    doSave(key);
+  };
+  const doSave = async (key: string) => {
     setSaving(key);
     try {
       await fetch(`${BASE}/api/admin/config/${key}`, {
@@ -157,6 +161,12 @@ function ConfigTab({ isCeoOrSuper }: { isCeoOrSuper: boolean }) {
       toast.success(`${key.replace(/_/g, " ")} updated`);
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(null); }
+  };
+  const confirmDangerSave = async () => {
+    if (!dangerSaveConfirm) return;
+    const { key } = dangerSaveConfirm;
+    setDangerSaveConfirm(null);
+    await doSave(key);
   };
 
   const handleSaveAll = async () => {
@@ -277,6 +287,28 @@ function ConfigTab({ isCeoOrSuper }: { isCeoOrSuper: boolean }) {
           </div>
         </Card>
       ))}
+
+      {/* Dangerous Setting Save Confirmation Modal */}
+      <Modal open={!!dangerSaveConfirm} onClose={() => setDangerSaveConfirm(null)} title="Confirm Setting Change">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <div className="text-sm space-y-1">
+              <p className="text-red font-semibold">Dangerous setting change</p>
+              <p className="text-textMuted">
+                Changing <strong className="text-text font-mono">{dangerSaveConfirm?.key.replace(/_/g, " ")}</strong> from{" "}
+                <code className="text-yellow bg-bg3 px-1 rounded">{dangerSaveConfirm?.from}</code> to{" "}
+                <code className="text-cyan bg-bg3 px-1 rounded">{dangerSaveConfirm?.to}</code>
+              </p>
+              <p className="text-textMuted text-xs">This takes effect immediately for all active users.</p>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDangerSaveConfirm(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmDangerSave}><Save size={12} /> Apply Change</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -445,6 +477,8 @@ function SessionsTab() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokeConfirm, setRevokeConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [revokeAllConfirm, setRevokeAllConfirm] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -453,8 +487,11 @@ function SessionsTab() {
 
   useEffect(() => { load(); }, []);
 
-  const handleRevoke = async (id: string, name: string) => {
-    if (!confirm(`Revoke session for ${name}?`)) return;
+  const handleRevoke = (id: string, name: string) => { setRevokeConfirm({ id, name }); };
+  const doRevoke = async () => {
+    if (!revokeConfirm) return;
+    const { id } = revokeConfirm;
+    setRevokeConfirm(null);
     setRevoking(id);
     try {
       await api.revokeSession(id);
@@ -464,10 +501,14 @@ function SessionsTab() {
     finally { setRevoking(null); }
   };
 
-  const handleRevokeAll = async () => {
+  const handleRevokeAll = () => {
     const others = sessions.slice(1);
     if (!others.length) { toast.error("No other sessions to revoke"); return; }
-    if (!confirm(`Revoke all ${others.length} other active sessions?`)) return;
+    setRevokeAllConfirm(true);
+  };
+  const doRevokeAll = async () => {
+    const others = sessions.slice(1);
+    setRevokeAllConfirm(false);
     try {
       await Promise.all(others.map(s => api.revokeSession(s.id)));
       toast.success(`${others.length} sessions revoked`);
@@ -581,6 +622,31 @@ function SessionsTab() {
           </div>
         </Card>
       )}
+
+      {/* Revoke Session Confirmation Modal */}
+      <Modal open={!!revokeConfirm} onClose={() => setRevokeConfirm(null)} title="Revoke Session">
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">Revoke the active session for <strong className="text-text">{revokeConfirm?.name}</strong>? They will be logged out immediately.</p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setRevokeConfirm(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doRevoke}><LogOut size={12} /> Revoke Session</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Revoke All Sessions Confirmation Modal */}
+      <Modal open={revokeAllConfirm} onClose={() => setRevokeAllConfirm(false)} title="Revoke All Other Sessions">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">Revoke all <strong>{sessions.slice(1).length}</strong> other active sessions? All other logged-in admins will be forced to re-authenticate.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setRevokeAllConfirm(false)}>Cancel</Button>
+            <Button variant="danger" onClick={doRevokeAll}><LogOut size={12} /> Revoke All Others</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

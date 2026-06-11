@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select, Card } from "@/components/ui";
 import { api, AdminUser, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
-import { PlusCircle, Trash2, ShieldOff, ShieldCheck, LogOut, Edit2, Key, Clock, Activity } from "lucide-react";
+import { PlusCircle, Trash2, ShieldOff, ShieldCheck, LogOut, Edit2, Key, Clock, Activity, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
@@ -41,6 +41,9 @@ export default function AdminsPage() {
   const [editEmail, setEditEmail] = useState("");
   const [newPw, setNewPw] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [suspendConfirm, setSuspendConfirm] = useState<AdminUser | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<AdminUser | null>(null);
+  const [forceLogoutConfirm, setForceLogoutConfirm] = useState<AdminUser | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -81,8 +84,10 @@ export default function AdminsPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleSuspend = async (a: AdminUser) => {
-    if (!confirm(`${a.is_active ? "Suspend" : "Reactivate"} ${a.full_name}?`)) return;
+  const handleSuspend = (a: AdminUser) => { setSuspendConfirm(a); };
+  const doSuspend = async () => {
+    if (!suspendConfirm) return;
+    const a = suspendConfirm; setSuspendConfirm(null);
     try {
       if (a.is_active) await api.suspendAdmin(a.id);
       else await api.reactivateAdmin(a.id);
@@ -91,14 +96,18 @@ export default function AdminsPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleDelete = async (a: AdminUser) => {
-    if (!confirm(`Delete ${a.full_name}? This cannot be undone.`)) return;
+  const handleDelete = (a: AdminUser) => { setDeleteConfirm(a); };
+  const doDelete = async () => {
+    if (!deleteConfirm) return;
+    const a = deleteConfirm; setDeleteConfirm(null);
     try { await api.deleteAdmin(a.id); toast.success("Admin deleted"); load(); }
     catch (e: any) { toast.error(e.message); }
   };
 
-  const handleForceLogout = async (a: AdminUser) => {
-    if (!confirm(`Force logout ${a.full_name}? All their sessions will be revoked.`)) return;
+  const handleForceLogout = (a: AdminUser) => { setForceLogoutConfirm(a); };
+  const doForceLogout = async () => {
+    if (!forceLogoutConfirm) return;
+    const a = forceLogoutConfirm; setForceLogoutConfirm(null);
     try { await api.forceLogout(a.id); toast.success(`${a.full_name} logged out`); }
     catch (e: any) { toast.error(e.message); }
   };
@@ -329,6 +338,49 @@ export default function AdminsPage() {
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="secondary" onClick={() => setEditModal(null)}>Cancel</Button>
             <Button onClick={handleEdit}>Save Changes</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Suspend / Reactivate Modal */}
+      <Modal open={!!suspendConfirm} onClose={() => setSuspendConfirm(null)}
+        title={suspendConfirm?.is_active ? `Suspend ${suspendConfirm?.full_name}` : `Reactivate ${suspendConfirm?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">
+            {suspendConfirm?.is_active
+              ? `Suspending this account will immediately revoke admin access for ${suspendConfirm?.full_name}.`
+              : `Reactivating ${suspendConfirm?.full_name} will restore their admin access.`}
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setSuspendConfirm(null)}>Cancel</Button>
+            <Button variant={suspendConfirm?.is_active ? "danger" : "secondary"} onClick={doSuspend}>
+              {suspendConfirm?.is_active ? <><ShieldOff size={12} /> Suspend Admin</> : <><ShieldCheck size={12} /> Reactivate Admin</>}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Admin Modal */}
+      <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title={`Delete ${deleteConfirm?.full_name}`}>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">Permanently delete <strong>{deleteConfirm?.full_name}</strong>? Their admin account will be removed. Audit log entries are preserved. This cannot be undone.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doDelete}><Trash2 size={12} /> Delete Admin</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Force Logout Modal */}
+      <Modal open={!!forceLogoutConfirm} onClose={() => setForceLogoutConfirm(null)} title={`Force Logout ${forceLogoutConfirm?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-textMuted text-sm">All active sessions for <strong className="text-text">{forceLogoutConfirm?.full_name}</strong> will be immediately revoked. They will need to log in again.</p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setForceLogoutConfirm(null)}>Cancel</Button>
+            <Button variant="danger" onClick={doForceLogout}><LogOut size={12} /> Force Logout</Button>
           </div>
         </div>
       </Modal>

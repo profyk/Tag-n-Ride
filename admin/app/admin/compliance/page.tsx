@@ -32,6 +32,7 @@ export default function CompliancePage() {
   const [phone, setPhone] = useState("");
   const [reason, setReason] = useState("");
   const [blacklistSearch, setBlacklistSearch] = useState("");
+  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const dangerPin = useDangerPin();
 
   const load = useCallback(async () => {
@@ -71,8 +72,11 @@ export default function CompliancePage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleRemove = async (id: string) => {
-    if (!confirm("Remove from blacklist? This requires your danger PIN.")) return;
+  const handleRemove = (id: string) => { setRemoveConfirm(id); };
+  const doRemove = async () => {
+    if (!removeConfirm) return;
+    const id = removeConfirm;
+    setRemoveConfirm(null);
     const token = await dangerPin.request();
     if (!token) return;
     try {
@@ -302,6 +306,20 @@ export default function CompliancePage() {
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" onClick={() => setAddModal(false)}>Cancel</Button>
             <Button variant="danger" onClick={handleAddBlacklist}>Add to Blacklist</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Remove from Blacklist Confirmation Modal */}
+      <Modal open={!!removeConfirm} onClose={() => setRemoveConfirm(null)} title="Remove from Blacklist">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-yellow/5 border border-yellow/20 rounded-xl">
+            <AlertTriangle size={15} className="text-yellow flex-shrink-0 mt-0.5" />
+            <p className="text-yellow text-sm">Remove this entry from the blacklist? The user will regain access to the platform. PIN confirmation required.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setRemoveConfirm(null)}>Cancel</Button>
+            <Button onClick={doRemove}><ShieldOff size={12} /> Remove from Blacklist</Button>
           </div>
         </div>
       </Modal>

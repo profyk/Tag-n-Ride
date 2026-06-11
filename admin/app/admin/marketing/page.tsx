@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   Target, Tag, Users2, Send, Megaphone, Star, TrendingUp,
-  Gift, MessageCircle, Bell, Plus, Zap, Award,
+  Gift, MessageCircle, Bell, Plus, Zap, Award, Trash2, AlertTriangle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
@@ -36,6 +36,7 @@ export default function MarketingPage() {
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModal, setCreateModal] = useState(false);
+  const [deletePromoId, setDeletePromoId] = useState<string | null>(null);
 
   // Promo form
   const [promoCode, setPromoCode] = useState("");
@@ -91,11 +92,13 @@ export default function MarketingPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const handleDeletePromo = async (id: string) => {
-    if (!confirm("Delete this promotion?")) return;
+  const handleDeletePromo = (id: string) => { setDeletePromoId(id); };
+  const confirmDeletePromo = async () => {
+    if (!deletePromoId) return;
+    const id = deletePromoId; setDeletePromoId(null);
     try {
       await api.deletePromotion(id);
-      toast.success("Deleted");
+      toast.success("Promotion deleted");
       load();
     } catch (e: any) { toast.error(e.message); }
   };
@@ -301,6 +304,20 @@ export default function MarketingPage() {
             <Button onClick={handleCreatePromo} loading={saving}>
               <Tag size={13} /> Create Promotion
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Promotion Confirmation Modal */}
+      <Modal open={!!deletePromoId} onClose={() => setDeletePromoId(null)} title="Delete Promotion">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">
+            <AlertTriangle size={15} className="text-red flex-shrink-0 mt-0.5" />
+            <p className="text-red text-sm">This promotion will be permanently deleted. Users with the promo code will no longer be able to redeem it.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setDeletePromoId(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmDeletePromo}><Trash2 size={12} /> Delete Promotion</Button>
           </div>
         </div>
       </Modal>
