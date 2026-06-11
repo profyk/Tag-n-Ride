@@ -236,7 +236,7 @@ export default function OwnerRegister() {
       if (firstDriverCode.trim()) {
         try { await api.ownerLinkDriver(firstDriverCode.trim().toUpperCase()); } catch {}
       }
-      router.replace("/owner");
+      router.replace("/owner/dashboard");
     } catch (e: any) {
       Alert.alert("Registration Failed", e?.message || "Please try again.");
     } finally {

@@ -36,7 +36,7 @@ export default function OwnerLogin() {
     setLoading(true);
     try {
       await signInOwner(email.trim().toLowerCase(), password);
-      router.replace("/owner");
+      router.replace("/owner/dashboard");
     } catch (e: any) {
       setErr(e?.message || "Login failed. Check your email and password.");
     } finally {

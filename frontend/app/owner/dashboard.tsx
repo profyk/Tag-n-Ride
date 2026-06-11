@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable,
@@ -90,10 +90,6 @@ export default function OwnerDashboard() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  useEffect(() => {
-    if (state.status === "guest") router.replace("/(auth)/welcome");
-  }, [state.status]);
 
   if (state.status !== "authed") {
     return (
@@ -196,7 +192,7 @@ export default function OwnerDashboard() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
               { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: signOut },
+              { text: "Sign out", style: "destructive", onPress: () => { signOut(); router.replace("/(auth)/welcome"); } },
             ])} style={s.avatar}>
               <Ionicons name="business-outline" size={20} color={colors.cyan} />
             </TouchableOpacity>

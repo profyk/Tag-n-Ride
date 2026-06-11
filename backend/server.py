@@ -867,12 +867,17 @@ async def register(body: RegisterIn):
         user_id = str(uuid.uuid4())
         email_stored = body.email.strip().lower() if body.email else None
         pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode() if body.password else None
+        # Owners identify by email, not phone. Use a unique placeholder so the
+        # insert works regardless of whether the DROP NOT NULL migration has run.
+        phone_stored = body.phone_number if body.phone_number else (
+            f"owner_{user_id[:12]}" if body.role == "owner" else None
+        )
 
         async with conn.transaction():
             await conn.execute(
                 "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash,password_hash) "
                 "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-                user_id, body.phone_number, body.full_name, body.surname,
+                user_id, phone_stored, body.full_name, body.surname,
                 body.id_number, email_stored, body.role, hash_pin(body.pin), pw_hash
             )
             await conn.execute("INSERT INTO wallets (id,user_id) VALUES ($1,$2)", str(uuid.uuid4()), user_id)
@@ -3838,7 +3843,9 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS subscription_price_per_taxi NUMERIC(14,2) DEFAULT 10.00")
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS subscription_free_taxis INTEGER DEFAULT 1")
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS owner_statement_price NUMERIC(14,2) DEFAULT 10.00")
-                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS passenger_statement_price NUMERIC(14,2) DEFAULT 5.00")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS passenger_statement_price NUMERIC(14,2) DEFAULT 0.00")
+                # Make passenger statements free if still at the original R5 default
+                await conn.execute("UPDATE payout_settings SET passenger_statement_price=0.00 WHERE id='default' AND passenger_statement_price=5.00")
                 # ── Owner subscription tracking ──
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS owner_subscriptions (
@@ -11410,14 +11417,17 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
         }
         stmt_id = str(uuid.uuid4())
         ref = f"PSTMT-{stmt_id[:8].upper()}"
-        txn_id = str(uuid.uuid4())
         import json as _json
         async with conn.transaction():
-            await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", price, user["id"])
-            await conn.execute("""
-                INSERT INTO transactions (id, reference, type, status, amount, currency, sender_id, note)
-                VALUES ($1,$2,'statement_fee','completed',$3,'ZAR',$4,'Passenger expense statement')
-            """, txn_id, f"STMTFEE-{ref}", price, user["id"])
+            if price > 0:
+                txn_id = str(uuid.uuid4())
+                await conn.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", price, user["id"])
+                await conn.execute("""
+                    INSERT INTO transactions (id, reference, type, status, amount, currency, sender_id, note)
+                    VALUES ($1,$2,'statement_fee','completed',$3,'ZAR',$4,'Passenger expense statement')
+                """, txn_id, f"STMTFEE-{ref}", price, user["id"])
+            else:
+                txn_id = None
             await conn.execute("""
                 INSERT INTO statement_requests
                     (id, reference, user_id, role, period_start, period_end,
