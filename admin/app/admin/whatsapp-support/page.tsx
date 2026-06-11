@@ -130,6 +130,17 @@ export default function WhatsAppSupportPage() {
   useEffect(() => {
     if (!selectedId) return;
     loadMessages(selectedId);
+    // Load persisted internal notes
+    fetch(`${BASE}/api/admin/whatsapp/support/conversations/${selectedId}/notes`, { headers: authHeaders() })
+      .then(r => r.json())
+      .then(d => {
+        const items: any[] = Array.isArray(d) ? d : (d.notes || []);
+        setInternalNotes(prev => ({
+          ...prev,
+          [selectedId]: items.map(n => ({ text: n.note || n.text || "", by: n.admin_name || n.by || "Admin", at: n.created_at || n.at || new Date().toISOString() })),
+        }));
+      })
+      .catch(() => {});
     // Mark as read when opened
     fetch(`${BASE}/api/admin/whatsapp/support/conversations/${selectedId}/read`, {
       method: "POST", headers: authHeaders(),
@@ -198,17 +209,26 @@ export default function WhatsAppSupportPage() {
     finally { setUpdatingStatus(false); }
   };
 
-  const handleSaveNote = () => {
+  const handleSaveNote = async () => {
     if (!selectedId || !internalNote.trim()) return;
     setSavingNote(true);
-    const note = { text: internalNote.trim(), by: "Admin", at: new Date().toISOString() };
-    setInternalNotes(prev => ({
-      ...prev,
-      [selectedId]: [...(prev[selectedId] ?? []), note],
-    }));
-    setInternalNote("");
-    setSavingNote(false);
-    toast.success("Internal note saved");
+    const noteText = internalNote.trim();
+    try {
+      const r = await fetch(`${BASE}/api/admin/whatsapp/support/conversations/${selectedId}/notes`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ note: noteText }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "Failed to save");
+      const note = { text: noteText, by: "Admin", at: new Date().toISOString() };
+      setInternalNotes(prev => ({
+        ...prev,
+        [selectedId]: [...(prev[selectedId] ?? []), note],
+      }));
+      setInternalNote("");
+      toast.success("Internal note saved");
+    } catch (e: any) { toast.error(e.message || "Could not save note"); }
+    finally { setSavingNote(false); }
   };
 
   const handleBlockContact = async (phone: string) => {

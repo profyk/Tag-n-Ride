@@ -36,7 +36,6 @@ export default function MarketingPage() {
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModal, setCreateModal] = useState(false);
-  const [broadcastModal, setBroadcastModal] = useState(false);
 
   // Promo form
   const [promoCode, setPromoCode] = useState("");
@@ -46,13 +45,6 @@ export default function MarketingPage() {
   const [promoExpiry, setPromoExpiry] = useState("");
   const [promoRole, setPromoRole] = useState("passenger");
   const [saving, setSaving] = useState(false);
-
-  // Broadcast form
-  const [bTitle, setBTitle] = useState("");
-  const [bMessage, setBMessage] = useState("");
-  const [bTarget, setBTarget] = useState("all");
-  const [bRole, setBRole] = useState("");
-  const [bSending, setBSending] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -89,19 +81,6 @@ export default function MarketingPage() {
       load();
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(false); }
-  };
-
-  const handleSendBroadcast = async () => {
-    if (!bTitle.trim() || !bMessage.trim()) { toast.error("Title and message required"); return; }
-    setBSending(true);
-    try {
-      await api.sendBroadcast({ title: bTitle.trim(), message: bMessage.trim(), target: bTarget, target_role: bRole || undefined });
-      toast.success("Broadcast sent");
-      setBroadcastModal(false);
-      setBTitle(""); setBMessage(""); setBTarget("all"); setBRole("");
-      load();
-    } catch (e: any) { toast.error(e.message); }
-    finally { setBSending(false); }
   };
 
   const handleTogglePromo = async (promo: any) => {
@@ -166,7 +145,7 @@ export default function MarketingPage() {
           <Button onClick={() => setCreateModal(true)}>
             <Plus size={13} /> New Promotion
           </Button>
-          <Button variant="secondary" onClick={() => setBroadcastModal(true)}>
+          <Button variant="secondary" onClick={() => window.location.href = "/admin/notifications"}>
             <Megaphone size={13} /> Send Broadcast
           </Button>
           <Button variant="secondary" onClick={() => window.location.href = "/admin/referrals"}>
@@ -259,7 +238,7 @@ export default function MarketingPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest">Recent Broadcasts</h2>
-            <Button onClick={() => setBroadcastModal(true)} variant="secondary"><Send size={13} /> Send</Button>
+            <Button onClick={() => window.location.href = "/admin/notifications"} variant="secondary"><Send size={13} /> Manage Broadcasts</Button>
           </div>
           <Table headers={["Title", "Message", "Audience", "Sent By", "Date"]} empty={!broadcasts.length}>
             {broadcasts.slice(0, 10).map((b: any) => (
@@ -326,46 +305,6 @@ export default function MarketingPage() {
         </div>
       </Modal>
 
-      {/* Send Broadcast Modal */}
-      <Modal open={broadcastModal} onClose={() => setBroadcastModal(false)} title="Send Broadcast">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Title</label>
-            <Input placeholder="Announcement title..." value={bTitle} onChange={e => setBTitle(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Message</label>
-            <textarea value={bMessage} onChange={e => setBMessage(e.target.value)} placeholder="Message body..."
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm placeholder:text-textDim focus:outline-none focus:border-cyan resize-none h-24" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Audience</label>
-              <Select value={bTarget} onChange={e => setBTarget(e.target.value)} className="w-full">
-                <option value="all">All Users</option>
-                <option value="role">By Role</option>
-              </Select>
-            </div>
-            {bTarget === "role" && (
-              <div>
-                <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Role</label>
-                <Select value={bRole} onChange={e => setBRole(e.target.value)} className="w-full">
-                  <option value="">Select...</option>
-                  <option value="passenger">Passengers</option>
-                  <option value="driver">Drivers</option>
-                  <option value="owner">Owners</option>
-                </Select>
-              </div>
-            )}
-          </div>
-          <div className="flex gap-3 justify-end pt-2">
-            <Button variant="secondary" onClick={() => setBroadcastModal(false)}>Cancel</Button>
-            <Button onClick={handleSendBroadcast} loading={bSending}>
-              <Send size={13} /> Send
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </AdminShell>
   );
 }

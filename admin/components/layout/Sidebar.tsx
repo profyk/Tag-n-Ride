@@ -105,6 +105,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Financial Reports",     href: "/admin/reports",        icon: BarChart3,    permission: "view_analytics" },
       { label: "Subscriptions",         href: "/admin/subscriptions",  icon: Tag,          permission: "view_analytics" },
       { label: "Fee Simulator",         href: "/admin/fee-simulator",  icon: Calculator,   permission: "view_analytics" },
+      { label: "Fee & Payout Config",   href: "/admin/fee-config",     icon: Settings,     permission: "edit_fees" },
+      { label: "Pricing Rules",         href: "/admin/pricing",        icon: DollarSign,   permission: "edit_fees" },
       { label: "Export Center",         href: "/admin/export-center",  icon: Download,     permission: "export_data" },
       { label: "Document Pricing",      href: "/admin/document-pricing", icon: Tag,        permission: "edit_fees" },
     ],
@@ -159,9 +161,8 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Megaphone,
     color: "text-orange-400",
     items: [
-      { label: "Broadcast",     href: "/admin/broadcast",     icon: Megaphone,     permission: "broadcast_messages" },
+      { label: "Announcements",  href: "/admin/notifications", icon: Megaphone,     permission: "broadcast_messages" },
       { label: "WhatsApp",      href: "/admin/whatsapp",      icon: MessageCircle, permission: "broadcast_messages" },
-      { label: "Notifications", href: "/admin/notifications", icon: Bell,          permission: "manage_users" },
       { label: "Send Notice",   href: "/admin/notices",       icon: Mail,          permission: "manage_users" },
       { label: "Promotions",    href: "/admin/promotions",    icon: Tag,           permission: "manage_promotions" },
       { label: "Marketing",     href: "/admin/marketing",     icon: Target,        permission: "manage_promotions" },
@@ -178,6 +179,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Support Lookup",    href: "/admin/support",          icon: HelpCircle,    permission: "reset_pin" },
       { label: "WhatsApp Support",  href: "/admin/whatsapp-support", icon: MessageCircle, permission: "reset_pin" },
+      { label: "Support Tickets",   href: "/admin/tickets",          icon: ClipboardList, permission: "reset_pin" },
     ],
   },
   // ── System ───────────────────────────────────────────────────
@@ -187,8 +189,9 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Settings,
     color: "text-textMuted",
     items: [
-      { label: "Coverage Zones", href: "/admin/geography", icon: Globe,    permission: "view_analytics" },
-      { label: "System Health",  href: "/admin/health",    icon: Activity, permission: "view_audit" },
+      { label: "Daily Operations", href: "/admin/daily-ops", icon: Zap,      permission: "view_analytics" },
+      { label: "Coverage Zones",  href: "/admin/geography", icon: Globe,    permission: "view_analytics" },
+      { label: "System Health",   href: "/admin/health",    icon: Activity, permission: "view_audit" },
     ],
   },
 ];

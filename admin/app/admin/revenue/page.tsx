@@ -148,7 +148,7 @@ export default function RevenuePage() {
                   <h2 className="text-text font-bold">Live Fee Schedule</h2>
                   <span className="text-[10px] text-textDim bg-bg border border-border px-2 py-0.5 rounded-full">from admin config</span>
                 </div>
-                <a href="/admin/settings" className="text-xs text-cyan hover:underline flex items-center gap-1">
+                <a href="/admin/fee-config" className="text-xs text-cyan hover:underline flex items-center gap-1">
                   <RefreshCw size={11} /> Edit fees
                 </a>
               </div>

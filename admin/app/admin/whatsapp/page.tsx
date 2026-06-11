@@ -94,6 +94,75 @@ function StatusChip({ status }: { status: MsgStatus }) {
   );
 }
 
+function TemplateRequestForm() {
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("UTILITY");
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!name.trim() || !body.trim()) { toast.error("Template name and body required"); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/whatsapp/templates/request`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: name.trim(), category, body: body.trim() }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || "Request failed");
+      }
+      toast.success("Template request submitted — pending Meta approval");
+      setName(""); setBody(""); setCategory("UTILITY");
+    } catch (e: any) { toast.error(e.message || "Could not submit request"); }
+    finally { setSubmitting(false); }
+  };
+
+  return (
+    <Card>
+      <div className="flex items-start gap-3 mb-4">
+        <FileText size={16} className="text-cyan flex-shrink-0 mt-0.5" />
+        <div>
+          <h3 className="text-text font-bold text-sm">Request New Template</h3>
+          <p className="text-textDim text-xs mt-0.5">Submit a new template for Meta approval. Approval typically takes 24–48 hours.</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Template Name *</label>
+          <Input placeholder="e.g. trip_completed_receipt" value={name} onChange={e => setName(e.target.value)} />
+          <p className="text-textDim text-[10px] mt-1">Lowercase, underscores only, max 512 chars</p>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">Category *</label>
+          <Select value={category} onChange={e => setCategory(e.target.value)} className="w-full">
+            <option value="UTILITY">Utility (account info, alerts)</option>
+            <option value="TRANSACTIONAL">Transactional (payments, receipts)</option>
+            <option value="MARKETING">Marketing (promotions, offers)</option>
+            <option value="AUTHENTICATION">Authentication (OTPs)</option>
+          </Select>
+        </div>
+        <div className="md:col-span-2">
+          <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">
+            Template Body * — use {"{{1}}, {{2}}"} for variables
+            <span className={`ml-2 font-normal normal-case ${body.length > 1024 ? "text-red" : "text-textDim"}`}>{body.length}/1024</span>
+          </label>
+          <textarea value={body} onChange={e => setBody(e.target.value)} rows={4} maxLength={1024}
+            placeholder={"Hi {{1}}, your Tag-n-Ride trip has been completed. Total charged: R{{2}}."}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors resize-none font-mono" />
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-textDim text-xs">Templates are reviewed by Meta and may be rejected if they violate WhatsApp policy.</p>
+        <Button onClick={handleSubmit} loading={submitting} disabled={!name || !body}>
+          <Send size={13} /> Submit for Approval
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export default function WhatsAppPage() {
   const [tab, setTab] = useState<TabId>("send");
   const [apiStatus, setApiStatus] = useState<any>(null);
@@ -166,7 +235,7 @@ export default function WhatsAppPage() {
 
   useEffect(() => { loadStatus(); loadTemplates(); }, []);
   useEffect(() => {
-    if (tab === "history") loadHistory();
+    if (tab === "history" || tab === "analytics") loadHistory();
     if (tab === "optouts") loadOptouts();
   }, [tab]);
 
@@ -689,6 +758,9 @@ export default function WhatsAppPage() {
                 </Card>
               ))}
             </div>
+
+            {/* Request new template */}
+            <TemplateRequestForm />
           </div>
         )}
 
