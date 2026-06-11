@@ -10,12 +10,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { PoweredBy } from "../../src/ui";
 import { useTheme } from "../../src/ThemeContext";
 import { radius } from "../../src/theme";
-import { api, tokenStore } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 
 export default function OwnerLogin() {
   const router = useRouter();
-  const { refresh } = useAuth();
+  const { signInOwner } = useAuth();
   const { colors } = useTheme();
 
   const [email, setEmail] = useState("");
@@ -36,9 +35,7 @@ export default function OwnerLogin() {
     }
     setLoading(true);
     try {
-      const r = await api.ownerLogin({ email: email.trim().toLowerCase(), password });
-      await tokenStore.set(r.token);
-      await refresh();
+      await signInOwner(email.trim().toLowerCase(), password);
       router.replace("/owner");
     } catch (e: any) {
       setErr(e?.message || "Login failed. Check your email and password.");

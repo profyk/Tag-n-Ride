@@ -199,8 +199,10 @@ def generate_qr_code() -> str:
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    phone_number TEXT UNIQUE NOT NULL,
+    phone_number TEXT UNIQUE,
     full_name TEXT NOT NULL,
+    surname TEXT,
+    id_number TEXT,
     role TEXT NOT NULL,
     pin_hash TEXT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
@@ -3227,6 +3229,9 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT")
                 await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+                # Owners identify by email, not phone — drop the NOT NULL constraint so owners
+                # can register without a phone number.
+                await conn.execute("ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by TEXT")

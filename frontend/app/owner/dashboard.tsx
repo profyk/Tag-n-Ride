@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable,
@@ -91,7 +91,17 @@ export default function OwnerDashboard() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  if (state.status !== "authed") return null;
+  useEffect(() => {
+    if (state.status === "guest") router.replace("/(auth)/welcome");
+  }, [state.status]);
+
+  if (state.status !== "authed") {
+    return (
+      <SafeAreaView style={[s.root, { alignItems: "center", justifyContent: "center" }]} edges={["top"]}>
+        <ActivityIndicator color={colors.cyan} size="large" />
+      </SafeAreaView>
+    );
+  }
 
   const handleLinkDriver = async () => {
     if (!driverCode.trim()) return;
