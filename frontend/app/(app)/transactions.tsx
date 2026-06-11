@@ -116,15 +116,17 @@ export default function Transactions() {
   };
 
   const handleClearAll = () => {
+    // Capture IDs now, before the Alert closes over a potentially stale `filtered`
+    const allIds = items.filter(t => !hidden.includes(t.id)).map(t => t.id);
+    if (!allIds.length) return;
     Alert.alert(
       "Clear all transactions?",
-      "All transactions will be removed from this device permanently.",
+      `All ${allIds.length} transaction${allIds.length === 1 ? "" : "s"} will be removed from this device.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete all", style: "destructive",
           onPress: async () => {
-            const allIds = filtered.map(t => t.id);
             await addHidden(allIds);
             setHidden(prev => [...new Set([...prev, ...allIds])]);
             setSelected(null);

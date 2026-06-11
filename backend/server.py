@@ -294,6 +294,7 @@ CREATE TABLE IF NOT EXISTS fleet_owners (
     id TEXT PRIMARY KEY,
     user_id TEXT UNIQUE NOT NULL REFERENCES users(id),
     business_name TEXT,
+    registered_as_driver BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -12157,9 +12158,29 @@ async def payslip_get(payslip_id: str, user: dict = Depends(get_current_user)):
                WHERE p.id=$1 AND p.user_id=$2""",
             payslip_id, user["id"]
         )
-    if not row:
-        raise HTTPException(status_code=404, detail="Payslip not found")
-    return dict(row)
+        if not row:
+            raise HTTPException(status_code=404, detail="Payslip not found")
+        trips = await conn.fetch(
+            """SELECT t.reference, t.amount, t.created_at,
+                      s.full_name as passenger_name
+               FROM transactions t
+               LEFT JOIN users s ON s.id = t.sender_id
+               WHERE t.receiver_id=$1 AND t.type='payment' AND t.status='completed'
+                 AND t.created_at >= $2 AND t.created_at <= $3
+               ORDER BY t.created_at DESC""",
+            user["id"], row["period_start"], row["period_end"]
+        )
+    result = dict(row)
+    result["trips"] = [
+        {
+            "reference": t["reference"],
+            "amount": float(t["amount"]),
+            "passenger": t["passenger_name"] or "Passenger",
+            "date": iso(t["created_at"]),
+        }
+        for t in trips
+    ]
+    return result
 
 
 @api.delete("/driver/payslip/{payslip_id}")

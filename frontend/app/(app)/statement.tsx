@@ -157,6 +157,19 @@ export default function PassengerStatementScreen() {
       setCharged(res.amount_charged ?? 0);
       setGenerated(true);
       setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+      // Auto-open the PDF so the user immediately sees the formatted statement
+      setTimeout(async () => {
+        try {
+          const html = buildPassengerStatementPDF(res.data, res.reference ?? "");
+          const { uri } = await Print.printToFileAsync({ html, base64: false });
+          const safePeriod = `${res.data?.period_start}-${res.data?.period_end}`.replace(/[^a-zA-Z0-9-]/g, "-");
+          await Sharing.shareAsync(uri, {
+            mimeType: "application/pdf",
+            dialogTitle: `TagNRide-Expense-Statement-${safePeriod}.pdf`,
+            UTI: "com.adobe.pdf",
+          });
+        } catch {}
+      }, 400);
     } catch (e: any) {
       const msg: string = e?.message || "Could not generate statement. Please try again.";
       if (msg.toLowerCase().includes("insufficient") || msg.toLowerCase().includes("balance")) {

@@ -238,9 +238,21 @@ export default function OwnerRegister() {
       if (firstDriverCode.trim()) {
         try { await api.ownerLinkDriver(firstDriverCode.trim().toUpperCase()); } catch {}
       }
-      router.replace("/owner/dashboard");
+      router.replace("/owner");
     } catch (e: any) {
-      Alert.alert("Registration Failed", e?.message || "Please try again.");
+      const msg: string = e?.message || "Please try again.";
+      if (msg.toLowerCase().includes("email already")) {
+        Alert.alert(
+          "Email Already Registered",
+          "This email address is already linked to an account. Sign in instead.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Sign In", onPress: () => router.replace("/(auth)/owner-login") },
+          ]
+        );
+      } else {
+        Alert.alert("Registration Failed", msg);
+      }
     } finally {
       setLoading(false);
     }

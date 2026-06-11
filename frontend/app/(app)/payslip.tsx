@@ -44,6 +44,16 @@ function monthStr(year: number, month: number) {
 
 export function buildStatementPDF(p: any): string {
   const showOwner = (p.owner_payouts ?? 0) > 0;
+  const trips: any[] = p.trips ?? [];
+  const tripsHtml = trips.length > 0
+    ? `<div class="section">
+  <div class="section-title">Trip Details (${trips.length})</div>
+  <table style="width:100%;border-collapse:collapse;font-size:11px;">
+    <tr style="background:#e8e8e8;"><th style="padding:6px 8px;text-align:left;">Date</th><th style="padding:6px 8px;text-align:left;">Passenger</th><th style="padding:6px 8px;text-align:left;">Ref</th><th style="padding:6px 8px;text-align:right;">Amount</th></tr>
+    ${trips.map((t: any) => `<tr style="border-bottom:1px solid #eee;"><td style="padding:5px 8px;">${(t.date || "").slice(0, 10)}</td><td style="padding:5px 8px;">${t.passenger || "Passenger"}</td><td style="padding:5px 8px;color:#888;">${t.reference || ""}</td><td style="padding:5px 8px;text-align:right;font-weight:700;">R ${Number(t.amount).toFixed(2)}</td></tr>`).join("")}
+  </table>
+</div>`
+    : "";
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -106,6 +116,7 @@ export function buildStatementPDF(p: any): string {
   <div><div class="perf-val" style="color:#00D4FF">${(p.rating_avg ?? 0).toFixed(1)} ★</div><div class="perf-lbl">Avg Rating</div></div>
   <div><div class="perf-val">${p.rating_count}</div><div class="perf-lbl">Total Reviews</div></div>
 </div>
+${tripsHtml}
 <div class="footer">
   <strong>Tag n Ride Pty Ltd</strong><br />
   Pretoria, Gauteng, South Africa &nbsp;·&nbsp; support@tagnride.com<br />
@@ -120,6 +131,7 @@ export function buildFormalPayslipPDF(p: any): string {
   const refUrl = `https://tagnride.com/verify?ref=${encodeURIComponent(p.reference_number)}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(refUrl)}`;
   const showOwner = (p.owner_payouts ?? 0) > 0;
+  const trips: any[] = p.trips ?? [];
   const issueDate = new Date(p.created_at).toLocaleDateString("en-ZA");
   return `<!DOCTYPE html>
 <html>
@@ -227,6 +239,13 @@ export function buildFormalPayslipPDF(p: any): string {
   <div><div class="perf-val" style="color:#00D4FF">${(p.rating_avg ?? 0).toFixed(1)} ★</div><div class="perf-lbl">Avg Rating</div></div>
   <div><div class="perf-val">${p.rating_count}</div><div class="perf-lbl">Total Reviews</div></div>
 </div>
+
+${trips.length > 0 ? `
+<div class="section-title">Trip Details (${trips.length})</div>
+<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px;">
+  <tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd;">Date</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd;">Passenger</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd;">Ref</th><th style="padding:6px 8px;text-align:right;border-bottom:1px solid #ddd;">Amount</th></tr>
+  ${trips.map((t: any) => `<tr style="border-bottom:1px solid #eee;"><td style="padding:5px 8px;">${(t.date || "").slice(0,10)}</td><td style="padding:5px 8px;">${t.passenger||"Passenger"}</td><td style="padding:5px 8px;color:#888;font-size:10px;">${t.reference||""}</td><td style="padding:5px 8px;text-align:right;font-weight:700;">R ${Number(t.amount).toFixed(2)}</td></tr>`).join("")}
+</table>` : ""}
 
 <div class="verify-box">
   <img src="${qrUrl}" width="80" height="80" style="border-radius:6px;flex-shrink:0;" />
