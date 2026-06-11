@@ -765,53 +765,78 @@ export default function Home() {
               <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
             </View>
             {/* Track Me — safety quick action */}
-            <TouchableOpacity
-              testID="qa-trackme"
-              onPress={trackMeSession ? handleTrackMeStop : handleTrackMeOpenConfirm}
-              activeOpacity={0.85}
-              disabled={trackMeLoading}
-              style={[
-                s.trackMeBtn,
-                trackMeSession
-                  ? { borderColor: "#4ade8050", backgroundColor: "rgba(74,222,128,0.05)" }
-                  : passengerTrip
+            {trackMeSession ? (
+              // ── Active: status row + stop/share buttons ──
+              <View>
+                <View style={[s.trackMeBtn, { borderColor: "#4ade8050", backgroundColor: "rgba(74,222,128,0.05)" }]}>
+                  <View style={[s.trackMeIconWrap, { backgroundColor: "rgba(74,222,128,0.14)" }]}>
+                    <Ionicons name="navigate" size={22} color="#4ade80" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: "#4ade80", fontWeight: "700", fontSize: 14 }}>Track Me</Text>
+                    <Text style={{ color: "#4ade8090", fontSize: 11, marginTop: 2 }}>Broadcasting your live location</Text>
+                  </View>
+                  <View style={s.trackMeLiveBadge}>
+                    <View style={s.trackMeLiveDot} />
+                    <Text style={s.trackMeLiveText}>LIVE</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => Share.share({
+                      message: `I'm sharing my live location for safety. Track me here:\n\n${trackMeSession.share_url}`,
+                      url: trackMeSession.share_url,
+                    })}
+                    style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: "#4ade8040", backgroundColor: "rgba(74,222,128,0.07)" }}>
+                    <Ionicons name="share-social-outline" size={15} color="#4ade80" />
+                    <Text style={{ color: "#4ade80", fontWeight: "700", fontSize: 13 }}>Share Link</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID="qa-trackme-stop"
+                    onPress={handleTrackMeStop}
+                    disabled={trackMeLoading}
+                    style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: `${colors.red}40`, backgroundColor: colors.redDim }}>
+                    {trackMeLoading
+                      ? <ActivityIndicator size="small" color={colors.red} />
+                      : <Ionicons name="stop-circle-outline" size={15} color={colors.red} />}
+                    <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>Stop Tracking</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              // ── Inactive: start button ──
+              <TouchableOpacity
+                testID="qa-trackme"
+                onPress={handleTrackMeOpenConfirm}
+                activeOpacity={0.85}
+                disabled={trackMeLoading}
+                style={[
+                  s.trackMeBtn,
+                  passengerTrip
                     ? { borderColor: "#00E5FF50", backgroundColor: "rgba(0,229,255,0.05)" }
                     : { borderColor: colors.border, backgroundColor: colors.bg2 },
-              ]}>
-              <View style={[
-                s.trackMeIconWrap,
-                { backgroundColor: trackMeSession ? "rgba(74,222,128,0.14)" : passengerTrip ? "rgba(0,229,255,0.14)" : "rgba(128,128,128,0.1)" },
-              ]}>
-                {trackMeLoading
-                  ? <ActivityIndicator size="small" color={trackMeSession ? "#4ade80" : "#00E5FF"} />
-                  : <Ionicons name="navigate" size={22} color={trackMeSession ? "#4ade80" : passengerTrip ? "#00E5FF" : colors.textMuted} />}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: trackMeSession ? "#4ade80" : passengerTrip ? "#00E5FF" : colors.text, fontWeight: "700", fontSize: 14 }}>
-                  Track Me
-                </Text>
-                <Text style={{ color: trackMeSession ? "#4ade8090" : passengerTrip ? "#00E5FF90" : colors.textMuted, fontSize: 11, marginTop: 2 }}>
-                  {trackMeSession
-                    ? "Broadcasting live · tap to stop"
-                    : passengerTrip
-                      ? "Share taxi live location · free"
-                      : `Share your location anytime · R${trackMeFee.toFixed(2)}`}
-                </Text>
-              </View>
-              {trackMeSession ? (
-                <View style={s.trackMeLiveBadge}>
-                  <View style={s.trackMeLiveDot} />
-                  <Text style={s.trackMeLiveText}>LIVE</Text>
+                ]}>
+                <View style={[s.trackMeIconWrap, { backgroundColor: passengerTrip ? "rgba(0,229,255,0.14)" : "rgba(128,128,128,0.1)" }]}>
+                  {trackMeLoading
+                    ? <ActivityIndicator size="small" color="#00E5FF" />
+                    : <Ionicons name="navigate-outline" size={22} color={passengerTrip ? "#00E5FF" : colors.textMuted} />}
                 </View>
-              ) : passengerTrip ? (
-                <View style={[s.trackMeLiveBadge, { borderColor: "rgba(0,229,255,0.25)", backgroundColor: "rgba(0,229,255,0.12)" }]}>
-                  <View style={[s.trackMeLiveDot, { backgroundColor: "#00E5FF" }]} />
-                  <Text style={[s.trackMeLiveText, { color: "#00E5FF" }]}>FREE</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: passengerTrip ? "#00E5FF" : colors.text, fontWeight: "700", fontSize: 14 }}>Start Track Me</Text>
+                  <Text style={{ color: passengerTrip ? "#00E5FF90" : colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                    {passengerTrip ? "Share taxi live location · free" : `Share your location · R${trackMeFee.toFixed(2)}`}
+                  </Text>
                 </View>
-              ) : (
-                <Ionicons name="share-social-outline" size={18} color={colors.textDim} />
-              )}
-            </TouchableOpacity>
+                {passengerTrip ? (
+                  <View style={[s.trackMeLiveBadge, { borderColor: "rgba(0,229,255,0.25)", backgroundColor: "rgba(0,229,255,0.12)" }]}>
+                    <View style={[s.trackMeLiveDot, { backgroundColor: "#00E5FF" }]} />
+                    <Text style={[s.trackMeLiveText, { color: "#00E5FF" }]}>FREE</Text>
+                  </View>
+                ) : (
+                  <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+                )}
+              </TouchableOpacity>
+            )}
           </>
         )}
 

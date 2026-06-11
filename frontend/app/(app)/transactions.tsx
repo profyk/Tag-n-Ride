@@ -52,8 +52,7 @@ export default function Transactions() {
   const [undoId, setUndoId] = useState<string | null>(null);
   const undoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
-  const [disputeFor, setDisputeFor] = useState<Txn | null>(null);
-  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [showDisputeForm, setShowDisputeForm] = useState(false);
   const [disputeCategory, setDisputeCategory] = useState("");
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeSubmitting, setDisputeSubmitting] = useState(false);
@@ -94,18 +93,17 @@ export default function Transactions() {
   };
 
   const handleSubmitDispute = async () => {
-    if (!disputeFor || !disputeReason.trim() || disputeReason.trim().length < 10) return;
+    if (!selected || !disputeReason.trim() || disputeReason.trim().length < 10) return;
     setDisputeSubmitting(true);
     try {
       await api.submitDispute({
-        transaction_id: disputeFor.id,
+        transaction_id: selected.id,
         reason: disputeReason.trim(),
         category: disputeCategory || undefined,
       });
       const updated = await api.myDisputes().catch(() => disputes);
       setDisputes(updated);
-      setDisputeOpen(false);
-      setDisputeFor(null);
+      setShowDisputeForm(false);
       setDisputeCategory("");
       setDisputeReason("");
       Alert.alert("Dispute submitted", "Your dispute has been logged. Our team will review it within 24–48 hours.");
@@ -249,8 +247,8 @@ export default function Transactions() {
       />
 
       {/* Transaction detail sheet */}
-      <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
-        <Pressable style={s.backdrop} onPress={() => setSelected(null)}>
+      <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => { setSelected(null); setShowDisputeForm(false); setDisputeCategory(""); setDisputeReason(""); }}>
+        <Pressable style={s.backdrop} onPress={() => { setSelected(null); setShowDisputeForm(false); setDisputeCategory(""); setDisputeReason(""); }}>
           <Pressable style={s.sheet} onPress={() => {}}>
             {selected && (() => {
               const isIn = selected.direction === "in" || selected.type === "topup";
@@ -271,7 +269,7 @@ export default function Transactions() {
                     <View style={[s.sheetIcon, { backgroundColor: isIn ? colors.greenDim : colors.cyanDim }]}>
                       <Ionicons name={icon as any} size={28} color={isIn ? colors.green : colors.cyan} />
                     </View>
-                    <TouchableOpacity onPress={() => setSelected(null)} style={s.closeBtn}>
+                    <TouchableOpacity onPress={() => { setSelected(null); setShowDisputeForm(false); setDisputeCategory(""); setDisputeReason(""); }} style={s.closeBtn}>
                       <Ionicons name="close" size={20} color={colors.textMuted} />
                     </TouchableOpacity>
                   </View>
@@ -307,136 +305,126 @@ export default function Transactions() {
                     ) : null}
                   </View>
 
-                  {(() => {
-                    const canDispute = selected.type === "payment" && selected.status === "completed";
-                    const existingDispute = disputes.find(d => d.transaction_id === selected.id);
-                    if (!canDispute) return null;
-                    if (existingDispute) {
-                      const isResolved = existingDispute.status === "resolved";
-                      return (
-                        <View style={[s.disputeStatus, {
-                          backgroundColor: isResolved ? colors.greenDim : colors.cyanDim,
-                          borderColor: isResolved ? colors.green + "40" : colors.cyan + "40",
-                        }]}>
-                          <Ionicons
-                            name={isResolved ? "checkmark-circle-outline" : "time-outline"}
-                            size={15}
-                            color={isResolved ? colors.green : colors.cyan}
-                          />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ color: isResolved ? colors.green : colors.cyan, fontWeight: "700", fontSize: 13 }}>
-                              {isResolved ? "Dispute resolved" : "Dispute under review"}
-                            </Text>
-                            {isResolved && existingDispute.resolution ? (
-                              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{existingDispute.resolution}</Text>
-                            ) : !isResolved ? (
-                              <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>Our team is reviewing your dispute</Text>
-                            ) : null}
-                          </View>
+                  {showDisputeForm ? (
+                    // ── Inline dispute form ──
+                    <View>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                        <TouchableOpacity onPress={() => { setShowDisputeForm(false); setDisputeCategory(""); setDisputeReason(""); }} style={{ padding: 4 }}>
+                          <Ionicons name="arrow-back" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                        <View>
+                          <Text style={{ color: colors.text, fontWeight: "800", fontSize: 16 }}>Raise a Dispute</Text>
+                          <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>Ref: {selected.reference}</Text>
                         </View>
-                      );
-                    }
-                    return (
-                      <TouchableOpacity
-                        onPress={() => { setDisputeFor(selected); setSelected(null); setDisputeOpen(true); }}
-                        style={[s.disputeBtn, { borderColor: colors.red + "30", backgroundColor: colors.redDim }]}>
-                        <Ionicons name="alert-circle-outline" size={15} color={colors.red} />
-                        <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>Raise a Dispute</Text>
-                      </TouchableOpacity>
-                    );
-                  })()}
+                      </View>
 
-                  <TouchableOpacity
-                    onPress={() => handleHide(selected.id)}
-                    style={s.hideSheetBtn}>
-                    <Ionicons name="eye-off-outline" size={15} color={colors.textMuted} />
-                    <Text style={[s.hideSheetBtnText, { color: colors.textMuted }]}>Hide from history</Text>
-                  </TouchableOpacity>
+                      <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Category</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          {DISPUTE_CATEGORIES.map(cat => (
+                            <TouchableOpacity
+                              key={cat}
+                              onPress={() => setDisputeCategory(cat)}
+                              style={{
+                                paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+                                borderWidth: 1,
+                                borderColor: disputeCategory === cat ? colors.cyan : colors.border,
+                                backgroundColor: disputeCategory === cat ? colors.cyanDim : colors.bg,
+                              }}>
+                              <Text style={{ color: disputeCategory === cat ? colors.cyan : colors.textMuted, fontWeight: "700", fontSize: 12 }}>
+                                {cat}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </ScrollView>
+
+                      <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Describe the issue</Text>
+                      <TextInput
+                        value={disputeReason}
+                        onChangeText={setDisputeReason}
+                        placeholder="What went wrong? (minimum 10 characters)"
+                        placeholderTextColor={colors.textDim}
+                        multiline
+                        numberOfLines={4}
+                        style={{
+                          backgroundColor: colors.bg,
+                          borderWidth: 1, borderColor: colors.border,
+                          borderRadius: 12, padding: 14,
+                          color: colors.text, fontSize: 14,
+                          minHeight: 100, textAlignVertical: "top",
+                          marginBottom: 16,
+                        }}
+                      />
+
+                      <TouchableOpacity
+                        onPress={handleSubmitDispute}
+                        disabled={disputeSubmitting || disputeReason.trim().length < 10}
+                        style={{
+                          backgroundColor: disputeReason.trim().length >= 10 ? colors.red : colors.bg3 ?? colors.border,
+                          borderRadius: 12, paddingVertical: 14,
+                          alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
+                          opacity: disputeSubmitting ? 0.6 : 1, marginBottom: 8,
+                        }}>
+                        <Ionicons name="alert-circle-outline" size={16} color={disputeReason.trim().length >= 10 ? "#fff" : colors.textDim} />
+                        <Text style={{ color: disputeReason.trim().length >= 10 ? "#fff" : colors.textDim, fontWeight: "800", fontSize: 14 }}>
+                          {disputeSubmitting ? "Submitting…" : "Submit Dispute"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    // ── Normal detail bottom section ──
+                    <>
+                      {(() => {
+                        const canDispute = selected.type === "payment" && selected.status === "completed";
+                        const existingDispute = disputes.find(d => d.transaction_id === selected.id);
+                        if (!canDispute) return null;
+                        if (existingDispute) {
+                          const isResolved = existingDispute.status === "resolved";
+                          return (
+                            <View style={[s.disputeStatus, {
+                              backgroundColor: isResolved ? colors.greenDim : colors.cyanDim,
+                              borderColor: isResolved ? colors.green + "40" : colors.cyan + "40",
+                            }]}>
+                              <Ionicons
+                                name={isResolved ? "checkmark-circle-outline" : "time-outline"}
+                                size={15}
+                                color={isResolved ? colors.green : colors.cyan}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: isResolved ? colors.green : colors.cyan, fontWeight: "700", fontSize: 13 }}>
+                                  {isResolved ? "Dispute resolved" : "Dispute under review"}
+                                </Text>
+                                {isResolved && existingDispute.resolution ? (
+                                  <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{existingDispute.resolution}</Text>
+                                ) : !isResolved ? (
+                                  <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>Our team is reviewing your dispute</Text>
+                                ) : null}
+                              </View>
+                            </View>
+                          );
+                        }
+                        return (
+                          <TouchableOpacity
+                            onPress={() => setShowDisputeForm(true)}
+                            style={[s.disputeBtn, { borderColor: colors.red + "30", backgroundColor: colors.redDim }]}>
+                            <Ionicons name="alert-circle-outline" size={15} color={colors.red} />
+                            <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>Raise a Dispute</Text>
+                          </TouchableOpacity>
+                        );
+                      })()}
+
+                      <TouchableOpacity
+                        onPress={() => handleHide(selected.id)}
+                        style={s.hideSheetBtn}>
+                        <Ionicons name="eye-off-outline" size={15} color={colors.textMuted} />
+                        <Text style={[s.hideSheetBtnText, { color: colors.textMuted }]}>Hide from history</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </ScrollView>
               );
             })()}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Dispute modal */}
-      <Modal visible={disputeOpen} transparent animationType="slide" onRequestClose={() => { setDisputeOpen(false); setDisputeFor(null); }}>
-        <Pressable style={s.backdrop} onPress={() => { setDisputeOpen(false); setDisputeFor(null); }}>
-          <Pressable style={[s.sheet, { paddingBottom: 48 }]} onPress={() => {}}>
-            <View style={s.sheetHandle} />
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <View>
-                <Text style={{ color: colors.text, fontWeight: "800", fontSize: 18 }}>Raise a Dispute</Text>
-                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-                  {disputeFor?.reference ? `Ref: ${disputeFor.reference}` : ""}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => { setDisputeOpen(false); setDisputeFor(null); }} style={s.closeBtn}>
-                <Ionicons name="close" size={20} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
-              Category
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                {DISPUTE_CATEGORIES.map(cat => (
-                  <TouchableOpacity
-                    key={cat}
-                    onPress={() => setDisputeCategory(cat)}
-                    style={{
-                      paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
-                      borderWidth: 1,
-                      borderColor: disputeCategory === cat ? colors.cyan : colors.border,
-                      backgroundColor: disputeCategory === cat ? colors.cyanDim : colors.bg,
-                    }}>
-                    <Text style={{ color: disputeCategory === cat ? colors.cyan : colors.textMuted, fontWeight: "700", fontSize: 12 }}>
-                      {cat}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-
-            <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
-              Describe the issue
-            </Text>
-            <TextInput
-              value={disputeReason}
-              onChangeText={setDisputeReason}
-              placeholder="What went wrong? (minimum 10 characters)"
-              placeholderTextColor={colors.textDim}
-              multiline
-              numberOfLines={4}
-              style={{
-                backgroundColor: colors.bg,
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderRadius: 12,
-                padding: 14,
-                color: colors.text,
-                fontSize: 14,
-                minHeight: 100,
-                textAlignVertical: "top",
-                marginBottom: 16,
-              }}
-            />
-
-            <TouchableOpacity
-              onPress={handleSubmitDispute}
-              disabled={disputeSubmitting || disputeReason.trim().length < 10}
-              style={{
-                backgroundColor: disputeReason.trim().length >= 10 ? colors.red : colors.bg3 ?? colors.border,
-                borderRadius: 12, paddingVertical: 14,
-                alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
-                opacity: disputeSubmitting ? 0.6 : 1,
-              }}>
-              <Ionicons name="alert-circle-outline" size={16} color={disputeReason.trim().length >= 10 ? "#fff" : colors.textDim} />
-              <Text style={{ color: disputeReason.trim().length >= 10 ? "#fff" : colors.textDim, fontWeight: "800", fontSize: 14 }}>
-                {disputeSubmitting ? "Submitting…" : "Submit Dispute"}
-              </Text>
-            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
