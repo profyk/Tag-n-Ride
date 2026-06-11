@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Badge, Spinner } from "@/components/ui";
 import client from "@/lib/api";
-import { Shield, AlertTriangle, Search, Phone, MapPin, RefreshCw, Users, Car, Radio } from "lucide-react";
+import { Shield, AlertTriangle, Search, Phone, MapPin, RefreshCw, Users, Car, Radio, Navigation, Activity, Clock, XCircle } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function SafeRidePage() {
@@ -18,6 +18,11 @@ export default function SafeRidePage() {
   const [loadingIncidents, setLoadingIncidents] = useState(true);
 
   const [stats, setStats] = useState({ active_trips: 0, total_passengers: 0, incidents_month: 0, contacts_reached: 0 });
+
+  const [trackMeList, setTrackMeList] = useState<any[]>([]);
+  const [trackMeLoading, setTrackMeLoading] = useState(true);
+  const [trackMeEndingId, setTrackMeEndingId] = useState<string | null>(null);
+  const trackMeRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const driverRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [sosList, setSosList] = useState<any[]>([]);
@@ -83,6 +88,24 @@ export default function SafeRidePage() {
     } catch {}
     finally { setDeadManLoading(false); }
   }, []);
+
+  const fetchTrackMe = useCallback(async () => {
+    try {
+      const res = await client.get("/api/admin/track-me");
+      setTrackMeList(res.data || []);
+    } catch {}
+    finally { setTrackMeLoading(false); }
+  }, []);
+
+  const handleEndTrackMe = async (tripId: string) => {
+    setTrackMeEndingId(tripId);
+    try {
+      await client.post(`/api/admin/track-me/${tripId}/end`, {});
+      toast.success("Track Me session ended — user notified");
+      fetchTrackMe();
+    } catch (e: any) { toast.error(e.message || "Failed to end session"); }
+    finally { setTrackMeEndingId(null); }
+  };
 
   const handleSosAction = async (sosId: string, status: "help_coming" | "dispatched" | "resolved", notes?: string) => {
     setSosActionLoading(sosId + status);
@@ -165,13 +188,16 @@ export default function SafeRidePage() {
     fetchIncidents();
     fetchSos();
     fetchDeadMan();
+    fetchTrackMe();
     driverRefTimer.current = setInterval(fetchDriverLocations, 30000);
     sosRefTimer.current = setInterval(fetchSos, 10000);
     deadManRefTimer.current = setInterval(fetchDeadMan, 10000);
+    trackMeRefTimer.current = setInterval(fetchTrackMe, 15000);
     return () => {
       if (driverRefTimer.current) clearInterval(driverRefTimer.current);
       if (sosRefTimer.current) clearInterval(sosRefTimer.current);
       if (deadManRefTimer.current) clearInterval(deadManRefTimer.current);
+      if (trackMeRefTimer.current) clearInterval(trackMeRefTimer.current);
     };
   }, []);
 
@@ -636,12 +662,110 @@ export default function SafeRidePage() {
           );
         })()}
 
+        {/* ACTIVE TRACK ME SESSIONS */}
+        <div className={`rounded-xl border p-5 ${trackMeList.length > 0 ? "bg-cyan-950/20 border-cyan/40" : "bg-bg2 border-border"}`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Navigation size={16} className={trackMeList.length > 0 ? "text-cyan animate-pulse" : "text-textMuted"} />
+              <h2 className="font-extrabold text-text text-sm uppercase tracking-wider">Active Track Me Sessions</h2>
+              {trackMeList.length > 0 && (
+                <span className="bg-cyan/80 text-bg text-[10px] font-black px-2 py-0.5 rounded-full">
+                  {trackMeList.length} LIVE
+                </span>
+              )}
+              <span className="text-[10px] text-textDim">(refreshes every 15s)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link href="/admin/monitoring" className="text-[10px] text-cyan hover:underline font-bold">Live Monitor →</Link>
+              <button onClick={fetchTrackMe} className="text-textMuted hover:text-cyan transition-colors">
+                <RefreshCw size={14} />
+              </button>
+            </div>
+          </div>
+
+          {trackMeLoading ? (
+            <div className="flex items-center justify-center py-8"><Spinner size={20} /></div>
+          ) : trackMeList.length === 0 ? (
+            <p className="text-textMuted text-sm text-center py-6">No active Track Me sessions</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["User", "Phone", "Duration", "Last Ping", "Location", "Action"].map(h => (
+                      <th key={h} className="text-left px-3 py-2 text-textDim font-extrabold uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {trackMeList.map(tm => {
+                    const durationMin = tm.created_at
+                      ? Math.floor((Date.now() - new Date(tm.created_at).getTime()) / 60000)
+                      : 0;
+                    const lastPingMin = tm.last_ping
+                      ? Math.floor((Date.now() - new Date(tm.last_ping).getTime()) / 60000)
+                      : null;
+                    const mapsUrl = tm.last_lat
+                      ? `https://maps.google.com/?q=${tm.last_lat},${tm.last_lng}`
+                      : null;
+                    const pingStale = lastPingMin !== null && lastPingMin > 3;
+                    return (
+                      <tr key={tm.id} className="border-b border-border/50 hover:bg-bg3">
+                        <td className="px-3 py-2.5 font-semibold text-text">{tm.user_name || "Unknown"}</td>
+                        <td className="px-3 py-2.5">
+                          <a href={`tel:${tm.user_phone}`} className="text-cyan hover:underline flex items-center gap-1">
+                            <Phone size={10} /> {tm.user_phone || "—"}
+                          </a>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="flex items-center gap-1 text-green font-bold">
+                            <Clock size={10} /> {durationMin < 60 ? `${durationMin}m` : `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {lastPingMin === null ? (
+                            <span className="text-textDim">No ping yet</span>
+                          ) : (
+                            <span className={pingStale ? "text-yellow-400 font-bold" : "text-textMuted"}>
+                              {lastPingMin === 0 ? "Just now" : `${lastPingMin}m ago`}
+                              {pingStale && " ⚠"}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {mapsUrl ? (
+                            <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-cyan hover:underline">
+                              <MapPin size={10} /> View Map
+                            </a>
+                          ) : <span className="text-textDim">No GPS yet</span>}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <button
+                            disabled={trackMeEndingId === tm.id}
+                            onClick={() => handleEndTrackMe(tm.id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 text-[10px] font-bold rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50">
+                            {trackMeEndingId === tm.id ? <Spinner size={8} /> : <XCircle size={10} />}
+                            End Session
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
             { label: "Active Trips", value: stats.active_trips, icon: Car, color: "text-cyan" },
-            { label: "Passengers Today", value: stats.total_passengers, icon: Users, color: "text-green" },
+            { label: "Track Me Live", value: trackMeList.length, icon: Navigation, color: trackMeList.length > 0 ? "text-cyan" : "text-textMuted" },
+            { label: "Passengers On Board", value: stats.total_passengers, icon: Users, color: "text-green" },
             { label: "Active SOS", value: activeSos.length, icon: Radio, color: activeSos.length > 0 ? "text-red-400" : "text-textMuted" },
+            { label: "Dead Man Active", value: deadManList.filter(d => d.status === "active" || d.status === "help_coming").length, icon: Shield, color: deadManList.filter(d => d.status === "active" || d.status === "help_coming").length > 0 ? "text-purple-400" : "text-textMuted" },
             { label: "Contacts Reached", value: stats.contacts_reached, icon: Phone, color: "text-purple" },
           ].map(stat => (
             <div key={stat.label} className="bg-bg2 border border-border rounded-xl p-4">

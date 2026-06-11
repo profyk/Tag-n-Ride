@@ -13381,6 +13381,67 @@ async def admin_charge_sos(sos_id: str, body: SosChargeIn, admin: dict = Depends
     return {"ok": True, "deducted_from_wallet": deducted is not None}
 
 
+# ── GET /api/admin/track-me ── list active Track Me sessions
+@api.get("/admin/track-me")
+async def admin_list_track_me(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                t.id,
+                t.trip_reference,
+                t.created_at,
+                u.full_name    AS user_name,
+                u.phone_number AS user_phone,
+                u.id           AS user_id,
+                gl.latitude    AS last_lat,
+                gl.longitude   AS last_lng,
+                gl.recorded_at AS last_ping
+            FROM trips t
+            JOIN users u ON u.id = t.driver_id
+            LEFT JOIN LATERAL (
+                SELECT latitude, longitude, recorded_at
+                FROM gps_logs
+                WHERE trip_id = t.id
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            ) gl ON true
+            WHERE t.status = 'active'
+              AND t.trip_reference LIKE 'TNR-TRACK-%'
+            ORDER BY t.created_at DESC
+        """)
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["created_at"] = iso(d.get("created_at"))
+        d["last_ping"]  = iso(d.get("last_ping"))
+        if d.get("last_lat") is not None: d["last_lat"] = float(d["last_lat"])
+        if d.get("last_lng") is not None: d["last_lng"] = float(d["last_lng"])
+        result.append(d)
+    return result
+
+
+# ── POST /api/admin/track-me/{trip_id}/end ── force-end a Track Me session
+@api.post("/admin/track-me/{trip_id}/end")
+async def admin_end_track_me(trip_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        trip = await conn.fetchrow(
+            "SELECT id, driver_id FROM trips WHERE id=$1 AND status='active' AND trip_reference LIKE 'TNR-TRACK-%'",
+            trip_id
+        )
+        if not trip:
+            raise HTTPException(404, "Track Me session not found or already ended")
+        await conn.execute(
+            "UPDATE trips SET status='completed', ended_at=NOW() WHERE id=$1",
+            trip_id
+        )
+        await notify_user(
+            conn, "Track Me Session Ended",
+            "Your Track Me session has been ended by the safety team.",
+            "track_me_ended", trip["driver_id"]
+        )
+    return {"ok": True}
+
+
 # ── PATCH /api/trips/{trip_id}/details ──
 @api.patch("/trips/{trip_id}/details")
 async def update_trip_details(trip_id: str, body: TripDetailsIn, user: dict = Depends(get_current_user)):
