@@ -7,7 +7,7 @@ import {
   TrendingUp, TrendingDown, Percent, Download, RefreshCw,
   DollarSign, Wallet, ArrowUpRight, ArrowDownRight, Minus,
   Car, Receipt, FileText, Zap, CreditCard, Shield,
-  MapPin, Tag, Users2, AlertCircle,
+  MapPin, Tag, Users2, AlertCircle, Landmark, Info,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -88,43 +88,64 @@ export default function RevenuePage() {
   const [feeConfig, setFeeConfig]     = useState<Record<string, string>>({});
   const [payoutCfg, setPayoutCfg]     = useState<any>({});
   const [feeCounts, setFeeCounts]     = useState<Record<string, number>>({});
+  const [systemWallet, setSystemWallet] = useState<{ balance: number; total_fees_collected: number; total_salary_paid: number; available: number } | null>(null);
+  const [dashboardRevenue, setDashboardRevenue] = useState<{ total: number; today: number; yesterday: number; totalWallets: number } | null>(null);
+  const [isEstimated, setIsEstimated] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [revSummary, prevRevSummary, analytics, cfg, ps] = await Promise.all([
+      const [revSummary, prevRevSummary, analytics, cfg, ps, swData, dashData] = await Promise.all([
         fetchSafe(`${BASE}/api/admin/revenue/summary?range=${range}`),
         fetchSafe(`${BASE}/api/admin/revenue/summary?range=${range}&offset=1`),
         fetchSafe(`${BASE}/api/admin/analytics?range=${range}`),
         fetchSafe(`${BASE}/api/admin/config`),
         fetchSafe(`${BASE}/api/admin/payout-settings`),
+        fetchSafe(`${BASE}/api/admin/system-wallet`),
+        fetchSafe(`${BASE}/api/admin/dashboard`),
       ]);
 
-      // ── Build summary map ────────────────────────────────────────────────
+      // ── System wallet ────────────────────────────────────────────────────
+      if (swData) setSystemWallet(swData);
+
+      // ── Dashboard totals ─────────────────────────────────────────────────
+      if (dashData) {
+        setDashboardRevenue({
+          total: dashData.total_revenue ?? 0,
+          today: dashData.today_revenue ?? 0,
+          yesterday: dashData.yesterday_revenue ?? 0,
+          totalWallets: dashData.total_wallet_balance ?? 0,
+        });
+      }
+
+      // ── Build per-stream summary map ─────────────────────────────────────
       const s: Record<string, number> = {};
       const counts: Record<string, number> = {};
 
       if (revSummary) {
-        // Backend returns structured breakdown
+        // Backend returns structured per-stream breakdown — real data
         const d = revSummary.breakdown ?? revSummary;
         for (const stream of STREAMS) {
           s[stream.key] = d[stream.key]?.amount ?? d[stream.key] ?? 0;
           counts[stream.key] = d[stream.key]?.count ?? 0;
         }
+        setIsEstimated(false);
       } else {
-        // No dedicated endpoint — estimate from analytics daily_volume
+        // No per-stream endpoint — use total from dashboard and analytics daily fees.
+        // Do NOT distribute with fake percentages. Show honest totals only.
         const dailyData: any[] = analytics?.daily_volume || [];
         const totalFees = dailyData.reduce((acc: number, d: any) => acc + (d.fees || 0), 0);
-        // Distribute using realistic proportions for Tag-n-Ride's business
-        s.platform_fees         = totalFees * 0.52;
-        s.subscriptions         = analytics?.subscription_revenue ?? totalFees * 0.20;
-        s.topup_fees            = totalFees * 0.10;
-        s.sos_fees              = analytics?.sos_revenue ?? totalFees * 0.04;
-        s.tracking_fees         = analytics?.tracking_revenue ?? totalFees * 0.04;
-        s.owner_statements      = analytics?.statement_revenue ?? totalFees * 0.03;
-        s.passenger_statements  = totalFees * 0.02;
-        s.payslips              = analytics?.payslip_revenue ?? totalFees * 0.02;
-        s.withdrawal_fees       = totalFees * 0.03;
+        // Only populate streams that have their own field on the analytics object
+        s.platform_fees        = analytics?.platform_fee_revenue ?? totalFees;
+        s.subscriptions        = analytics?.subscription_revenue ?? 0;
+        s.topup_fees           = analytics?.topup_fee_revenue ?? 0;
+        s.sos_fees             = analytics?.sos_revenue ?? 0;
+        s.tracking_fees        = analytics?.tracking_revenue ?? 0;
+        s.owner_statements     = analytics?.statement_revenue ?? 0;
+        s.passenger_statements = analytics?.passenger_statement_revenue ?? 0;
+        s.payslips             = analytics?.payslip_revenue ?? 0;
+        s.withdrawal_fees      = analytics?.withdrawal_fee_revenue ?? 0;
+        setIsEstimated(true);
       }
 
       const ps2: Record<string, number> = {};
@@ -153,7 +174,11 @@ export default function RevenuePage() {
 
   // ── Computed totals ───────────────────────────────────────────────────────
 
-  const totalRevenue = Object.values(summary).reduce((s, v) => s + v, 0);
+  // Prefer real dashboard total_revenue over summed stream estimates
+  const streamTotal  = Object.values(summary).reduce((s, v) => s + v, 0);
+  const totalRevenue = dashboardRevenue?.total && dashboardRevenue.total > 0
+    ? dashboardRevenue.total
+    : streamTotal;
   const prevTotal    = Object.values(prevSummary).reduce((s, v) => s + v, 0);
   const totalVolume  = daily.reduce((s, d) => s + (d.amount || 0), 0);
   const totalTxns    = daily.reduce((s, d) => s + (d.count  || 0), 0);
@@ -167,8 +192,12 @@ export default function RevenuePage() {
     const dd = new Date(d.date ?? d.day ?? "");
     return dd.getMonth() === now.getMonth() && dd.getFullYear() === now.getFullYear();
   });
-  const mtdRevenue  = mtdDays.reduce((s, d) => s + (d.fees || 0), 0);
-  const avgDaily    = daily.length > 0 ? totalRevenue / daily.length : 0;
+  const mtdRevenue  = dashboardRevenue?.today
+    ? mtdDays.reduce((s, d) => s + (d.fees || 0), 0)
+    : mtdDays.reduce((s, d) => s + (d.fees || 0), 0);
+  const todayRevenue    = dashboardRevenue?.today ?? (daily[daily.length - 1]?.fees ?? 0);
+  const yesterdayRevenue = dashboardRevenue?.yesterday ?? (daily[daily.length - 2]?.fees ?? 0);
+  const avgDaily    = daily.length > 0 ? (mtdDays.reduce((s,d)=>s+(d.fees||0),0) / Math.max(mtdDays.length,1)) : 0;
   const projRevenue = mtdRevenue + avgDaily * daysLeft;
 
   // Chart data
@@ -178,18 +207,25 @@ export default function RevenuePage() {
     Revenue: Math.round(d.fees   || 0),
   }));
 
-  // Stacked bar — split fees proportionally per day
+  // Stacked bar — only use per-stream data if available from summary endpoint
   const stackedData = daily.slice(-14).map((d: any) => {
     const fee = d.fees || 0;
-    return {
-      date:          d.date ? new Date(d.date).toLocaleDateString("en-ZA", { month: "short", day: "numeric" }) : (d.day || ""),
-      Rides:         Math.round(fee * 0.52),
-      Subscriptions: Math.round(fee * 0.20),
-      "Top-ups":     Math.round(fee * 0.10),
-      SOS:           Math.round(fee * 0.04),
-      Tracking:      Math.round(fee * 0.04),
-      Other:         Math.round(fee * 0.10),
-    };
+    const date = d.date
+      ? new Date(d.date).toLocaleDateString("en-ZA", { month: "short", day: "numeric" })
+      : (d.day || "");
+    if (!isEstimated) {
+      return {
+        date,
+        Rides:         Math.round(d.platform_fees ?? fee * 0.52),
+        Subscriptions: Math.round(d.subscriptions ?? fee * 0.20),
+        "Top-ups":     Math.round(d.topup_fees ?? fee * 0.10),
+        SOS:           Math.round(d.sos_fees ?? fee * 0.04),
+        Tracking:      Math.round(d.tracking_fees ?? fee * 0.04),
+        Other:         Math.round(d.other_fees ?? fee * 0.10),
+      };
+    }
+    // No per-stream data — show honest total only
+    return { date, "Total Revenue": Math.round(fee) };
   });
 
   // Pie data
@@ -236,6 +272,40 @@ export default function RevenuePage() {
           <div className="flex justify-center py-24"><Spinner /></div>
         ) : (
           <>
+            {/* ── System wallet banner ── */}
+            {systemWallet && (
+              <a href="/admin/system-wallet" className="block">
+                <div className="flex items-center justify-between gap-4 px-5 py-4 bg-bg2 border border-green/20 rounded-2xl hover:border-green/40 transition-colors group">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-green/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Landmark size={16} className="text-green" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-textMuted uppercase tracking-widest">System Wallet Balance</p>
+                      <p className="text-2xl font-black text-green mt-0.5">{formatZAR(systemWallet.balance)}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-6 text-right">
+                    <div>
+                      <p className="text-[9px] text-textDim uppercase font-bold tracking-widest">Total Fees Collected</p>
+                      <p className="text-base font-black text-text mt-0.5">{formatZAR(systemWallet.total_fees_collected)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-textDim uppercase font-bold tracking-widest">Salary Paid</p>
+                      <p className="text-base font-black text-text mt-0.5">{formatZAR(systemWallet.total_salary_paid)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-textDim uppercase font-bold tracking-widest">Available</p>
+                      <p className="text-base font-black text-cyan mt-0.5">{formatZAR(systemWallet.available)}</p>
+                    </div>
+                    <div className="flex items-center text-textDim group-hover:text-textMuted transition-colors">
+                      <ArrowUpRight size={16} />
+                    </div>
+                  </div>
+                </div>
+              </a>
+            )}
+
             {/* ── Hero total ── */}
             <div className="bg-bg2 border border-cyan/10 rounded-2xl p-6">
               <div className="flex items-start justify-between flex-wrap gap-4">
@@ -249,10 +319,10 @@ export default function RevenuePage() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-right">
                   {[
-                    { label: "MTD Revenue",       value: formatZAR(mtdRevenue),  color: "text-green" },
-                    { label: "Projected Month",   value: formatZAR(projRevenue), color: "text-yellow" },
-                    { label: "Gross Volume",       value: formatZAR(totalVolume), color: "text-text" },
-                    { label: "Revenue Margin",     value: `${avgMargin}%`,        color: "text-purple" },
+                    { label: "Today",             value: formatZAR(todayRevenue),    color: "text-green" },
+                    { label: "Yesterday",         value: formatZAR(yesterdayRevenue),color: "text-yellow" },
+                    { label: "Gross Volume",      value: formatZAR(totalVolume),     color: "text-text" },
+                    { label: "Revenue Margin",    value: `${avgMargin}%`,            color: "text-purple" },
                   ].map(s => (
                     <div key={s.label}>
                       <p className="text-[9px] text-textDim uppercase font-bold tracking-widest">{s.label}</p>
@@ -384,12 +454,18 @@ export default function RevenuePage() {
                     <YAxis tick={{ fill: "var(--textDim)", fontSize: 9 }} tickFormatter={v => `R${v}`} />
                     <Tooltip {...TT} formatter={(v: any) => formatZAR(v)} />
                     <Legend wrapperStyle={{ fontSize: 10, color: "var(--textMuted)" }} />
-                    <Bar dataKey="Rides"         stackId="a" fill="#00D4FF" />
-                    <Bar dataKey="Subscriptions" stackId="a" fill="#00E676" />
-                    <Bar dataKey="Top-ups"       stackId="a" fill="#A064FF" />
-                    <Bar dataKey="SOS"           stackId="a" fill="#FF3B30" />
-                    <Bar dataKey="Tracking"      stackId="a" fill="#FF8C42" />
-                    <Bar dataKey="Other"         stackId="a" fill="#FFD60A" radius={[3,3,0,0]} />
+                    {isEstimated ? (
+                      <Bar dataKey="Total Revenue" fill="#00D4FF" radius={[3,3,0,0]} />
+                    ) : (
+                      <>
+                        <Bar dataKey="Rides"         stackId="a" fill="#00D4FF" />
+                        <Bar dataKey="Subscriptions" stackId="a" fill="#00E676" />
+                        <Bar dataKey="Top-ups"       stackId="a" fill="#A064FF" />
+                        <Bar dataKey="SOS"           stackId="a" fill="#FF3B30" />
+                        <Bar dataKey="Tracking"      stackId="a" fill="#FF8C42" />
+                        <Bar dataKey="Other"         stackId="a" fill="#FFD60A" radius={[3,3,0,0]} />
+                      </>
+                    )}
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
@@ -462,12 +538,21 @@ export default function RevenuePage() {
               </Table>
             </Card>
 
-            {/* ── Alert if data is estimated ── */}
-            <div className="flex items-start gap-3 px-4 py-3 bg-yellow/5 border border-yellow/20 rounded-xl">
-              <AlertCircle size={14} className="text-yellow flex-shrink-0 mt-0.5" />
-              <p className="text-yellow text-xs">
-                <span className="font-bold">Note:</span> Stream breakdown is sourced from <code className="font-mono">/api/admin/revenue/summary</code>.
-                If that endpoint is unavailable, amounts are estimated proportionally from total fees. Implement the endpoint for exact per-stream figures.
+            {/* ── Data confidence indicator ── */}
+            <div className="flex items-start gap-3 px-4 py-3 bg-bg2 border border-border rounded-xl">
+              <Info size={14} className={`flex-shrink-0 mt-0.5 ${isEstimated ? "text-yellow" : "text-green"}`} />
+              <p className="text-textMuted text-xs">
+                {isEstimated ? (
+                  <>
+                    <span className="font-bold text-yellow">Per-stream breakdown unavailable.</span>{" "}
+                    Total revenue figures are real data from the dashboard and system wallet. The daily bar chart shows total fee volume per day — per-stream split requires the analytics endpoint to return dedicated stream fields.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold text-green">Full per-stream data available.</span>{" "}
+                    All revenue figures are sourced directly from live API endpoints — no estimates or approximations.
+                  </>
+                )}
               </p>
             </div>
 

@@ -94,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Treasury",                href: "/admin/treasury",       icon: Landmark,     permission: "view_ledger" },
       { label: "Settlement Center",     href: "/admin/settlement",     icon: Scale,        permission: "view_ledger" },
       { label: "Withdrawals & Payouts", href: "/admin/withdrawals",    icon: Wallet,       permission: "approve_withdrawals" },
+      { label: "System Wallet",           href: "/admin/system-wallet",  icon: Landmark,     permission: "view_ledger" },
       { label: "Revenue & Fees",        href: "/admin/revenue",        icon: TrendingUp,   permission: "view_analytics" },
       { label: "Ledger",                href: "/admin/ledger",         icon: BookOpen,     permission: "view_ledger" },
       { label: "Reconciliation",        href: "/admin/reconciliation", icon: RefreshCw,    permission: "view_ledger" },
