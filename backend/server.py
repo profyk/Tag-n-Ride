@@ -1801,8 +1801,8 @@ def _fmt_payout_settings(row) -> dict:
         "default_commission_pct": float(row["default_commission_pct"] or 50),
         "subscription_price_per_taxi": float(row["subscription_price_per_taxi"] or 10),
         "subscription_free_taxis": int(row["subscription_free_taxis"] or 1),
-        "owner_statement_price": float(row["owner_statement_price"] or 10),
-        "passenger_statement_price": float(row["passenger_statement_price"] or 5),
+        "owner_statement_price": float(row["owner_statement_price"]) if row["owner_statement_price"] is not None else 10.0,
+        "passenger_statement_price": float(row["passenger_statement_price"]) if row["passenger_statement_price"] is not None else 5.0,
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -11343,7 +11343,7 @@ async def owner_get_statement(statement_id: str, user: dict = Depends(require_ow
 async def passenger_statement_pricing(user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         settings = await conn.fetchrow("SELECT passenger_statement_price FROM payout_settings WHERE id='default'")
-    price = float(settings["passenger_statement_price"] or 5) if settings else 5.0
+    price = float(settings["passenger_statement_price"]) if settings and settings["passenger_statement_price"] is not None else 5.0
     return {"enabled": True, "price": price}
 
 @api.post("/passenger/statement/request")
@@ -11355,9 +11355,9 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
     async with pool.acquire() as conn:
         settings = await conn.fetchrow("SELECT passenger_statement_price FROM payout_settings WHERE id='default'")
-        price = float(settings["passenger_statement_price"] or 5) if settings else 5.0
+        price = float(settings["passenger_statement_price"]) if settings and settings["passenger_statement_price"] is not None else 5.0
         wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"])
-        if not wallet or float(wallet["balance"]) < price:
+        if price > 0 and (not wallet or float(wallet["balance"]) < price):
             raise HTTPException(status_code=400, detail=f"Insufficient balance. Statement costs R{price:.2f}")
         # Build passenger statement
         trips = await conn.fetch("""

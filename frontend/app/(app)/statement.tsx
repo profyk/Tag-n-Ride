@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Alert, ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
@@ -19,17 +19,20 @@ const MONTHS = [
 
 export function buildPassengerStatementPDF(d: any, reference: string): string {
   const genDate = new Date().toLocaleDateString("en-ZA");
-  const tripsHtml = d.trips.length > 0
+  const trips = d.trips ?? [];
+  const topups = d.topups ?? [];
+  const summary = d.summary ?? {};
+  const tripsHtml = trips.length > 0
     ? `<div class="section">
-  <div class="section-title">Trips (${d.trips.length})</div>
-  ${d.trips.map((t: any) =>
+  <div class="section-title">Trips (${trips.length})</div>
+  ${trips.map((t: any) =>
     `<div class="trip-row"><span>${t.driver || "Driver"} &nbsp;·&nbsp; ${(t.date || "").slice(0, 10)}</span><span class="red">R ${parseFloat(t.amount).toFixed(2)}</span></div>`
   ).join("")}
 </div>` : "";
-  const topupsHtml = d.topups.length > 0
+  const topupsHtml = topups.length > 0
     ? `<div class="section">
-  <div class="section-title">Top-Ups (${d.topups.length})</div>
-  ${d.topups.map((t: any) =>
+  <div class="section-title">Top-Ups (${topups.length})</div>
+  ${topups.map((t: any) =>
     `<div class="trip-row"><span>Wallet Top-Up &nbsp;·&nbsp; ${(t.date || "").slice(0, 10)}</span><span class="green">+R ${parseFloat(t.amount).toFixed(2)}</span></div>`
   ).join("")}
 </div>` : "";
@@ -71,10 +74,10 @@ export function buildPassengerStatementPDF(d: any, reference: string): string {
 </div>
 <div class="section">
   <div class="section-title">Summary</div>
-  <div class="row"><span class="label">Total Rides</span><span class="value">${d.summary.total_trips}</span></div>
-  <div class="row"><span class="label">Total Spent on Rides</span><span class="value red">R ${Number(d.summary.total_spent).toFixed(2)}</span></div>
-  <div class="row"><span class="label">Total Wallet Top-Ups</span><span class="value green">R ${Number(d.summary.total_topups).toFixed(2)}</span></div>
-  <div class="row"><span class="label">Average Trip Cost</span><span class="value">R ${Number(d.summary.average_trip).toFixed(2)}</span></div>
+  <div class="row"><span class="label">Total Rides</span><span class="value">${summary.total_trips ?? 0}</span></div>
+  <div class="row"><span class="label">Total Spent on Rides</span><span class="value red">R ${Number(summary.total_spent ?? 0).toFixed(2)}</span></div>
+  <div class="row"><span class="label">Total Wallet Top-Ups</span><span class="value green">R ${Number(summary.total_topups ?? 0).toFixed(2)}</span></div>
+  <div class="row"><span class="label">Average Trip Cost</span><span class="value">R ${Number(summary.average_trip ?? 0).toFixed(2)}</span></div>
 </div>
 ${tripsHtml}
 ${topupsHtml}
@@ -134,7 +137,7 @@ export default function PassengerStatementScreen() {
     }
   }, []);
 
-  useEffect(() => { loadPricing(); }, []);
+  useFocusEffect(useCallback(() => { loadPricing(); }, [loadPricing]));
 
   const periodStart = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const lastDay = new Date(year, month + 1, 0).getDate();
@@ -144,6 +147,10 @@ export default function PassengerStatementScreen() {
     if (loading) return;
     setLoading(true);
     try {
+      // Refresh balance immediately before submitting so the stale-balance
+      // "Top Up Wallet" loop can't happen after a user tops up and comes back.
+      const w = await api.wallet().catch(() => null);
+      if (w) setWalletBalance(w.balance);
       const res = await api.requestPassengerStatement(periodStart, periodEnd);
       setData(res.data);
       setStmtRef(res.reference ?? "");
@@ -353,14 +360,14 @@ export default function PassengerStatementScreen() {
             {/* Summary */}
             <View style={s.section}>
               <Text style={s.sectionLabel}>SUMMARY</Text>
-              <Row label="Total rides" value={String(d.summary.total_trips)} colors={colors} s={s} />
-              <Row label="Total spent on rides" value={formatZAR(d.summary.total_spent)} bold colors={colors} s={s} />
-              <Row label="Total wallet top-ups" value={formatZAR(d.summary.total_topups)} green colors={colors} s={s} />
-              <Row label="Average trip cost" value={formatZAR(d.summary.average_trip)} colors={colors} s={s} />
+              <Row label="Total rides" value={String(d.summary?.total_trips ?? 0)} colors={colors} s={s} />
+              <Row label="Total spent on rides" value={formatZAR(d.summary?.total_spent ?? 0)} bold colors={colors} s={s} />
+              <Row label="Total wallet top-ups" value={formatZAR(d.summary?.total_topups ?? 0)} green colors={colors} s={s} />
+              <Row label="Average trip cost" value={formatZAR(d.summary?.average_trip ?? 0)} colors={colors} s={s} />
             </View>
 
             {/* Trips */}
-            {d.trips.length > 0 && (
+            {(d.trips?.length ?? 0) > 0 && (
               <View style={s.section}>
                 <Text style={s.sectionLabel}>TRIPS ({d.trips.length})</Text>
                 {d.trips.map((t: any, i: number) => (
@@ -376,7 +383,7 @@ export default function PassengerStatementScreen() {
             )}
 
             {/* Top-ups */}
-            {d.topups.length > 0 && (
+            {(d.topups?.length ?? 0) > 0 && (
               <View style={s.section}>
                 <Text style={s.sectionLabel}>TOP-UPS ({d.topups.length})</Text>
                 {d.topups.map((t: any, i: number) => (
