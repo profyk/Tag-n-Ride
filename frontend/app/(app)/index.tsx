@@ -98,6 +98,12 @@ export default function Home() {
   const [sosCancelPin, setSosCancelPin] = useState("");
   const [sosCancelPinError, setSosCancelPinError] = useState("");
   const [sosCancelPinChecking, setSosCancelPinChecking] = useState(false);
+
+  // PIN modal for Track Me stop
+  const [tmStopPinModal, setTmStopPinModal] = useState(false);
+  const [tmStopPin, setTmStopPin] = useState("");
+  const [tmStopPinError, setTmStopPinError] = useState("");
+  const [tmStopPinChecking, setTmStopPinChecking] = useState(false);
   const [fuelModal, setFuelModal] = useState(false);
   const [fuelAmount, setFuelAmount] = useState("");
   const [fuelLoading, setFuelLoading] = useState(false);
@@ -501,6 +507,44 @@ export default function Home() {
     }, 30000);
   };
 
+  const handleTrackMeStopPress = () => {
+    setTmStopPin("");
+    setTmStopPinError("");
+    setTmStopPinModal(true);
+  };
+
+  const doStopTrackingWithPin = async () => {
+    if (!trackMeSession || !tmStopPin) return;
+    setTmStopPinChecking(true);
+    setTmStopPinError("");
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      const res = await api.trackMeEndPin({
+        trip_id: trackMeSession.id,
+        pin: tmStopPin,
+        latitude: loc?.coords.latitude,
+        longitude: loc?.coords.longitude,
+      });
+      setTmStopPinModal(false);
+      setTmStopPin("");
+      stopTrackMePing();
+      setTrackMeSession(null);
+      if (res.stealth) {
+        startGhostPing();
+      } else {
+        Alert.alert("Tracking Stopped", "Your live location sharing has ended.");
+      }
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.toLowerCase().includes("incorrect") || msg.toLowerCase().includes("pin")) {
+        setTmStopPinError("Incorrect PIN. Try again.");
+      } else {
+        setTmStopPinModal(false);
+        Alert.alert("Error", msg || "Could not stop tracking");
+      }
+    } finally { setTmStopPinChecking(false); }
+  };
+
   const handleTrackMeStop = async () => {
     if (!trackMeSession) return;
     stopTrackMePing();
@@ -793,7 +837,7 @@ export default function Home() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     testID="qa-trackme-stop"
-                    onPress={handleTrackMeStop}
+                    onPress={handleTrackMeStopPress}
                     disabled={trackMeLoading}
                     style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: `${colors.red}40`, backgroundColor: colors.redDim }}>
                     {trackMeLoading
@@ -1203,6 +1247,42 @@ export default function Home() {
             </TouchableOpacity>
             <Pressable onPress={() => { setSosCancelPinModal(false); setSosCancelPin(""); setSosCancelPinError(""); }} style={{ marginTop: 16 }}>
               <Text style={{ color: colors.textDim, fontSize: 13 }}>Back to Safety</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Track Me Stop PIN Modal */}
+      <Modal visible={tmStopPinModal} transparent animationType="fade" onRequestClose={() => { setTmStopPinModal(false); setTmStopPin(""); setTmStopPinError(""); }}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <View style={{ backgroundColor: colors.bg2, borderRadius: 20, padding: 28, width: "100%", maxWidth: 360, borderWidth: 1, borderColor: "#4ade8060", alignItems: "center" }}>
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(74,222,128,0.12)", borderWidth: 1, borderColor: "#4ade8040", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <Ionicons name="navigate" size={28} color="#4ade80" />
+            </View>
+            <Text style={{ color: colors.text, fontWeight: "900", fontSize: 20, letterSpacing: 0.5, marginBottom: 6 }}>Stop Tracking</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 24 }}>Enter your PIN to stop sharing your live location.</Text>
+            <TextInput
+              style={{ width: "100%", backgroundColor: colors.bg, borderRadius: 12, borderWidth: 1, borderColor: tmStopPinError ? colors.red : colors.border, paddingVertical: 14, paddingHorizontal: 20, color: colors.text, fontSize: 28, fontWeight: "900", letterSpacing: 10, textAlign: "center", marginBottom: 4 }}
+              value={tmStopPin}
+              onChangeText={t => { setTmStopPin(t.replace(/\D/g, "")); setTmStopPinError(""); }}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={6}
+              placeholder="••••"
+              placeholderTextColor={colors.textDim}
+            />
+            {!!tmStopPinError && <Text style={{ color: colors.red, fontSize: 12, marginBottom: 12, textAlign: "center" }}>{tmStopPinError}</Text>}
+            <TouchableOpacity
+              onPress={doStopTrackingWithPin}
+              disabled={tmStopPinChecking || !tmStopPin}
+              style={{ width: "100%", backgroundColor: tmStopPin ? colors.red : colors.border, borderRadius: 12, paddingVertical: 14, alignItems: "center", marginTop: 12, flexDirection: "row", justifyContent: "center", gap: 8 }}>
+              {tmStopPinChecking
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <><Ionicons name="stop-circle" size={16} color="#fff" /><Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>Confirm Stop</Text></>
+              }
+            </TouchableOpacity>
+            <Pressable onPress={() => { setTmStopPinModal(false); setTmStopPin(""); setTmStopPinError(""); }} style={{ marginTop: 16 }}>
+              <Text style={{ color: colors.textDim, fontSize: 13 }}>Cancel</Text>
             </Pressable>
           </View>
         </View>

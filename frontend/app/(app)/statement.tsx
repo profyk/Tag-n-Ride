@@ -108,7 +108,7 @@ export default function PassengerStatementScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const now = new Date();
   const [year, setYear]       = useState(now.getFullYear());
-  const [month, setMonth]     = useState(now.getMonth() === 0 ? 11 : now.getMonth() - 1);
+  const [month, setMonth]     = useState(now.getMonth());  // default = current month
   const [loading, setLoading] = useState(false);
   const [data, setData]       = useState<any>(null);
   const [stmtRef, setStmtRef] = useState("");

@@ -683,6 +683,10 @@ export const api = {
     }),
   trackMeEnd: (sessionId: string) =>
     request<{ ok: boolean }>(`/api/track-me/${sessionId}/end`, { method: "POST", body: "{}" }),
+  trackMeEndPin: (body: { trip_id: string; pin: string; latitude?: number; longitude?: number }) =>
+    request<{ ok: boolean; ended: boolean; stealth: boolean }>("/api/track-me/end-pin", {
+      method: "POST", body: JSON.stringify(body),
+    }),
   trackMeActive: () => request<{ session: { id: string; trip_reference: string; share_url: string; started_at: string } | null }>("/api/track-me/active"),
 
   adminDriverLocations: () => request<any[]>("/api/trips/driver-locations"),

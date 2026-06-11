@@ -11366,14 +11366,14 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
             FROM transactions t
             LEFT JOIN users u ON u.id=t.receiver_id
             WHERE t.sender_id=$1 AND t.type='payment' AND t.status='completed'
-              AND DATE(t.created_at) BETWEEN $2 AND $3
+              AND DATE(t.created_at) BETWEEN $2::date AND $3::date
             ORDER BY t.created_at DESC
         """, user["id"], body.period_start, body.period_end)
         topups = await conn.fetch("""
             SELECT t.reference, t.amount, t.created_at
             FROM transactions t
             WHERE t.receiver_id=$1 AND t.type='topup' AND t.status='completed'
-              AND DATE(t.created_at) BETWEEN $2 AND $3
+              AND DATE(t.created_at) BETWEEN $2::date AND $3::date
             ORDER BY t.created_at DESC
         """, user["id"], body.period_start, body.period_end)
         total_spent  = sum(float(r["amount"]) for r in trips)
@@ -13580,6 +13580,31 @@ async def track_me_end(session_id: str, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Track Me session not found")
         await conn.execute("UPDATE trips SET status='completed', ended_at=NOW() WHERE id=$1", session_id)
     return {"ok": True}
+
+# ── POST /api/track-me/end-pin ── PIN-protected stop (dead-man aware)
+@api.post("/track-me/end-pin")
+async def track_me_end_pin(body: TripEndPinIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
+        profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
+        if not user_row:
+            raise HTTPException(401, "User not found")
+        real_ok     = verify_pin(body.pin, user_row["pin_hash"])
+        dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
+        if not real_ok and not dead_man_ok:
+            raise HTTPException(401, "Incorrect PIN")
+        if dead_man_ok:
+            await _trigger_dead_man(conn, user, body.latitude, body.longitude, "track_me_stop")
+            return {"ok": True, "ended": True, "stealth": True}
+        # Real PIN — end the track-me session
+        trip = await conn.fetchrow(
+            "SELECT id FROM trips WHERE id=$1 AND driver_id=$2 AND status='active' AND trip_reference LIKE 'TNR-TRACK-%'",
+            body.trip_id, user["id"]
+        )
+        if not trip:
+            raise HTTPException(404, "Track Me session not found")
+        await conn.execute("UPDATE trips SET status='completed', ended_at=NOW() WHERE id=$1", body.trip_id)
+    return {"ok": True, "ended": True, "stealth": False}
 
 # ── GET /api/track-me/active ──
 @api.get("/track-me/active")
