@@ -8,7 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
-import { api, tokenStore } from "../../src/api";
+import { api } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { radius } from "../../src/theme";
@@ -123,7 +123,7 @@ const TOTAL_STEPS = 5;
 
 export default function OwnerRegister() {
   const router = useRouter();
-  const { refresh } = useAuth();
+  const { signUp } = useAuth();
   const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -216,7 +216,9 @@ export default function OwnerRegister() {
   const submitRegister = async () => {
     setLoading(true);
     try {
-      const r = await api.register({
+      // signUp stores the token AND sets auth state directly from the registration
+      // response — no second api.me() call that could fail and clear the token.
+      await signUp({
         full_name: fullName.trim(),
         surname: surname.trim(),
         pin,
@@ -227,14 +229,13 @@ export default function OwnerRegister() {
         id_number: idNumber.trim() || undefined,
         driver_mode: driverMode === true,
       });
-      await tokenStore.set(r.token);
+      // KYC and driver link are best-effort — failures must not block navigation.
       if (driverMode && selfie && licenceFront) {
-        await api.kycSubmit(selfie, licenceFront);
+        try { await api.kycSubmit(selfie, licenceFront); } catch {}
       }
       if (firstDriverCode.trim()) {
         try { await api.ownerLinkDriver(firstDriverCode.trim().toUpperCase()); } catch {}
       }
-      await refresh();
       router.replace("/owner");
     } catch (e: any) {
       Alert.alert("Registration Failed", e?.message || "Please try again.");
