@@ -302,6 +302,11 @@ CREATE TABLE IF NOT EXISTS owner_drivers (
     id TEXT PRIMARY KEY,
     owner_id TEXT NOT NULL REFERENCES fleet_owners(id),
     driver_user_id TEXT NOT NULL REFERENCES users(id),
+    payment_mode TEXT DEFAULT 'daily_target',
+    driver_commission_pct NUMERIC(5,2) DEFAULT 0,
+    commission_status TEXT,
+    daily_target NUMERIC(14,2) DEFAULT 0,
+    confirmed BOOLEAN DEFAULT FALSE,
     linked_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(owner_id, driver_user_id)
 );
@@ -379,6 +384,12 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles TEXT DEFAULT ''",
                 "ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL",
                 "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS registered_as_driver BOOLEAN DEFAULT FALSE",
+                # owner_drivers columns required by dashboard and commission endpoints
+                "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT 'daily_target'",
+                "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS driver_commission_pct NUMERIC(5,2) DEFAULT 0",
+                "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS commission_status TEXT",
+                "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS daily_target NUMERIC(14,2) DEFAULT 0",
+                "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS confirmed BOOLEAN DEFAULT FALSE",
                 PLATFORM_LEDGER_SQL,
                 """CREATE TABLE IF NOT EXISTS statement_requests (
                     id TEXT PRIMARY KEY,
