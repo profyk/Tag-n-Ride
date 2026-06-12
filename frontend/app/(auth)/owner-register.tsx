@@ -153,7 +153,7 @@ export default function OwnerRegister() {
         business_name: businessName.trim() || undefined,
         id_number: idNumber.trim() || undefined,
       });
-      router.replace("/owner");
+      router.replace("/owner/dashboard");
     } catch (e: any) {
       const msg: string = e?.message || "Please try again.";
       if (msg.toLowerCase().includes("email already")) {

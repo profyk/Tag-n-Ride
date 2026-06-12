@@ -26,7 +26,7 @@ export default function Login() {
     setLoading(true);
     try {
       const user = await signIn("+27" + localDigits, pin);
-      router.replace(user.role === "owner" ? "/owner" : "/(app)");
+      router.replace(user.role === "owner" ? "/owner/dashboard" : "/(app)");
     } catch (e: any) {
       setErr(e?.message || "Login failed");
     } finally {

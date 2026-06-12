@@ -39,7 +39,7 @@ function AppTabs() {
 
   useEffect(() => {
     if (state.status === "guest") router.replace("/(auth)/welcome");
-    else if (state.status === "authed" && state.user.role === "owner") router.replace("/owner");
+    else if (state.status === "authed" && state.user.role === "owner") router.replace("/owner/dashboard");
   }, [state.status, router]);
 
   if (state.status !== "authed") return null;
