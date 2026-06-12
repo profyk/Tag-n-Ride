@@ -15,6 +15,8 @@ export default function OwnerProfile() {
   const { state, signOut } = useAuth();
   const router = useRouter();
   const { colors } = useTheme();
+
+  // Bank / cashup
   const [bankData, setBankData] = useState<any>(null);
   const [bankModal, setBankModal] = useState(false);
   const [bankName, setBankName] = useState("");
@@ -23,10 +25,14 @@ export default function OwnerProfile() {
   const [saving, setSaving] = useState(false);
   const [cashupMethod, setCashupMethod] = useState<"wallet" | "bank">("wallet");
   const [savingMethod, setSavingMethod] = useState(false);
+
+  // Wallet / payout
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [payOutModal, setPayOutModal] = useState(false);
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
+
+  // Subscription
   const [subscription, setSubscription] = useState<any>(null);
 
   // Change password
@@ -39,6 +45,13 @@ export default function OwnerProfile() {
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
 
+  // Change PIN
+  const [pinModal, setPinModal] = useState(false);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [changingPin, setChangingPin] = useState(false);
+
   if (state.status !== "authed") return null;
   const user = state.user;
 
@@ -49,67 +62,56 @@ export default function OwnerProfile() {
         api.ownerWallet().catch(() => null),
         api.ownerSubscription().catch(() => null),
       ]);
+      // bankRes is flat: { bank_name, account_number, account_name, cashup_method }
       setBankData(bankRes);
       setCashupMethod(bankRes.cashup_method || "wallet");
-      if (bankRes.bank_account) {
-        setBankName(bankRes.bank_account.bank_name || "");
-        setAccountNumber(bankRes.bank_account.account_number || "");
-        setAccountName(bankRes.bank_account.account_name || "");
+      if (bankRes.bank_name) {
+        setBankName(bankRes.bank_name || "");
+        setAccountNumber(bankRes.account_number || "");
+        setAccountName(bankRes.account_name || "");
       }
       if (walletRes) setWalletBalance(walletRes.balance ?? null);
       if (subRes) setSubscription(subRes.subscription);
-    } catch (e) {}
+    } catch {}
   }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handlePayOut = async () => {
     const amount = parseFloat(payOutAmount);
-    if (!payOutAmount || isNaN(amount) || amount <= 0) {
-      Alert.alert("Invalid amount", "Please enter a valid amount."); return;
-    }
-    if (amount < 5) { Alert.alert("Minimum amount", "Minimum payout is R5.00."); return; }
+    if (!payOutAmount || isNaN(amount) || amount <= 0) { Alert.alert("Invalid amount", "Please enter a valid amount."); return; }
+    if (amount < 5) { Alert.alert("Minimum", "Minimum payout is R5.00."); return; }
     if (walletBalance !== null && amount > walletBalance) {
       Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(walletBalance)}.`); return;
     }
-    if (!bankData?.bank_name) {
-      Alert.alert("No bank account", "Please add your banking details first."); return;
-    }
+    if (!bankData?.bank_name) { Alert.alert("No bank account", "Please add your banking details first."); return; }
     setPayOutLoading(true);
     try {
       await api.ownerPayout(amount);
       setPayOutModal(false); setPayOutAmount("");
-      Alert.alert("Payout Submitted", `${formatZAR(amount)} has been submitted for admin approval. You will be notified once it is processed to your bank account.`);
+      Alert.alert("Payout Submitted", `${formatZAR(amount)} submitted for admin approval.`);
       load();
     } catch (e: any) {
-      Alert.alert("Failed", e?.message || "Could not process payout. Please try again.");
-    } finally {
-      setPayOutLoading(false);
-    }
+      Alert.alert("Failed", e?.message || "Could not process payout.");
+    } finally { setPayOutLoading(false); }
   };
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
-
   const handleSaveBank = async () => {
-    if (!bankName || !accountNumber) {
-      Alert.alert("Required", "Please enter bank name and account number");
-      return;
-    }
+    if (!bankName || !accountNumber) { Alert.alert("Required", "Please enter bank name and account number."); return; }
     setSaving(true);
     try {
       await api.ownerSaveBank({ bank_name: bankName, account_number: accountNumber, account_name: accountName });
       setBankModal(false);
       load();
-      Alert.alert("Saved", "Banking details saved successfully.");
+      Alert.alert("Saved", "Banking details saved.");
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Could not save banking details");
-    } finally {
-      setSaving(false);
-    }
+      Alert.alert("Error", e?.message || "Could not save banking details.");
+    } finally { setSaving(false); }
   };
 
   const handleSetCashupMethod = async (method: "wallet" | "bank") => {
-    if (method === "bank" && !bankData?.bank_account) {
-      Alert.alert("No bank account", "Please add your bank account details first.");
-      return;
+    if (method === "bank" && !bankData?.bank_name) {
+      Alert.alert("No bank account", "Please add your bank account details first."); return;
     }
     setSavingMethod(true);
     try {
@@ -117,10 +119,8 @@ export default function OwnerProfile() {
       setCashupMethod(method);
       load();
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Could not update preference");
-    } finally {
-      setSavingMethod(false);
-    }
+      Alert.alert("Error", e?.message || "Could not update preference.");
+    } finally { setSavingMethod(false); }
   };
 
   const handleChangePassword = async () => {
@@ -133,13 +133,26 @@ export default function OwnerProfile() {
       await api.ownerChangePassword({ current_password: currentPw, new_password: newPw });
       setPwModal(false);
       setCurrentPw(""); setNewPw(""); setConfirmPw("");
-      setShowCurrentPw(false); setShowNewPw(false); setShowConfirmPw(false);
-      Alert.alert("Password Changed ✓", "Your login password has been updated successfully.");
+      Alert.alert("Password Changed", "Your login password has been updated.");
     } catch (e: any) {
-      Alert.alert("Failed", e?.message || "Could not change password. Please try again.");
-    } finally {
-      setChangingPw(false);
-    }
+      Alert.alert("Failed", e?.message || "Could not change password.");
+    } finally { setChangingPw(false); }
+  };
+
+  const handleChangePin = async () => {
+    if (currentPin.length !== 4) { Alert.alert("Required", "Enter your current 4-digit PIN."); return; }
+    if (newPin.length !== 4) { Alert.alert("Required", "Enter a new 4-digit PIN."); return; }
+    if (newPin !== confirmPin) { Alert.alert("Mismatch", "New PINs do not match."); return; }
+    if (newPin === currentPin) { Alert.alert("Invalid", "New PIN must be different from current."); return; }
+    setChangingPin(true);
+    try {
+      await api.changePin({ current_pin: currentPin, new_pin: newPin });
+      setPinModal(false);
+      setCurrentPin(""); setNewPin(""); setConfirmPin("");
+      Alert.alert("PIN Changed", "Your security PIN has been updated.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not change PIN.");
+    } finally { setChangingPin(false); }
   };
 
   const styles = makeStyles(colors);
@@ -149,6 +162,7 @@ export default function OwnerProfile() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
         <Text style={styles.title}>Profile</Text>
 
+        {/* Avatar */}
         <View style={styles.avatarSection}>
           <View style={styles.avatar}>
             <Ionicons name="business" size={36} color={colors.cyan} />
@@ -160,6 +174,7 @@ export default function OwnerProfile() {
           </View>
         </View>
 
+        {/* Cashup method */}
         <Text style={styles.section}>CASHUP PREFERENCES</Text>
         <View style={styles.methodCard}>
           <Text style={styles.methodTitle}>Driver Cash-Up Method</Text>
@@ -182,7 +197,7 @@ export default function OwnerProfile() {
               </View>
             </TouchableOpacity>
           </View>
-          {cashupMethod === "bank" && !bankData?.bank_account && (
+          {cashupMethod === "bank" && !bankData?.bank_name && (
             <View style={styles.warningNote}>
               <Ionicons name="warning-outline" size={14} color="#FFD60A" />
               <Text style={styles.warningText}>Add bank account below to enable bank cashups</Text>
@@ -190,6 +205,7 @@ export default function OwnerProfile() {
           )}
         </View>
 
+        {/* Banking details */}
         <Text style={[styles.section, { marginTop: 24 }]}>BANKING DETAILS</Text>
         {bankData?.bank_name ? (
           <View style={styles.bankCard}>
@@ -215,14 +231,12 @@ export default function OwnerProfile() {
           </TouchableOpacity>
         )}
 
-        {/* Pay Out */}
+        {/* Wallet */}
         <Text style={[styles.section, { marginTop: 24 }]}>WALLET</Text>
         <View style={styles.walletCard}>
           <View style={{ flex: 1 }}>
             <Text style={styles.walletLabel}>AVAILABLE BALANCE</Text>
-            <Text style={styles.walletBalance}>
-              {walletBalance !== null ? formatZAR(walletBalance) : "—"}
-            </Text>
+            <Text style={styles.walletBalance}>{walletBalance !== null ? formatZAR(walletBalance) : "—"}</Text>
           </View>
           <TouchableOpacity
             onPress={() => { setPayOutAmount(""); setPayOutModal(true); }}
@@ -251,7 +265,7 @@ export default function OwnerProfile() {
                 </Text>
                 <Text style={styles.subSub}>
                   {subscription.billable_taxis === 0
-                    ? `First ${subscription.free_taxis} taxi free — add more taxis to unlock paid plan`
+                    ? `First ${subscription.free_taxis} taxi free`
                     : `${subscription.free_taxis} free + ${subscription.billable_taxis} paid`}
                 </Text>
               </View>
@@ -264,25 +278,23 @@ export default function OwnerProfile() {
             {subscription.status === "overdue" && (
               <View style={styles.overdueNote}>
                 <Ionicons name="warning-outline" size={14} color={colors.red} />
-                <Text style={styles.overdueText}>Payment failed — please top up your wallet to clear your subscription</Text>
+                <Text style={styles.overdueText}>Payment failed — top up your wallet to clear your subscription</Text>
               </View>
             )}
             {subscription.next_billing_date && (
-              <Text style={styles.subNextBilling}>
-                Next billing: {subscription.next_billing_date}
-              </Text>
+              <Text style={styles.subNextBilling}>Next billing: {subscription.next_billing_date}</Text>
             )}
           </View>
         ) : null}
 
         {/* Documents */}
-        <TouchableOpacity style={styles.stmtBtn} onPress={() => router.push("/owner/documents")}>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push("/owner/documents")}>
           <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
             <Ionicons name="folder-outline" size={20} color={colors.cyan} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.menuTitle}>My Documents</Text>
-            <Text style={styles.menuSub}>View and download fleet statements & documents</Text>
+            <Text style={styles.menuSub}>Statements, payslips & fleet documents</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
@@ -301,23 +313,43 @@ export default function OwnerProfile() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
 
-        {[
-          { icon: "car-sport-outline", color: colors.cyanDim, iconColor: colors.cyan, title: "Driver Mode", sub: "Activate to receive passenger payments", route: "/owner/driver-mode" },
-          { icon: "lock-closed-outline", color: colors.greenDim, iconColor: colors.green, title: "Change Security PIN", sub: "Update your 4-digit in-app PIN", route: "/(app)/profile" },
-          { icon: "shield-checkmark-outline", color: "#A064FF20", iconColor: "#A064FF", title: "Identity Verification", sub: "KYC status and documents", route: "/(app)/kyc" },
-        ].map((item, i) => (
-          <TouchableOpacity key={i} style={styles.menuItem} onPress={() => router.push(item.route as any)}>
-            <View style={[styles.menuIcon, { backgroundColor: item.color }]}>
-              <Ionicons name={item.icon as any} size={20} color={item.iconColor} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuTitle}>{item.title}</Text>
-              <Text style={styles.menuSub}>{item.sub}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        ))}
+        {/* Change PIN */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => { setCurrentPin(""); setNewPin(""); setConfirmPin(""); setPinModal(true); }}>
+          <View style={[styles.menuIcon, { backgroundColor: colors.greenDim }]}>
+            <Ionicons name="lock-closed-outline" size={20} color={colors.green} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>Change Security PIN</Text>
+            <Text style={styles.menuSub}>Update your 4-digit in-app PIN</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
 
+        {/* Driver Mode */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push("/owner/driver-mode")}>
+          <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
+            <Ionicons name="car-sport-outline" size={20} color={colors.cyan} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>Driver Mode</Text>
+            <Text style={styles.menuSub}>Activate to receive passenger payments</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        {/* KYC */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push("/owner/documents")}>
+          <View style={[styles.menuIcon, { backgroundColor: "#A064FF20" }]}>
+            <Ionicons name="shield-checkmark-outline" size={20} color="#A064FF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>Identity Verification</Text>
+            <Text style={styles.menuSub}>KYC status and documents</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        {/* Sign out */}
         <TouchableOpacity style={styles.signOutBtn}
           onPress={() => Alert.alert("Sign out", "Are you sure?", [
             { text: "Cancel", style: "cancel" },
@@ -330,7 +362,7 @@ export default function OwnerProfile() {
         <Text style={styles.version}>Tag n Ride · Fleet Owner · v1.0</Text>
       </ScrollView>
 
-      {/* Pay Out modal */}
+      {/* ── Pay Out modal ── */}
       <Modal visible={payOutModal} transparent animationType="slide" onRequestClose={() => setPayOutModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
@@ -347,25 +379,17 @@ export default function OwnerProfile() {
             )}
             <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
             <TextInput
-              style={styles.modalInput}
-              value={payOutAmount}
-              onChangeText={setPayOutAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={colors.textDim}
-            />
+              style={styles.modalInput} value={payOutAmount} onChangeText={setPayOutAmount}
+              keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim} />
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
-              <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary" onPress={() => { setPayOutModal(false); setPayOutAmount(""); }} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button label="Pay Out" onPress={handlePayOut} loading={payOutLoading} />
-              </View>
+              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => { setPayOutModal(false); setPayOutAmount(""); }} /></View>
+              <View style={{ flex: 1 }}><Button label="Pay Out" onPress={handlePayOut} loading={payOutLoading} /></View>
             </View>
           </View>
         </View>
       </Modal>
 
+      {/* ── Bank details modal ── */}
       <Modal visible={bankModal} transparent animationType="slide" onRequestClose={() => setBankModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
@@ -389,12 +413,8 @@ export default function OwnerProfile() {
             <TextInput style={styles.modalInput} value={accountName} onChangeText={setAccountName}
               placeholder="e.g. John Mokoena" placeholderTextColor={colors.textDim} autoCapitalize="words" />
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
-              <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary" onPress={() => setBankModal(false)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button label="Save Details" onPress={handleSaveBank} loading={saving} />
-              </View>
+              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setBankModal(false)} /></View>
+              <View style={{ flex: 1 }}><Button label="Save Details" onPress={handleSaveBank} loading={saving} /></View>
             </View>
           </View>
         </View>
@@ -411,55 +431,32 @@ export default function OwnerProfile() {
             <Text style={styles.modalTitle}>Change Password</Text>
             <Text style={styles.modalSub}>Your login password (not the 4-digit PIN)</Text>
 
-            {/* Current password */}
             <Text style={styles.inputLabel}>CURRENT PASSWORD</Text>
             <View style={styles.pwRow}>
-              <TextInput
-                style={[styles.modalInput, { flex: 1, marginBottom: 0 }]}
-                value={currentPw}
-                onChangeText={setCurrentPw}
-                placeholder="Current password"
-                placeholderTextColor={colors.textDim}
-                secureTextEntry={!showCurrentPw}
-                autoCapitalize="none"
-              />
+              <TextInput style={[styles.modalInput, { flex: 1, marginBottom: 0 }]} value={currentPw} onChangeText={setCurrentPw}
+                placeholder="Current password" placeholderTextColor={colors.textDim}
+                secureTextEntry={!showCurrentPw} autoCapitalize="none" />
               <TouchableOpacity onPress={() => setShowCurrentPw(v => !v)} style={styles.eyeBtn}>
                 <Ionicons name={showCurrentPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
-            {/* New password */}
             <Text style={[styles.inputLabel, { marginTop: 14 }]}>NEW PASSWORD</Text>
             <View style={styles.pwRow}>
-              <TextInput
-                style={[styles.modalInput, { flex: 1, marginBottom: 0 }]}
-                value={newPw}
-                onChangeText={setNewPw}
-                placeholder="At least 8 characters"
-                placeholderTextColor={colors.textDim}
-                secureTextEntry={!showNewPw}
-                autoCapitalize="none"
-              />
+              <TextInput style={[styles.modalInput, { flex: 1, marginBottom: 0 }]} value={newPw} onChangeText={setNewPw}
+                placeholder="At least 8 characters" placeholderTextColor={colors.textDim}
+                secureTextEntry={!showNewPw} autoCapitalize="none" />
               <TouchableOpacity onPress={() => setShowNewPw(v => !v)} style={styles.eyeBtn}>
                 <Ionicons name={showNewPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
-            {/* Confirm new password */}
             <Text style={[styles.inputLabel, { marginTop: 14 }]}>CONFIRM NEW PASSWORD</Text>
             <View style={[styles.pwRow, { marginBottom: 4 }]}>
-              <TextInput
-                style={[styles.modalInput, {
-                  flex: 1, marginBottom: 0,
-                  borderColor: confirmPw && newPw !== confirmPw ? colors.red : colors.border,
-                }]}
-                value={confirmPw}
-                onChangeText={setConfirmPw}
-                placeholder="Repeat new password"
-                placeholderTextColor={colors.textDim}
-                secureTextEntry={!showConfirmPw}
-                autoCapitalize="none"
-              />
+              <TextInput style={[styles.modalInput, { flex: 1, marginBottom: 0, borderColor: confirmPw && newPw !== confirmPw ? colors.red : colors.border }]}
+                value={confirmPw} onChangeText={setConfirmPw}
+                placeholder="Repeat new password" placeholderTextColor={colors.textDim}
+                secureTextEntry={!showConfirmPw} autoCapitalize="none" />
               <TouchableOpacity onPress={() => setShowConfirmPw(v => !v)} style={styles.eyeBtn}>
                 <Ionicons name={showConfirmPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
               </TouchableOpacity>
@@ -467,14 +464,47 @@ export default function OwnerProfile() {
             {confirmPw.length > 0 && newPw !== confirmPw && (
               <Text style={{ color: colors.red, fontSize: 11, marginBottom: 8 }}>Passwords do not match</Text>
             )}
-
             <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
-              <View style={{ flex: 1 }}>
-                <Button label="Cancel" variant="secondary" onPress={() => setPwModal(false)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button label="Update" onPress={handleChangePassword} loading={changingPw} />
-              </View>
+              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setPwModal(false)} /></View>
+              <View style={{ flex: 1 }}><Button label="Update" onPress={handleChangePassword} loading={changingPw} /></View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Change PIN modal ── */}
+      <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={[styles.modalIconWrap, { backgroundColor: colors.greenDim }]}>
+              <Ionicons name="lock-closed-outline" size={26} color={colors.green} />
+            </View>
+            <Text style={styles.modalTitle}>Change Security PIN</Text>
+            <Text style={styles.modalSub}>Your 4-digit PIN for in-app actions</Text>
+
+            <Text style={styles.inputLabel}>CURRENT PIN</Text>
+            <TextInput style={styles.modalInput} value={currentPin} onChangeText={t => { if (/^\d*$/.test(t) && t.length <= 4) setCurrentPin(t); }}
+              placeholder="••••" placeholderTextColor={colors.textDim}
+              keyboardType="numeric" maxLength={4} secureTextEntry />
+
+            <Text style={styles.inputLabel}>NEW PIN</Text>
+            <TextInput style={styles.modalInput} value={newPin} onChangeText={t => { if (/^\d*$/.test(t) && t.length <= 4) setNewPin(t); }}
+              placeholder="••••" placeholderTextColor={colors.textDim}
+              keyboardType="numeric" maxLength={4} secureTextEntry />
+
+            <Text style={styles.inputLabel}>CONFIRM NEW PIN</Text>
+            <TextInput style={[styles.modalInput, { borderColor: confirmPin && newPin !== confirmPin ? colors.red : colors.border }]}
+              value={confirmPin} onChangeText={t => { if (/^\d*$/.test(t) && t.length <= 4) setConfirmPin(t); }}
+              placeholder="••••" placeholderTextColor={colors.textDim}
+              keyboardType="numeric" maxLength={4} secureTextEntry />
+            {confirmPin.length > 0 && newPin !== confirmPin && (
+              <Text style={{ color: colors.red, fontSize: 11, marginTop: -10, marginBottom: 8 }}>PINs do not match</Text>
+            )}
+
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => setPinModal(false)} /></View>
+              <View style={{ flex: 1 }}><Button label="Update PIN" onPress={handleChangePin} loading={changingPin} /></View>
             </View>
           </View>
         </View>
@@ -482,6 +512,7 @@ export default function OwnerProfile() {
     </SafeAreaView>
   );
 }
+
 const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   title: { color: colors.text, fontSize: 24, fontWeight: "800", marginBottom: 24 },
@@ -535,7 +566,6 @@ const makeStyles = (colors: any) => StyleSheet.create({
   subNextBilling: { color: colors.textDim, fontSize: 11, marginTop: 8 },
   overdueNote: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 8, backgroundColor: colors.redDim, borderRadius: radius.sm },
   overdueText: { color: colors.red, fontSize: 11, flex: 1 },
-  stmtBtn: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 8 },
   signOutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.redDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red, padding: 16, marginTop: 24 },
   signOutText: { color: colors.red, fontWeight: "800", fontSize: 15 },
   version: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 24 },
@@ -545,12 +575,11 @@ const makeStyles = (colors: any) => StyleSheet.create({
   modalTitle: { color: colors.text, fontSize: 20, fontWeight: "800", textAlign: "center" },
   modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4, marginBottom: 20, lineHeight: 18 },
   inputLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8 },
-  modalInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 15, marginBottom: 16 },
+  modalInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 15, marginBottom: 16 },
   bankChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   bankChipActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
   bankChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
   bankChipTextActive: { color: colors.cyan },
-  // Change password modal
   modalIconWrap: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 12, borderWidth: 1, borderColor: colors.border },
   pwRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
   eyeBtn: { width: 48, height: 50, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },

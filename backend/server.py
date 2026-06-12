@@ -295,6 +295,10 @@ CREATE TABLE IF NOT EXISTS fleet_owners (
     user_id TEXT UNIQUE NOT NULL REFERENCES users(id),
     business_name TEXT,
     registered_as_driver BOOLEAN DEFAULT FALSE,
+    bank_name TEXT,
+    account_number TEXT,
+    account_name TEXT,
+    cashup_method TEXT DEFAULT 'wallet',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -384,6 +388,10 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles TEXT DEFAULT ''",
                 "ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL",
                 "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS registered_as_driver BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS bank_name TEXT",
+                "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS account_number TEXT",
+                "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS account_name TEXT",
+                "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS cashup_method TEXT DEFAULT 'wallet'",
                 # owner_drivers columns required by dashboard and commission endpoints
                 "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT 'daily_target'",
                 "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS driver_commission_pct NUMERIC(5,2) DEFAULT 0",
