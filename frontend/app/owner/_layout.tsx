@@ -38,6 +38,15 @@ export default function OwnerTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="driver-mode"
+        options={{
+          title: "Drive",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="car-sport-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
@@ -46,7 +55,6 @@ export default function OwnerTabLayout() {
           ),
         }}
       />
-      <Tabs.Screen name="driver-mode" options={{ href: null }} />
       <Tabs.Screen name="documents" options={{ href: null }} />
       <Tabs.Screen name="statement" options={{ href: null }} />
       <Tabs.Screen name="driver" options={{ href: null }} />
