@@ -369,6 +369,52 @@ async def lifespan(app: FastAPI):
         async with pool.acquire() as conn:
             await conn.execute(CREATE_TABLES_SQL)
         print("DB pool created, tables ready")
+        # Critical migrations — run independently so a single failure never blocks the rest
+        async with pool.acquire() as conn:
+            for _sql in [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS surname TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS id_number TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles TEXT DEFAULT ''",
+                "ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL",
+                "ALTER TABLE fleet_owners ADD COLUMN IF NOT EXISTS registered_as_driver BOOLEAN DEFAULT FALSE",
+                PLATFORM_LEDGER_SQL,
+                """CREATE TABLE IF NOT EXISTS statement_requests (
+                    id TEXT PRIMARY KEY,
+                    reference TEXT UNIQUE NOT NULL,
+                    user_id TEXT NOT NULL REFERENCES users(id),
+                    role TEXT NOT NULL,
+                    period_start DATE NOT NULL,
+                    period_end DATE NOT NULL,
+                    amount_paid NUMERIC(14,2) DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'paid',
+                    transaction_id TEXT,
+                    statement_data JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    CONSTRAINT chk_stmt_role CHECK (role IN ('owner','passenger','driver'))
+                )""",
+                """CREATE TABLE IF NOT EXISTS user_documents (
+                    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                    user_id TEXT NOT NULL,
+                    document_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    period_label TEXT,
+                    amount NUMERIC DEFAULT 0,
+                    reference_number TEXT,
+                    source TEXT DEFAULT 'app',
+                    is_read BOOLEAN DEFAULT false,
+                    status TEXT DEFAULT 'active',
+                    metadata JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )""",
+            ]:
+                try:
+                    await conn.execute(_sql)
+                except Exception as _e:
+                    log.warning("Critical migration skipped: %s", _e)
         await create_new_tables()
         asyncio.create_task(transfer_escalation_loop())
         asyncio.create_task(commission_auto_cashup_loop())
@@ -3625,6 +3671,8 @@ async def create_new_tables():
                         "INSERT INTO coverage_zones (id,name,city,province,country,active) VALUES ($1,$2,$3,$4,'ZA',TRUE) ON CONFLICT DO NOTHING",
                         zid,zn,city,prov
                     )
+                # Create platform ledger tables before seeding
+                await conn.execute(PLATFORM_LEDGER_SQL)
                 # Seed platform accounts
                 platform_accounts_defaults = [
                     ('user_wallets', 0, 'Total balance held in user wallets'),
@@ -11318,14 +11366,13 @@ async def owner_request_statement(body: StatementRequestIn, user: dict = Depends
                 INSERT INTO transactions (id, reference, type, status, amount, currency, sender_id, note)
                 VALUES ($1,$2,'statement_fee','completed',$3,'ZAR',$4,'Owner fleet statement download')
             """, txn_id, f"STMTFEE-{ref}", price, user["id"])
-            import json as _json
             await conn.execute("""
                 INSERT INTO statement_requests
                     (id, reference, user_id, role, period_start, period_end,
                      amount_paid, status, transaction_id, statement_data)
                 VALUES ($1,$2,$3,'owner',$4,$5,$6,'paid',$7,$8)
             """, stmt_id, ref, user["id"], body.period_start, body.period_end,
-                price, txn_id, _json.dumps(stmt_data))
+                price, txn_id, stmt_data)
             await conn.execute(
                 """INSERT INTO user_documents
                    (id,user_id,document_type,title,description,period_label,amount,reference_number,source,is_read,metadata)
@@ -11336,7 +11383,7 @@ async def owner_request_statement(body: StatementRequestIn, user: dict = Depends
                 f"{body.period_start} to {body.period_end}",
                 price,
                 ref,
-                _json.dumps({"statement_id": stmt_id, "statement_type": "owner"})
+                {"statement_id": stmt_id, "statement_type": "owner"}
             )
     return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
 
@@ -11418,7 +11465,6 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
         }
         stmt_id = str(uuid.uuid4())
         ref = f"PSTMT-{stmt_id[:8].upper()}"
-        import json as _json
         async with conn.transaction():
             if price > 0:
                 txn_id = str(uuid.uuid4())
@@ -11435,7 +11481,7 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
                      amount_paid, status, transaction_id, statement_data)
                 VALUES ($1,$2,$3,'passenger',$4,$5,$6,'paid',$7,$8)
             """, stmt_id, ref, user["id"], body.period_start, body.period_end,
-                price, txn_id, _json.dumps(stmt_data))
+                price, txn_id, stmt_data)
             await conn.execute(
                 """INSERT INTO user_documents
                    (id,user_id,document_type,title,description,period_label,amount,reference_number,source,is_read,metadata)
@@ -11446,7 +11492,7 @@ async def passenger_request_statement(body: StatementRequestIn, user: dict = Dep
                 f"{body.period_start} to {body.period_end}",
                 price,
                 ref,
-                _json.dumps({"statement_id": stmt_id, "statement_type": "passenger"})
+                {"statement_id": stmt_id, "statement_type": "passenger"}
             )
     return {"statement_id": stmt_id, "reference": ref, "amount_charged": price, "data": stmt_data}
 
