@@ -25,6 +25,7 @@ export default function OwnerDriveMode() {
 
   if (state.status !== "authed") return null;
   const u = state.user;
+  const driverModeActive = wallet?.driver_mode_active ?? false;
   const qrCode = wallet?.qr_code ?? "";
 
   const handleCopy = async () => {
@@ -69,7 +70,9 @@ export default function OwnerDriveMode() {
         <View style={[s.infoBanner, { backgroundColor: colors.cyanDim, borderColor: colors.cyan + "44" }]}>
           <Ionicons name="information-circle-outline" size={16} color={colors.cyan} />
           <Text style={[s.infoBannerText, { color: colors.text }]}>
-            Show this QR code to passengers when you drive. Payments go directly to your wallet.
+            {driverModeActive
+              ? "Show this QR code to passengers when you drive. Payments go directly to your wallet."
+              : "Driver mode is off. Activate it in your profile to start accepting passenger payments."}
           </Text>
         </View>
 
@@ -86,7 +89,11 @@ export default function OwnerDriveMode() {
           </View>
 
           <View style={s.qrBox}>
-            {qrCode ? (
+            {!wallet ? (
+              <View style={s.qrLoader}>
+                <ActivityIndicator color="#00D4FF" size="large" />
+              </View>
+            ) : driverModeActive && qrCode ? (
               <QRCode
                 value={qrCode} size={220} color="#05050A" backgroundColor="#FFFFFF"
                 logo={{ uri: logoUri }} logoSize={52} logoBackgroundColor="#FFFFFF"
@@ -94,7 +101,13 @@ export default function OwnerDriveMode() {
               />
             ) : (
               <View style={s.qrLoader}>
-                <ActivityIndicator color="#00D4FF" size="large" />
+                <Ionicons name="car-sport-outline" size={48} color="#00D4FF" />
+                <Text style={{ color: "#333", fontWeight: "700", fontSize: 15, marginTop: 12, textAlign: "center" }}>
+                  Driver mode not active
+                </Text>
+                <Text style={{ color: "#888", fontSize: 13, marginTop: 6, textAlign: "center", paddingHorizontal: 12 }}>
+                  Activate driver mode in your profile to receive passenger payments.
+                </Text>
               </View>
             )}
           </View>
@@ -102,16 +115,17 @@ export default function OwnerDriveMode() {
           <Text style={s.qrName}>{u.full_name}</Text>
           <Text style={s.qrPhone}>{u.phone_number}</Text>
 
-          <View style={s.qrCodePill}>
-            <Ionicons name="finger-print" size={14} color="#00D4FF" />
-            <Text style={s.qrCodeText}>{qrCode || "Loading..."}</Text>
-          </View>
-
-          <Text style={s.qrHint}>Scan to pay me instantly</Text>
+          {driverModeActive && <>
+            <View style={s.qrCodePill}>
+              <Ionicons name="finger-print" size={14} color="#00D4FF" />
+              <Text style={s.qrCodeText}>{qrCode}</Text>
+            </View>
+            <Text style={s.qrHint}>Scan to pay me instantly</Text>
+          </>}
         </View>
 
-        {/* Action buttons */}
-        <View style={s.actionRow}>
+        {/* Action buttons — only shown when driver mode is active */}
+        {driverModeActive && <View style={s.actionRow}>
           {[
             { icon: "copy-outline", label: "Copy ID", onPress: handleCopy },
             { icon: "share-social-outline", label: "Share", onPress: handleShare },
@@ -124,7 +138,7 @@ export default function OwnerDriveMode() {
               <Text style={[s.actionBtnLabel, { color: colors.text }]}>{btn.label}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </View>}
 
         {/* Account details */}
         <View style={[s.detailCard, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
