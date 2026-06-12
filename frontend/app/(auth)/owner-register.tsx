@@ -106,10 +106,16 @@ export default function OwnerRegister() {
 
   // ── Step 1: Identity ──────────────────────────────────────
   const submitStep1 = () => {
-    if (!fullName.trim()) { Alert.alert("Required", "Please enter your first name."); return; }
-    if (!surname.trim()) { Alert.alert("Required", "Please enter your surname."); return; }
+    if (fullName.trim().length < 2) { Alert.alert("Required", "First name must be at least 2 characters."); return; }
+    if (surname.trim().length < 2) { Alert.alert("Required", "Surname must be at least 2 characters."); return; }
     if (!email.trim() || !/\S+@\S+\.\S+/.test(email.trim())) {
       Alert.alert("Required", "Please enter a valid email address. You'll use it to sign in."); return;
+    }
+    if (phoneNumber.trim() && phoneNumber.trim().length < 7) {
+      Alert.alert("Invalid", "Phone number must be at least 7 digits."); return;
+    }
+    if (idNumber.trim() && idNumber.trim().length < 5) {
+      Alert.alert("Invalid", "ID / passport number must be at least 5 characters."); return;
     }
     setStep(2);
   };
