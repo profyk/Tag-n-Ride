@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, KeyboardAvoidingView, Platform,
+  TextInput, Alert, Keyboard, KeyboardAvoidingView, Platform,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -75,6 +75,7 @@ export default function OwnerRegister() {
   const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [regError, setRegError] = useState("");
 
   // Step 1 — Identity
   const [fullName, setFullName] = useState("");
@@ -127,6 +128,7 @@ export default function OwnerRegister() {
 
   // ── Step 2b: PIN → triggers registration on confirm ───────
   const submitPin = () => {
+    Keyboard.dismiss();
     if (pinSubStep === "create") {
       if (pin.length !== 4) { Alert.alert("Required", "Please enter a 4-digit PIN."); return; }
       setPinSubStep("confirm"); setPinConfirm(""); return;
@@ -140,6 +142,7 @@ export default function OwnerRegister() {
 
   // ── Register ──────────────────────────────────────────────
   const submitRegister = async () => {
+    setRegError("");
     setLoading(true);
     try {
       await signUp({
@@ -155,7 +158,9 @@ export default function OwnerRegister() {
       });
       router.replace("/owner/dashboard");
     } catch (e: any) {
-      const msg: string = e?.message || "Please try again.";
+      const msg: string = e?.message || "Something went wrong. Please try again.";
+      console.error("[owner-register] signUp failed:", msg);
+      setRegError(msg);
       if (msg.toLowerCase().includes("email already")) {
         Alert.alert(
           "Email Already Registered",
@@ -326,6 +331,11 @@ export default function OwnerRegister() {
                   </>
                 )}
               </TouchableOpacity>
+              {!!regError && (
+                <View style={{ backgroundColor: "#FF3B3020", borderRadius: 10, borderWidth: 1, borderColor: "#FF3B30", padding: 12, marginTop: 12 }}>
+                  <Text style={{ color: "#FF3B30", fontSize: 13, textAlign: "center" }}>{regError}</Text>
+                </View>
+              )}
             </View>
           )}
 
