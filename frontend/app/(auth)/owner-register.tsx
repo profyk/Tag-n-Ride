@@ -128,11 +128,13 @@ export default function OwnerRegister() {
 
   // ── Step 2b: PIN → triggers registration on confirm ───────
   const submitPin = () => {
-    Keyboard.dismiss();
     if (pinSubStep === "create") {
       if (pin.length !== 4) { Alert.alert("Required", "Please enter a 4-digit PIN."); return; }
+      // Don't dismiss keyboard — user still needs it for the confirm step
       setPinSubStep("confirm"); setPinConfirm(""); return;
     }
+    // Only dismiss keyboard when we're about to submit
+    Keyboard.dismiss();
     if (pin !== pinConfirm) {
       Alert.alert("PIN Mismatch", "PINs do not match. Try again.");
       setPinSubStep("create"); setPin(""); setPinConfirm(""); return;
@@ -316,6 +318,7 @@ export default function OwnerRegister() {
                   : "Enter your PIN again to confirm."}
               </Text>
               <PinInput
+                key={pinSubStep}
                 value={pinSubStep === "create" ? pin : pinConfirm}
                 onChange={pinSubStep === "create" ? setPin : setPinConfirm}
                 colors={colors}
