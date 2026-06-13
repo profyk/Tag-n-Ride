@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal, ActivityIndicator, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -54,12 +54,21 @@ export default function OwnerProfile() {
   const [confirmPin, setConfirmPin] = useState("");
   const [changingPin, setChangingPin] = useState(false);
 
+  // Dead man code
+  const [deadManCodeSet, setDeadManCodeSet] = useState(false);
+  const [deadManModal, setDeadManModal] = useState(false);
+  const [deadManCode, setDeadManCode] = useState("");
+  const [deadManCodeConfirm, setDeadManCodeConfirm] = useState("");
+  const [deadManCurrentPin, setDeadManCurrentPin] = useState("");
+  const [deadManSaving, setDeadManSaving] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [bankRes, walletRes, subRes] = await Promise.all([
+      const [bankRes, walletRes, subRes, safetyRes] = await Promise.all([
         api.ownerGetBank(),
         api.ownerWallet().catch(() => null),
         api.ownerSubscription().catch(() => null),
+        api.safetyProfile().catch(() => null),
       ]);
       setBankData(bankRes);
       setCashupMethod(bankRes.cashup_method || "wallet");
@@ -70,6 +79,7 @@ export default function OwnerProfile() {
       }
       if (walletRes) setWalletBalance(walletRes.balance ?? null);
       if (subRes) setSubscription(subRes.subscription);
+      if (safetyRes) setDeadManCodeSet(!!safetyRes.dead_man_code_set);
     } catch {}
   }, []);
 
@@ -169,6 +179,31 @@ export default function OwnerProfile() {
     } catch (e: any) {
       Alert.alert("Failed", e?.message || "Could not change PIN.");
     } finally { setChangingPin(false); }
+  };
+
+  const handleSaveDeadManCode = async () => {
+    if (deadManCode.length < 4 || !/^\d+$/.test(deadManCode)) {
+      Alert.alert("Invalid", "Dead man code must be 4–6 digits."); return;
+    }
+    if (deadManCode !== deadManCodeConfirm) {
+      Alert.alert("Mismatch", "Codes do not match."); return;
+    }
+    if (!deadManCurrentPin) {
+      Alert.alert("PIN required", "Enter your current account PIN to confirm."); return;
+    }
+    if (deadManCode === deadManCurrentPin) {
+      Alert.alert("Invalid", "Dead man code must be different from your real PIN."); return;
+    }
+    setDeadManSaving(true);
+    try {
+      await api.setDeadManCode({ dead_man_code: deadManCode, current_pin: deadManCurrentPin });
+      setDeadManCodeSet(true);
+      setDeadManModal(false);
+      setDeadManCode(""); setDeadManCodeConfirm(""); setDeadManCurrentPin("");
+      Alert.alert("Dead Man Code Set", "Saved securely. If you enter this code instead of your real PIN when cancelling an SOS, it will appear cancelled but your location keeps being tracked silently.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not save code.");
+    } finally { setDeadManSaving(false); }
   };
 
   const styles = makeStyles(colors);
@@ -396,11 +431,54 @@ export default function OwnerProfile() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
 
+        {/* Dead Man Code */}
+        <Text style={[styles.section, { marginTop: 24 }]}>EMERGENCY SAFETY</Text>
+        <View style={[styles.deadManCard, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+            <View style={[styles.menuIcon, { backgroundColor: colors.redDim }]}>
+              <Ionicons name="shield-half-outline" size={20} color={colors.red} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuTitle, { color: colors.text }]}>Dead Man Code</Text>
+              <Text style={[styles.menuSub, { color: colors.textMuted }]}>
+                A secret code you enter instead of your real PIN when cancelling an SOS under duress. It appears to cancel but silently keeps tracking your location and alerts our team.
+              </Text>
+            </View>
+          </View>
+          {deadManCodeSet ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+              <Ionicons name="checkmark-circle" size={15} color={colors.green} />
+              <Text style={{ color: colors.green, fontWeight: "700", fontSize: 13 }}>Dead man code is set</Text>
+            </View>
+          ) : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+              <Ionicons name="warning-outline" size={15} color={colors.red} />
+              <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>No dead man code set</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[styles.deadManBtn, { borderColor: colors.red + "60", backgroundColor: colors.redDim }]}
+            onPress={() => { setDeadManCode(""); setDeadManCodeConfirm(""); setDeadManCurrentPin(""); setDeadManModal(true); }}>
+            <Ionicons name="key-outline" size={15} color={colors.red} />
+            <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>
+              {deadManCodeSet ? "Change Dead Man Code" : "Set Dead Man Code"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Sign out */}
         <TouchableOpacity style={styles.signOutBtn}
           onPress={() => Alert.alert("Sign out", "Are you sure?", [
             { text: "Cancel", style: "cancel" },
-            { text: "Sign out", style: "destructive", onPress: () => signOut() },
+            {
+              text: "Sign out", style: "destructive",
+              onPress: () => {
+                // Navigate away first while the component is still mounted,
+                // then clear auth state — avoids navigation-after-unmount race
+                router.replace("/(auth)/welcome");
+                signOut();
+              },
+            },
           ])}>
           <Ionicons name="log-out-outline" size={20} color={colors.red} />
           <Text style={styles.signOutText}>Sign Out</Text>
@@ -583,6 +661,76 @@ export default function OwnerProfile() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Dead Man Code modal ── */}
+      <Modal visible={deadManModal} transparent animationType="slide" onRequestClose={() => setDeadManModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setDeadManModal(false)}>
+          <Pressable style={styles.modalSheet} onPress={() => {}}>
+            <View style={styles.modalHandle} />
+            <View style={[styles.modalIconWrap, { backgroundColor: colors.redDim, borderColor: colors.red + "40" }]}>
+              <Ionicons name="shield-half-outline" size={26} color={colors.red} />
+            </View>
+            <Text style={styles.modalTitle}>Dead Man Code</Text>
+            <Text style={[styles.modalSub, { color: colors.textMuted }]}>
+              Enter this code instead of your real PIN when cancelling an SOS if you are under duress.
+              It looks like a cancel but your location keeps being tracked silently.{"\n\n"}
+              Keep it secret — never share it with anyone.
+            </Text>
+
+            <Text style={styles.inputLabel}>NEW DEAD MAN CODE (4–6 digits)</Text>
+            <TextInput
+              style={[styles.modalInput, { borderColor: colors.red + "60" }]}
+              value={deadManCode}
+              onChangeText={setDeadManCode}
+              placeholder="e.g. 9999"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+            />
+
+            <Text style={styles.inputLabel}>CONFIRM CODE</Text>
+            <TextInput
+              style={[styles.modalInput, { borderColor: deadManCodeConfirm && deadManCode !== deadManCodeConfirm ? colors.red : colors.red + "60" }]}
+              value={deadManCodeConfirm}
+              onChangeText={setDeadManCodeConfirm}
+              placeholder="Repeat code"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+            />
+            {deadManCodeConfirm.length > 0 && deadManCode !== deadManCodeConfirm && (
+              <Text style={{ color: colors.red, fontSize: 11, marginBottom: 8 }}>Codes do not match</Text>
+            )}
+
+            <Text style={styles.inputLabel}>YOUR CURRENT ACCOUNT PIN</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={deadManCurrentPin}
+              onChangeText={setDeadManCurrentPin}
+              placeholder="Your regular 4-digit PIN"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+            />
+
+            <TouchableOpacity
+              style={[styles.signOutBtn, { marginTop: 8, backgroundColor: colors.redDim, borderColor: colors.red, opacity: deadManSaving ? 0.6 : 1 }]}
+              onPress={handleSaveDeadManCode}
+              disabled={deadManSaving}>
+              {deadManSaving
+                ? <ActivityIndicator color={colors.red} size="small" />
+                : <><Ionicons name="key-outline" size={18} color={colors.red} />
+                   <Text style={styles.signOutText}>Save Dead Man Code</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setDeadManModal(false)} style={{ alignItems: "center", paddingVertical: 12 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -647,6 +795,8 @@ const makeStyles = (colors: any) => StyleSheet.create({
   subBreakdownVal: { fontSize: 12, fontWeight: "700" },
   autoDebitNote: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radius.sm, borderWidth: 1, padding: 8, marginTop: 10 },
   autoDebitText: { fontSize: 11, fontWeight: "600", flex: 1 },
+  deadManCard: { borderRadius: radius.md, borderWidth: 1, padding: 16, marginBottom: 8 },
+  deadManBtn: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radius.md, borderWidth: 1, padding: 12, alignSelf: "flex-start" },
   signOutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.redDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red, padding: 16, marginTop: 24 },
   signOutText: { color: colors.red, fontWeight: "800", fontSize: 15 },
   version: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 24 },

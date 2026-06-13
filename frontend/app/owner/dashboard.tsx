@@ -4,11 +4,10 @@ import {
   RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { useAuth } from "../../src/AuthContext";
-import { useRouter } from "expo-router";
 import { api, DriverTransfer } from "../../src/api";
 import { formatZAR, formatDate, radius, useColors, darkColors as colors } from "../../src/theme";
 import { Button } from "../../src/ui";
@@ -71,9 +70,16 @@ export default function OwnerDashboard() {
   const [cancelError, setCancelError] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const sosPingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ghostPingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [ghostActive, setGhostActive] = useState(false);
 
   const stopSosPing = useCallback(() => {
     if (sosPingRef.current) { clearInterval(sosPingRef.current); sosPingRef.current = null; }
+  }, []);
+
+  const stopGhostPing = useCallback(() => {
+    if (ghostPingRef.current) { clearInterval(ghostPingRef.current); ghostPingRef.current = null; }
+    setGhostActive(false);
   }, []);
 
   const startSosPing = useCallback((sosId: string) => {
@@ -88,6 +94,21 @@ export default function OwnerDashboard() {
       } catch {}
     }, 30000);
   }, [stopSosPing]);
+
+  // Ghost ping — active after dead man code used during SOS cancel
+  const startGhostPing = useCallback(() => {
+    stopGhostPing();
+    setGhostActive(true);
+    ghostPingRef.current = setInterval(async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const res = await api.ghostPing({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        if (!res.continue) stopGhostPing();
+      } catch {}
+    }, 30000);
+  }, [stopGhostPing]);
 
   const handleSOS = async (type: "police" | "ambulance") => {
     setSosModal(false);
@@ -114,8 +135,18 @@ export default function OwnerDashboard() {
     if (!sosActive || cancelPin.length < 4) { setCancelError("Enter your PIN to cancel SOS."); return; }
     setCancelling(true);
     try {
-      await api.sosCancelPin({ sos_id: sosActive.id, pin: cancelPin });
-      stopSosPing(); setSosActive(null); setCancelModal(false); setCancelPin("");
+      const res = await api.sosCancelPin({ sos_id: sosActive.id, pin: cancelPin });
+      setCancelModal(false); setCancelPin("");
+      if (res.stealth) {
+        // Dead man code was entered — appear to cancel but silently keep tracking
+        stopSosPing();
+        setSosActive(null);
+        startGhostPing();
+      } else {
+        // Real PIN — genuine cancel
+        stopSosPing();
+        setSosActive(null);
+      }
     } catch (e: any) {
       const msg = e?.message || "";
       setCancelError(msg.toLowerCase().includes("pin") || msg.toLowerCase().includes("incorrect") ? "Incorrect PIN." : msg || "Could not cancel.");
@@ -287,7 +318,7 @@ export default function OwnerDashboard() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
               { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: () => signOut() },
+              { text: "Sign out", style: "destructive", onPress: () => { router.replace("/(auth)/welcome"); signOut(); } },
             ])} style={s.avatar}>
               <Ionicons name="business-outline" size={20} color={colors.cyan} />
             </TouchableOpacity>

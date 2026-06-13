@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Tabs, useRouter } from "expo-router";
+import { useState, useEffect } from "react";
+import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useColors } from "../../src/theme";
 import { api } from "../../src/api";
@@ -10,16 +10,7 @@ import { DocumentProvider } from "../../src/DocumentContext";
 function OwnerTabs() {
   const colors = useColors();
   const { state } = useAuth();
-  const router = useRouter();
   const [driverModeActive, setDriverModeActive] = useState(false);
-
-  // Auth guard — fires at layout level so sign-out navigation works
-  // regardless of which screen is currently mounted/unmounting
-  useEffect(() => {
-    if (state.status === "guest") {
-      router.replace("/(auth)/welcome");
-    }
-  }, [state.status]);
 
   useEffect(() => {
     if (state.status !== "authed") return;
@@ -87,11 +78,10 @@ function OwnerTabs() {
           ),
         }}
       />
-      {/* Hidden screens — accessible via in-screen navigation only */}
-      <Tabs.Screen name="notifications" options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="documents"     options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="statement"     options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="driver"        options={{ href: null, tabBarButton: () => null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="documents"     options={{ href: null }} />
+      <Tabs.Screen name="statement"     options={{ href: null }} />
+      <Tabs.Screen name="driver"        options={{ href: null }} />
     </Tabs>
   );
 }

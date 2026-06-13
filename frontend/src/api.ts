@@ -462,7 +462,7 @@ export const api = {
     }[]>("/api/owner/transactions"),
 
   ownerToggleDriverMode: (active: boolean) =>
-    request<{ ok: boolean; driver_mode_active: boolean }>(
+    request<{ ok: boolean; driver_mode_active: boolean; kyc_status: string }>(
       "/api/owner/toggle-driver-mode",
       { method: "POST", body: JSON.stringify({ active }) }
     ),
