@@ -1,1 +1,1 @@
-export { default } from "../(app)/documents";
+export { default } from "../(app)/kyc";

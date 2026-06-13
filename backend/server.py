@@ -2690,20 +2690,23 @@ async def owner_transactions(user: dict = Depends(require_owner)):
 async def owner_toggle_driver_mode(body: dict, user: dict = Depends(require_owner)):
     active = body.get("active", False)
     async with pool.acquire() as conn:
+        kyc_status = "not_submitted"
         if active:
             kyc = await conn.fetchrow("SELECT status FROM kyc_documents WHERE user_id=$1", user["id"])
-            if not kyc or kyc["status"] != "approved":
-                raise HTTPException(status_code=403, detail="KYC approval required to activate driver mode")
+            kyc_status = kyc["status"] if kyc else "not_submitted"
+            # Ensure drivers record exists so QR code is available
             existing_driver = await conn.fetchrow("SELECT id FROM drivers WHERE user_id=$1", user["id"])
             if not existing_driver:
-                await conn.execute("INSERT INTO drivers (id,user_id,qr_code,vehicle_plate,is_verified) VALUES ($1,$2,$3,$4,TRUE)",
-                    str(uuid.uuid4()), user["id"], generate_qr_code(), "")
+                await conn.execute(
+                    "INSERT INTO drivers (id,user_id,qr_code,vehicle_plate,is_verified) VALUES ($1,$2,$3,$4,FALSE)",
+                    str(uuid.uuid4()), user["id"], generate_qr_code(), ""
+                )
         await conn.execute(
             "INSERT INTO wallets (id, user_id, driver_mode_active) VALUES ($1,$2,$3) "
             "ON CONFLICT (user_id) DO UPDATE SET driver_mode_active=EXCLUDED.driver_mode_active",
             str(uuid.uuid4()), user["id"], active
         )
-    return {"ok": True, "driver_mode_active": active}
+    return {"ok": True, "driver_mode_active": active, "kyc_status": kyc_status}
 
 # ── Owner cashup management ──────────────────────────────────
 

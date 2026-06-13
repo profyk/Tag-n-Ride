@@ -335,13 +335,13 @@ export default function OwnerProfile() {
         ) : null}
 
         {/* Documents */}
-        <TouchableOpacity style={styles.menuItem} onPress={() => router.push("/owner/documents")}>
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push("/owner/notifications")}>
           <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
             <Ionicons name="folder-outline" size={20} color={colors.cyan} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.menuTitle}>My Documents</Text>
-            <Text style={styles.menuSub}>Statements, payslips & fleet documents</Text>
+            <Text style={styles.menuSub}>Statements & fleet documents</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
@@ -400,7 +400,7 @@ export default function OwnerProfile() {
         <TouchableOpacity style={styles.signOutBtn}
           onPress={() => Alert.alert("Sign out", "Are you sure?", [
             { text: "Cancel", style: "cancel" },
-            { text: "Sign out", style: "destructive", onPress: async () => { await signOut(); router.replace("/(auth)/welcome"); } },
+            { text: "Sign out", style: "destructive", onPress: () => signOut() },
           ])}>
           <Ionicons name="log-out-outline" size={20} color={colors.red} />
           <Text style={styles.signOutText}>Sign Out</Text>

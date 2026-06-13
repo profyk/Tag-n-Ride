@@ -4,7 +4,7 @@ import {
   ActivityIndicator, Alert, Share, StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
@@ -16,6 +16,7 @@ import { radius } from "../../src/theme";
 export default function OwnerDriveMode() {
   const { state } = useAuth();
   const { colors } = useTheme();
+  const router = useRouter();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [toggling, setToggling] = useState(false);
 
@@ -35,7 +36,26 @@ export default function OwnerDriveMode() {
     try {
       const res = await api.ownerToggleDriverMode(val);
       setWallet(prev => prev ? { ...prev, driver_mode_active: res.driver_mode_active } : prev);
-      if (res.driver_mode_active) loadWallet();
+      if (res.driver_mode_active) {
+        // Reload wallet so QR code appears
+        loadWallet();
+        // Warn if KYC not yet approved
+        if (res.kyc_status && res.kyc_status !== "approved") {
+          const msg = res.kyc_status === "pending"
+            ? "Driver mode is ON. Your identity verification is pending admin review — you can start receiving payments once approved."
+            : "Driver mode is ON. Please complete your Identity Verification so passengers can pay you. Tap the button below to submit your documents.";
+          Alert.alert(
+            "Driver Mode Active",
+            msg,
+            res.kyc_status === "not_submitted"
+              ? [
+                  { text: "Later", style: "cancel" },
+                  { text: "Verify Now", onPress: () => router.push("/owner/documents") },
+                ]
+              : [{ text: "OK" }]
+          );
+        }
+      }
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Could not update driver mode.");
     } finally {

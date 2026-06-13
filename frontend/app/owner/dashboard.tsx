@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable,
@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import { useAuth } from "../../src/AuthContext";
 import { useRouter } from "expo-router";
 import { api, DriverTransfer } from "../../src/api";
@@ -60,6 +61,66 @@ export default function OwnerDashboard() {
   const { unreadCount: notifUnread } = useNotifications();
   const { unreadCount: docsUnread } = useDocuments();
   const totalInboxUnread = notifUnread + docsUnread;
+
+  // SOS state
+  const [sosModal, setSosModal] = useState(false);
+  const [sosLoading, setSosLoading] = useState(false);
+  const [sosActive, setSosActive] = useState<{ id: string; type: string } | null>(null);
+  const [cancelModal, setCancelModal] = useState(false);
+  const [cancelPin, setCancelPin] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const sosPingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopSosPing = useCallback(() => {
+    if (sosPingRef.current) { clearInterval(sosPingRef.current); sosPingRef.current = null; }
+  }, []);
+
+  const startSosPing = useCallback((sosId: string) => {
+    stopSosPing();
+    sosPingRef.current = setInterval(async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const res = await api.sosLocationPing(sosId, { latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        if (res.resolved) { stopSosPing(); setSosActive(null); }
+      } catch {}
+    }, 30000);
+  }, [stopSosPing]);
+
+  const handleSOS = async (type: "police" | "ambulance") => {
+    setSosModal(false);
+    setSosLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      let lat: number | undefined; let lng: number | undefined;
+      if (status === "granted") {
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          lat = loc.coords.latitude; lng = loc.coords.longitude;
+        } catch {}
+      }
+      const res = await api.sosRequest({ emergency_type: type, latitude: lat, longitude: lng });
+      setSosActive({ id: res.sos_id, type });
+      startSosPing(res.sos_id);
+      Alert.alert("SOS Sent", `Emergency alert sent. Help is on the way.\nSOS ID: ${res.sos_id}`);
+    } catch (e: any) {
+      Alert.alert("SOS Failed", e?.message || "Could not send alert. Call 10111 directly.");
+    } finally { setSosLoading(false); }
+  };
+
+  const handleCancelSOS = async () => {
+    if (!sosActive || cancelPin.length < 4) { setCancelError("Enter your PIN to cancel SOS."); return; }
+    setCancelling(true);
+    try {
+      await api.sosCancelPin({ sos_id: sosActive.id, pin: cancelPin });
+      stopSosPing(); setSosActive(null); setCancelModal(false); setCancelPin("");
+    } catch (e: any) {
+      const msg = e?.message || "";
+      setCancelError(msg.toLowerCase().includes("pin") || msg.toLowerCase().includes("incorrect") ? "Incorrect PIN." : msg || "Could not cancel.");
+    } finally { setCancelling(false); }
+  };
   const [data, setData] = useState<any>(null);
   const [outstanding, setOutstanding] = useState<any>(null);
   const [cashupHistory, setCashupHistory] = useState<any>(null);
@@ -203,6 +264,19 @@ export default function OwnerDashboard() {
               <Ionicons name="qr-code-outline" size={18} color={colors.bg} />
               <Text style={s.driveBtnText}>Drive</Text>
             </TouchableOpacity>
+            {/* SOS button */}
+            <TouchableOpacity
+              onPress={() => sosActive ? setCancelModal(true) : setSosModal(true)}
+              style={[s.sosHeaderBtn, sosActive && { backgroundColor: colors.red }]}
+              activeOpacity={0.8}>
+              {sosLoading
+                ? <ActivityIndicator size="small" color={sosActive ? "#fff" : colors.red} />
+                : <Ionicons name="warning" size={14} color={sosActive ? "#fff" : colors.red} />}
+              <Text style={[s.sosHeaderText, { color: sosActive ? "#fff" : colors.red }]}>
+                {sosActive ? "ACTIVE" : "SOS"}
+              </Text>
+            </TouchableOpacity>
+            {/* Bell */}
             <TouchableOpacity onPress={() => router.push("/owner/notifications")} style={s.avatar}>
               <Ionicons name="notifications-outline" size={20} color={colors.cyan} />
               {totalInboxUnread > 0 && (
@@ -213,7 +287,7 @@ export default function OwnerDashboard() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
               { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: () => { signOut(); router.replace("/(auth)/welcome"); } },
+              { text: "Sign out", style: "destructive", onPress: () => signOut() },
             ])} style={s.avatar}>
               <Ionicons name="business-outline" size={20} color={colors.cyan} />
             </TouchableOpacity>
@@ -688,9 +762,100 @@ export default function OwnerDashboard() {
           </Pressable>
         </Modal>
       )}
+      {/* ── SOS choice modal ── */}
+      <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
+        <Pressable style={ss.backdrop} onPress={() => setSosModal(false)}>
+          <Pressable style={[ss.sheet, { backgroundColor: colors.bg2, borderColor: colors.border }]} onPress={() => {}}>
+            <View style={ss.handle} />
+            <View style={[ss.iconWrap, { backgroundColor: colors.redDim, borderColor: colors.red + "40" }]}>
+              <Ionicons name="warning" size={32} color={colors.red} />
+            </View>
+            <Text style={[ss.title, { color: colors.text }]}>Emergency SOS</Text>
+            <Text style={[ss.sub, { color: colors.textMuted }]}>
+              Your location is sent to emergency services immediately. Only use in a genuine emergency.
+            </Text>
+            <TouchableOpacity
+              style={[ss.choice, { backgroundColor: "#1D4ED815", borderColor: "#1D4ED8" }]}
+              onPress={() => handleSOS("police")} activeOpacity={0.8}>
+              <View style={[ss.choiceIcon, { backgroundColor: "#1D4ED820" }]}>
+                <Ionicons name="shield-outline" size={22} color="#1D4ED8" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[ss.choiceTitle, { color: "#1D4ED8" }]}>Police</Text>
+                <Text style={[ss.choiceSub, { color: colors.textMuted }]}>SAPS emergency response</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[ss.choice, { backgroundColor: colors.redDim, borderColor: colors.red }]}
+              onPress={() => handleSOS("ambulance")} activeOpacity={0.8}>
+              <View style={[ss.choiceIcon, { backgroundColor: colors.redDim }]}>
+                <Ionicons name="medkit-outline" size={22} color={colors.red} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[ss.choiceTitle, { color: colors.red }]}>Ambulance</Text>
+                <Text style={[ss.choiceSub, { color: colors.textMuted }]}>Medical emergency services</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSosModal(false)} style={ss.cancelRow}>
+              <Text style={{ color: colors.textMuted, fontSize: 14, fontWeight: "600" }}>Cancel — not an emergency</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── SOS cancel modal (PIN required) ── */}
+      <Modal visible={cancelModal} transparent animationType="slide" onRequestClose={() => setCancelModal(false)}>
+        <Pressable style={ss.backdrop} onPress={() => setCancelModal(false)}>
+          <Pressable style={[ss.sheet, { backgroundColor: colors.bg2, borderColor: colors.border }]} onPress={() => {}}>
+            <View style={ss.handle} />
+            <View style={[ss.iconWrap, { backgroundColor: colors.greenDim, borderColor: colors.green + "40" }]}>
+              <Ionicons name="checkmark-circle-outline" size={32} color={colors.green} />
+            </View>
+            <Text style={[ss.title, { color: colors.text }]}>Cancel SOS</Text>
+            <Text style={[ss.sub, { color: colors.textMuted }]}>
+              Enter your PIN to confirm you are safe and cancel the {sosActive?.type} alert.
+            </Text>
+            <TextInput
+              style={[ss.pinInput, { backgroundColor: colors.bg, borderColor: cancelError ? colors.red : colors.border, color: colors.text }]}
+              value={cancelPin}
+              onChangeText={v => { setCancelPin(v.replace(/\D/g, "").slice(0, 6)); setCancelError(""); }}
+              placeholder="••••" placeholderTextColor={colors.textDim}
+              keyboardType="number-pad" secureTextEntry maxLength={6} autoFocus
+            />
+            {cancelError ? <Text style={{ color: colors.red, fontSize: 12, textAlign: "center", marginBottom: 8 }}>{cancelError}</Text> : null}
+            <TouchableOpacity
+              style={[ss.confirmBtn, { backgroundColor: colors.green, opacity: cancelling || cancelPin.length < 4 ? 0.5 : 1 }]}
+              onPress={handleCancelSOS} disabled={cancelling || cancelPin.length < 4}>
+              {cancelling ? <ActivityIndicator color="#fff" size="small" /> : (
+                <><Ionicons name="checkmark" size={18} color="#fff" />
+                  <Text style={{ color: "#fff", fontSize: 15, fontWeight: "800" }}>I Am Safe — Cancel SOS</Text></>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setCancelModal(false)} style={ss.cancelRow}>
+              <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: "600" }}>Keep SOS active</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
+
+const ss = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 48, borderTopWidth: 1 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: "#444", alignSelf: "center", marginBottom: 20 },
+  iconWrap: { width: 64, height: 64, borderRadius: 32, borderWidth: 1, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 14 },
+  title: { fontSize: 22, fontWeight: "900", textAlign: "center", marginBottom: 6 },
+  sub: { fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: 24 },
+  choice: { flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 12 },
+  choiceIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  choiceTitle: { fontSize: 16, fontWeight: "800" },
+  choiceSub: { fontSize: 12, marginTop: 2 },
+  cancelRow: { alignItems: "center", paddingVertical: 14 },
+  pinInput: { borderWidth: 1.5, borderRadius: 14, fontSize: 22, padding: 16, textAlign: "center", letterSpacing: 8, marginBottom: 8 },
+  confirmBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, padding: 16, marginTop: 4 },
+});
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
@@ -704,6 +869,8 @@ const s = StyleSheet.create({
   bellBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
   driveBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.cyan, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
   driveBtnText: { color: colors.bg, fontWeight: "800", fontSize: 13 },
+  sosHeaderBtn: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1.5, borderColor: colors.red, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.redDim },
+  sosHeaderText: { fontSize: 10, fontWeight: "900", letterSpacing: 0.8 },
   statsGrid: { flexDirection: "row", gap: 10 },
   statCard: { flex: 1, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, padding: 14 },
   statIcon: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", marginBottom: 8 },
