@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from "react";
 import {
-  View, Text, ScrollView, TouchableOpacity,
+  View, Text, ScrollView, TouchableOpacity, Switch,
   ActivityIndicator, Alert, Share, StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
@@ -14,19 +14,34 @@ import { api, Wallet } from "../../src/api";
 import { radius } from "../../src/theme";
 
 export default function OwnerDriveMode() {
-  const router = useRouter();
   const { state } = useAuth();
   const { colors } = useTheme();
   const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [toggling, setToggling] = useState(false);
 
-  useFocusEffect(useCallback(() => {
+  const loadWallet = useCallback(() => {
     api.wallet().then(setWallet).catch(() => {});
-  }, []));
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadWallet(); }, [loadWallet]));
 
   if (state.status !== "authed") return null;
   const u = state.user;
   const driverModeActive = wallet?.driver_mode_active ?? false;
   const qrCode = wallet?.qr_code ?? "";
+
+  const handleToggle = async (val: boolean) => {
+    setToggling(true);
+    try {
+      const res = await api.ownerToggleDriverMode(val);
+      setWallet(prev => prev ? { ...prev, driver_mode_active: res.driver_mode_active } : prev);
+      if (res.driver_mode_active) loadWallet();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not update driver mode.");
+    } finally {
+      setToggling(false);
+    }
+  };
 
   const handleCopy = async () => {
     if (!qrCode) return;
@@ -53,27 +68,40 @@ export default function OwnerDriveMode() {
 
   return (
     <SafeAreaView style={[s.root, { backgroundColor: colors.bg }]} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
 
         {/* Header */}
         <View style={s.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={[s.backBtn, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
-            <Ionicons name="arrow-back" size={20} color={colors.text} />
-          </TouchableOpacity>
           <Text style={[s.title, { color: colors.text }]}>Drive Mode</Text>
-          <TouchableOpacity onPress={handleShare} style={[s.shareBtn, { backgroundColor: colors.cyanDim, borderColor: colors.cyan }]}>
-            <Ionicons name="share-social-outline" size={20} color={colors.cyan} />
-          </TouchableOpacity>
+          {driverModeActive && (
+            <TouchableOpacity onPress={handleShare} style={[s.shareBtn, { backgroundColor: colors.cyanDim, borderColor: colors.cyan }]}>
+              <Ionicons name="share-social-outline" size={20} color={colors.cyan} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Info banner */}
-        <View style={[s.infoBanner, { backgroundColor: colors.cyanDim, borderColor: colors.cyan + "44" }]}>
-          <Ionicons name="information-circle-outline" size={16} color={colors.cyan} />
-          <Text style={[s.infoBannerText, { color: colors.text }]}>
-            {driverModeActive
-              ? "Show this QR code to passengers when you drive. Payments go directly to your wallet."
-              : "Driver mode is off. Activate it in your profile to start accepting passenger payments."}
-          </Text>
+        {/* Toggle card */}
+        <View style={[s.toggleCard, { backgroundColor: colors.bg2, borderColor: driverModeActive ? colors.cyan : colors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.toggleTitle, { color: colors.text }]}>
+              {driverModeActive ? "Driver Mode Active" : "Driver Mode Off"}
+            </Text>
+            <Text style={[s.toggleSub, { color: colors.textMuted }]}>
+              {driverModeActive
+                ? "Passengers can scan your QR and pay you directly."
+                : "Enable to accept passenger payments with your QR code."}
+            </Text>
+          </View>
+          {toggling ? (
+            <ActivityIndicator color={colors.cyan} />
+          ) : (
+            <Switch
+              value={driverModeActive}
+              onValueChange={handleToggle}
+              trackColor={{ false: colors.border, true: colors.cyan }}
+              thumbColor={driverModeActive ? "#fff" : colors.textMuted}
+            />
+          )}
         </View>
 
         {/* QR card — always white background, theme-independent */}
@@ -101,12 +129,14 @@ export default function OwnerDriveMode() {
               />
             ) : (
               <View style={s.qrLoader}>
-                <Ionicons name="car-sport-outline" size={48} color="#00D4FF" />
+                <Ionicons name="car-sport-outline" size={48} color={driverModeActive ? "#00D4FF" : "#CCC"} />
                 <Text style={{ color: "#333", fontWeight: "700", fontSize: 15, marginTop: 12, textAlign: "center" }}>
-                  Driver mode not active
+                  {driverModeActive ? "Loading QR…" : "Driver mode is off"}
                 </Text>
                 <Text style={{ color: "#888", fontSize: 13, marginTop: 6, textAlign: "center", paddingHorizontal: 12 }}>
-                  Activate driver mode in your profile to receive passenger payments.
+                  {driverModeActive
+                    ? "Your QR code is being generated."
+                    : "Toggle driver mode above to reveal your QR code."}
                 </Text>
               </View>
             )}
@@ -115,7 +145,7 @@ export default function OwnerDriveMode() {
           <Text style={s.qrName}>{u.full_name}</Text>
           <Text style={s.qrPhone}>{u.phone_number}</Text>
 
-          {driverModeActive && <>
+          {driverModeActive && qrCode && <>
             <View style={s.qrCodePill}>
               <Ionicons name="finger-print" size={14} color="#00D4FF" />
               <Text style={s.qrCodeText}>{qrCode}</Text>
@@ -125,20 +155,22 @@ export default function OwnerDriveMode() {
         </View>
 
         {/* Action buttons — only shown when driver mode is active */}
-        {driverModeActive && <View style={s.actionRow}>
-          {[
-            { icon: "copy-outline", label: "Copy ID", onPress: handleCopy },
-            { icon: "share-social-outline", label: "Share", onPress: handleShare },
-          ].map(btn => (
-            <TouchableOpacity key={btn.label} onPress={btn.onPress}
-              style={[s.actionBtn, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
-              <View style={[s.actionBtnIcon, { backgroundColor: colors.cyanDim }]}>
-                <Ionicons name={btn.icon as any} size={22} color={colors.cyan} />
-              </View>
-              <Text style={[s.actionBtnLabel, { color: colors.text }]}>{btn.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>}
+        {driverModeActive && qrCode && (
+          <View style={s.actionRow}>
+            {[
+              { icon: "copy-outline", label: "Copy ID", onPress: handleCopy },
+              { icon: "share-social-outline", label: "Share", onPress: handleShare },
+            ].map(btn => (
+              <TouchableOpacity key={btn.label} onPress={btn.onPress}
+                style={[s.actionBtn, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
+                <View style={[s.actionBtnIcon, { backgroundColor: colors.cyanDim }]}>
+                  <Ionicons name={btn.icon as any} size={22} color={colors.cyan} />
+                </View>
+                <Text style={[s.actionBtnLabel, { color: colors.text }]}>{btn.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         {/* Account details */}
         <View style={[s.detailCard, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
@@ -168,11 +200,11 @@ export default function OwnerDriveMode() {
 const s = StyleSheet.create({
   root: { flex: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   title: { fontSize: 22, fontWeight: "800" },
   shareBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  infoBanner: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderRadius: radius.md, borderWidth: 1, padding: 12, marginBottom: 16 },
-  infoBannerText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  toggleCard: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: radius.md, borderWidth: 1.5, padding: 16, marginBottom: 16 },
+  toggleTitle: { fontSize: 15, fontWeight: "800", marginBottom: 2 },
+  toggleSub: { fontSize: 12, lineHeight: 16 },
   qrCard: { backgroundColor: "#FFFFFF", borderRadius: 24, padding: 24, alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 12, marginBottom: 16 },
   qrCardHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20, alignSelf: "flex-start" },
   qrBrandIcon: { width: 44, height: 44, borderRadius: 10, backgroundColor: "#00D4FF", alignItems: "center", justifyContent: "center" },

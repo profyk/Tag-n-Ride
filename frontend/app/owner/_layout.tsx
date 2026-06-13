@@ -1,9 +1,22 @@
+import { useEffect, useState } from "react";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useColors } from "../../src/theme";
+import { api } from "../../src/api";
+import { useAuth } from "../../src/AuthContext";
+import { NotificationProvider } from "../../src/NotificationContext";
+import { DocumentProvider } from "../../src/DocumentContext";
 
-export default function OwnerTabLayout() {
+function OwnerTabs() {
   const colors = useColors();
+  const { state } = useAuth();
+  const [driverModeActive, setDriverModeActive] = useState(false);
+
+  useEffect(() => {
+    if (state.status !== "authed") return;
+    api.wallet().then(w => setDriverModeActive(!!w.driver_mode_active)).catch(() => {});
+  }, [state.status]);
+
   return (
     <Tabs
       screenOptions={{
@@ -47,6 +60,16 @@ export default function OwnerTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="trip-centre"
+        options={{
+          title: "Trip Centre",
+          href: driverModeActive ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="shield-checkmark-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
@@ -55,9 +78,21 @@ export default function OwnerTabLayout() {
           ),
         }}
       />
+      {/* Hidden screens — accessible via in-screen navigation only */}
+      <Tabs.Screen name="notifications" options={{ href: null }} />
       <Tabs.Screen name="documents" options={{ href: null }} />
       <Tabs.Screen name="statement" options={{ href: null }} />
       <Tabs.Screen name="driver" options={{ href: null }} />
     </Tabs>
+  );
+}
+
+export default function OwnerTabLayout() {
+  return (
+    <NotificationProvider>
+      <DocumentProvider>
+        <OwnerTabs />
+      </DocumentProvider>
+    </NotificationProvider>
   );
 }

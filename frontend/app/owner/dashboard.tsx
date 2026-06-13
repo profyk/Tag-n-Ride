@@ -11,6 +11,8 @@ import { useRouter } from "expo-router";
 import { api, DriverTransfer } from "../../src/api";
 import { formatZAR, formatDate, radius, useColors, darkColors as colors } from "../../src/theme";
 import { Button } from "../../src/ui";
+import { useNotifications } from "../../src/NotificationContext";
+import { useDocuments } from "../../src/DocumentContext";
 
 type Driver = {
   user_id: string;
@@ -55,6 +57,9 @@ export default function OwnerDashboard() {
   const router = useRouter();
   const { state, signOut } = useAuth();
   const colors = useColors();
+  const { unreadCount: notifUnread } = useNotifications();
+  const { unreadCount: docsUnread } = useDocuments();
+  const totalInboxUnread = notifUnread + docsUnread;
   const [data, setData] = useState<any>(null);
   const [outstanding, setOutstanding] = useState<any>(null);
   const [cashupHistory, setCashupHistory] = useState<any>(null);
@@ -105,7 +110,15 @@ export default function OwnerDashboard() {
     try {
       const res = await api.ownerLinkDriver(driverCode.trim().toUpperCase());
       setLinkModal(false); setDriverCode("");
-      Alert.alert("Driver Linked!", `${res.driver.full_name} added to your fleet.`);
+      let msg = `${res.driver.full_name} added to your fleet.`;
+      if (res.subscription_charged > 0) {
+        msg += `\n\nSubscription fee of ${formatZAR(res.subscription_charged)} deducted for taxi #${res.taxi_count} (${res.free_taxis} free, R${res.subscription_price_per_taxi.toFixed(2)}/taxi/month).`;
+      } else if (res.subscription_insufficient) {
+        msg += `\n\nInsufficient wallet balance for subscription fee of ${formatZAR(res.subscription_price_per_taxi)}. Please top up your wallet.`;
+      } else if (res.taxi_count <= res.free_taxis) {
+        msg += `\n\nTaxi ${res.taxi_count} of ${res.free_taxis} free — no subscription fee.`;
+      }
+      Alert.alert("Driver Linked!", msg);
       load();
     } catch (e: any) { Alert.alert("Failed", e?.message || "Could not link driver"); }
     finally { setLinking(false); }
@@ -189,6 +202,14 @@ export default function OwnerDashboard() {
             <TouchableOpacity onPress={() => router.push("/owner/driver-mode")} style={s.driveBtn}>
               <Ionicons name="qr-code-outline" size={18} color={colors.bg} />
               <Text style={s.driveBtnText}>Drive</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push("/owner/notifications")} style={s.avatar}>
+              <Ionicons name="notifications-outline" size={20} color={colors.cyan} />
+              {totalInboxUnread > 0 && (
+                <View style={s.bellBadge}>
+                  <Text style={s.bellBadgeText}>{totalInboxUnread > 9 ? "9+" : String(totalInboxUnread)}</Text>
+                </View>
+              )}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
               { text: "Cancel", style: "cancel" },
@@ -679,6 +700,8 @@ const s = StyleSheet.create({
   greeting: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
   ownerName: { color: colors.text, fontSize: 20, fontWeight: "800" },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan, alignItems: "center", justifyContent: "center" },
+  bellBadge: { position: "absolute", top: -4, right: -4, backgroundColor: "#FF3B30", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 2 },
+  bellBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
   driveBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.cyan, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
   driveBtnText: { color: colors.bg, fontWeight: "800", fontSize: 13 },
   statsGrid: { flexDirection: "row", gap: 10 },

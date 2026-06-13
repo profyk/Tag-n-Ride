@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -31,6 +31,8 @@ export default function OwnerProfile() {
   const [payOutModal, setPayOutModal] = useState(false);
   const [payOutAmount, setPayOutAmount] = useState("");
   const [payOutLoading, setPayOutLoading] = useState(false);
+  const [payOutFee, setPayOutFee] = useState<{ gateway_fee: number; total_deducted: number } | null>(null);
+  const [payOutFeeLoading, setPayOutFeeLoading] = useState(false);
 
   // Subscription
   const [subscription, setSubscription] = useState<any>(null);
@@ -52,9 +54,6 @@ export default function OwnerProfile() {
   const [confirmPin, setConfirmPin] = useState("");
   const [changingPin, setChangingPin] = useState(false);
 
-  if (state.status !== "authed") return null;
-  const user = state.user;
-
   const load = useCallback(async () => {
     try {
       const [bankRes, walletRes, subRes] = await Promise.all([
@@ -62,7 +61,6 @@ export default function OwnerProfile() {
         api.ownerWallet().catch(() => null),
         api.ownerSubscription().catch(() => null),
       ]);
-      // bankRes is flat: { bank_name, account_number, account_name, cashup_method }
       setBankData(bankRes);
       setCashupMethod(bankRes.cashup_method || "wallet");
       if (bankRes.bank_name) {
@@ -77,19 +75,37 @@ export default function OwnerProfile() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  if (state.status !== "authed") return null;
+  const user = state.user;
+
+  const fetchPayOutFee = useCallback(async (amountStr: string) => {
+    const amount = parseFloat(amountStr);
+    if (!amountStr || isNaN(amount) || amount <= 0) { setPayOutFee(null); return; }
+    setPayOutFeeLoading(true);
+    try {
+      const res = await api.ownerPayoutFee(amount);
+      setPayOutFee({ gateway_fee: res.gateway_fee, total_deducted: res.total_deducted });
+    } catch { setPayOutFee(null); }
+    finally { setPayOutFeeLoading(false); }
+  }, []);
+
   const handlePayOut = async () => {
     const amount = parseFloat(payOutAmount);
     if (!payOutAmount || isNaN(amount) || amount <= 0) { Alert.alert("Invalid amount", "Please enter a valid amount."); return; }
     if (amount < 5) { Alert.alert("Minimum", "Minimum payout is R5.00."); return; }
-    if (walletBalance !== null && amount > walletBalance) {
-      Alert.alert("Insufficient balance", `Your wallet balance is ${formatZAR(walletBalance)}.`); return;
+    const totalNeeded = payOutFee ? payOutFee.total_deducted : amount;
+    if (walletBalance !== null && totalNeeded > walletBalance) {
+      Alert.alert("Insufficient balance", `You need ${formatZAR(totalNeeded)} (incl. gateway fee). Your balance is ${formatZAR(walletBalance)}.`); return;
     }
     if (!bankData?.bank_name) { Alert.alert("No bank account", "Please add your banking details first."); return; }
     setPayOutLoading(true);
     try {
-      await api.ownerPayout(amount);
-      setPayOutModal(false); setPayOutAmount("");
-      Alert.alert("Payout Submitted", `${formatZAR(amount)} submitted for admin approval.`);
+      const res = await api.ownerPayout(amount);
+      setPayOutModal(false); setPayOutAmount(""); setPayOutFee(null);
+      const msg = res.pending_approval
+        ? `${formatZAR(res.net_to_bank)} submitted for processing.\nGateway fee: ${formatZAR(res.gateway_fee)}\nTotal deducted: ${formatZAR(res.total_deducted)}`
+        : `${formatZAR(res.net_to_bank)} sent to ${bankData.bank_name}.\nGateway fee: ${formatZAR(res.gateway_fee)}`;
+      Alert.alert("Payout Submitted", msg);
       load();
     } catch (e: any) {
       Alert.alert("Failed", e?.message || "Could not process payout.");
@@ -251,9 +267,10 @@ export default function OwnerProfile() {
         )}
 
         {/* Subscription */}
-        <Text style={[styles.section, { marginTop: 24 }]}>SUBSCRIPTION</Text>
+        <Text style={[styles.section, { marginTop: 24 }]}>FLEET SUBSCRIPTION</Text>
         {subscription ? (
-          <View style={styles.subCard}>
+          <View style={[styles.subCard, subscription.status === "overdue" && { borderColor: colors.red }]}>
+            {/* Status row */}
             <View style={styles.subRow}>
               <View style={[styles.subIcon, subscription.status === "overdue" && { backgroundColor: colors.redDim, borderColor: colors.red }]}>
                 <Ionicons name="car-sport-outline" size={20} color={subscription.status === "overdue" ? colors.red : colors.cyan} />
@@ -265,8 +282,8 @@ export default function OwnerProfile() {
                 </Text>
                 <Text style={styles.subSub}>
                   {subscription.billable_taxis === 0
-                    ? `First ${subscription.free_taxis} taxi free`
-                    : `${subscription.free_taxis} free + ${subscription.billable_taxis} paid`}
+                    ? `First ${subscription.free_taxis} free · no charge`
+                    : `${subscription.free_taxis} free + ${subscription.billable_taxis} × ${formatZAR(subscription.price_per_taxi ?? 0)}`}
                 </Text>
               </View>
               <View style={[styles.subStatusBadge, subscription.status === "overdue" && { backgroundColor: colors.redDim, borderColor: colors.red }]}>
@@ -275,6 +292,33 @@ export default function OwnerProfile() {
                 </Text>
               </View>
             </View>
+
+            {/* Pricing breakdown */}
+            {subscription.billable_taxis > 0 && (
+              <View style={[styles.subBreakdown, { borderColor: colors.border }]}>
+                <View style={styles.subBreakdownRow}>
+                  <Text style={[styles.subBreakdownLabel, { color: colors.textMuted }]}>Price per taxi/month</Text>
+                  <Text style={[styles.subBreakdownVal, { color: colors.text }]}>{formatZAR(subscription.price_per_taxi ?? 0)}</Text>
+                </View>
+                <View style={styles.subBreakdownRow}>
+                  <Text style={[styles.subBreakdownLabel, { color: colors.textMuted }]}>Paid taxis</Text>
+                  <Text style={[styles.subBreakdownVal, { color: colors.text }]}>{subscription.billable_taxis}</Text>
+                </View>
+                <View style={[styles.subBreakdownRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8, marginTop: 4 }]}>
+                  <Text style={[styles.subBreakdownLabel, { color: colors.text, fontWeight: "800" }]}>Monthly total</Text>
+                  <Text style={[styles.subBreakdownVal, { color: colors.cyan, fontWeight: "900" }]}>{formatZAR(subscription.monthly_fee)}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Auto-debit notice */}
+            <View style={[styles.autoDebitNote, { backgroundColor: colors.cyanDim, borderColor: colors.cyan + "40" }]}>
+              <Ionicons name="repeat-outline" size={13} color={colors.cyan} />
+              <Text style={[styles.autoDebitText, { color: colors.cyan }]}>
+                Auto-debited from your wallet on the 1st of each month
+              </Text>
+            </View>
+
             {subscription.status === "overdue" && (
               <View style={styles.overdueNote}>
                 <Ionicons name="warning-outline" size={14} color={colors.red} />
@@ -282,7 +326,10 @@ export default function OwnerProfile() {
               </View>
             )}
             {subscription.next_billing_date && (
-              <Text style={styles.subNextBilling}>Next billing: {subscription.next_billing_date}</Text>
+              <Text style={styles.subNextBilling}>
+                Next billing: {subscription.next_billing_date}
+                {subscription.monthly_fee > 0 ? ` · ${formatZAR(subscription.monthly_fee)}` : " · Free"}
+              </Text>
             )}
           </View>
         ) : null}
@@ -363,7 +410,7 @@ export default function OwnerProfile() {
       </ScrollView>
 
       {/* ── Pay Out modal ── */}
-      <Modal visible={payOutModal} transparent animationType="slide" onRequestClose={() => setPayOutModal(false)}>
+      <Modal visible={payOutModal} transparent animationType="slide" onRequestClose={() => { setPayOutModal(false); setPayOutFee(null); }}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -377,12 +424,39 @@ export default function OwnerProfile() {
                 <Text style={styles.balancePillText}>Available: {formatZAR(walletBalance)}</Text>
               </View>
             )}
-            <Text style={styles.inputLabel}>AMOUNT (ZAR)</Text>
+            <Text style={styles.inputLabel}>AMOUNT TO RECEIVE (ZAR)</Text>
             <TextInput
-              style={styles.modalInput} value={payOutAmount} onChangeText={setPayOutAmount}
-              keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.textDim} />
+              style={styles.modalInput}
+              value={payOutAmount}
+              onChangeText={v => { setPayOutAmount(v); fetchPayOutFee(v); }}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={colors.textDim} />
+            {/* Fee breakdown */}
+            {payOutFeeLoading && (
+              <View style={{ flexDirection: "row", gap: 6, alignItems: "center", marginBottom: 12 }}>
+                <ActivityIndicator size="small" color={colors.cyan} />
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>Calculating fee…</Text>
+              </View>
+            )}
+            {payOutFee && !payOutFeeLoading && (
+              <View style={[styles.feeBreakdown, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 12 }}>Payout amount</Text>
+                  <Text style={{ color: colors.text, fontSize: 12, fontWeight: "700" }}>{formatZAR(parseFloat(payOutAmount) || 0)}</Text>
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 12 }}>Gateway fee</Text>
+                  <Text style={{ color: colors.red, fontSize: 12, fontWeight: "700" }}>−{formatZAR(payOutFee.gateway_fee)}</Text>
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.border }}>
+                  <Text style={{ color: colors.text, fontSize: 12, fontWeight: "800" }}>Total deducted from wallet</Text>
+                  <Text style={{ color: colors.cyan, fontSize: 13, fontWeight: "900" }}>{formatZAR(payOutFee.total_deducted)}</Text>
+                </View>
+              </View>
+            )}
             <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
-              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => { setPayOutModal(false); setPayOutAmount(""); }} /></View>
+              <View style={{ flex: 1 }}><Button label="Cancel" variant="secondary" onPress={() => { setPayOutModal(false); setPayOutAmount(""); setPayOutFee(null); }} /></View>
               <View style={{ flex: 1 }}><Button label="Pay Out" onPress={handlePayOut} loading={payOutLoading} /></View>
             </View>
           </View>
@@ -555,6 +629,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
   payOutBtnText: { color: colors.bg, fontWeight: "800", fontSize: 14 },
   payOutNote: { color: colors.textDim, fontSize: 11, marginBottom: 8, marginTop: -4 },
   balancePill: { alignSelf: "center", backgroundColor: colors.bg, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
+  feeBreakdown: { borderRadius: radius.md, borderWidth: 1, padding: 12, marginBottom: 14 },
   balancePillText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
   subCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 8 },
   subRow: { flexDirection: "row", alignItems: "center", gap: 12 },
@@ -566,6 +641,12 @@ const makeStyles = (colors: any) => StyleSheet.create({
   subNextBilling: { color: colors.textDim, fontSize: 11, marginTop: 8 },
   overdueNote: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 8, backgroundColor: colors.redDim, borderRadius: radius.sm },
   overdueText: { color: colors.red, fontSize: 11, flex: 1 },
+  subBreakdown: { borderRadius: radius.sm, borderWidth: 1, padding: 10, marginTop: 10, gap: 6 },
+  subBreakdownRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  subBreakdownLabel: { fontSize: 12 },
+  subBreakdownVal: { fontSize: 12, fontWeight: "700" },
+  autoDebitNote: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radius.sm, borderWidth: 1, padding: 8, marginTop: 10 },
+  autoDebitText: { fontSize: 11, fontWeight: "600", flex: 1 },
   signOutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: colors.redDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red, padding: 16, marginTop: 24 },
   signOutText: { color: colors.red, fontWeight: "800", fontSize: 15 },
   version: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 24 },

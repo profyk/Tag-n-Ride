@@ -7,12 +7,12 @@ import { formatZAR, formatDate } from "@/lib/utils";
 import {
   TrendingUp, Users, AlertTriangle, CheckCircle, Save, Zap, Gift,
   RefreshCw, CreditCard, Building, Calendar, DollarSign, ChevronRight,
-  BarChart3,
+  BarChart3, Wrench, Play, ToggleLeft, ToggleRight, Info,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, Cell,
+  Cell,
 } from "recharts";
 
 const STATUS_TONE: Record<string, "green" | "red" | "yellow" | "cyan" | "muted"> = {
@@ -58,10 +58,21 @@ export default function SubscriptionsPage() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [pricePerTaxi, setPricePerTaxi] = useState("10");
   const [freeTaxis, setFreeTaxis] = useState("1");
+  const [subBillingDay, setSubBillingDay] = useState("1");
   const [ownerStmtPrice, setOwnerStmtPrice] = useState("10");
   const [passengerStmtPrice, setPassengerStmtPrice] = useState("5");
   const [savingPricing, setSavingPricing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "subscribers" | "settings">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "subscribers" | "settings" | "maintenance">("overview");
+
+  // Maintenance fee state
+  const [maintEnabled, setMaintEnabled] = useState(false);
+  const [maintAmount, setMaintAmount] = useState("0");
+  const [maintDay, setMaintDay] = useState("1");
+  const [maintLabel, setMaintLabel] = useState("Monthly maintenance fee");
+  const [savingMaint, setSavingMaint] = useState(false);
+  const [maintPreview, setMaintPreview] = useState<any>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [runningMaint, setRunningMaint] = useState(false);
 
   const loadAll = () => {
     setLoading(true);
@@ -75,12 +86,20 @@ export default function SubscriptionsPage() {
     loadAll();
     api.getPayoutSettings()
       .then(r => {
-        setPricePerTaxi(String(r.data.subscription_price_per_taxi ?? 10));
-        setFreeTaxis(String(r.data.subscription_free_taxis ?? 1));
-        setOwnerStmtPrice(String(r.data.owner_statement_price ?? 10));
-        setPassengerStmtPrice(String(r.data.passenger_statement_price ?? 5));
+        const d = r.data;
+        setPricePerTaxi(String(d.subscription_price_per_taxi ?? 10));
+        setFreeTaxis(String(d.subscription_free_taxis ?? 1));
+        setSubBillingDay(String(d.subscription_billing_day ?? 1));
+        setOwnerStmtPrice(String(d.owner_statement_price ?? 10));
+        setPassengerStmtPrice(String(d.passenger_statement_price ?? 5));
+        setMaintEnabled(!!d.maintenance_fee_enabled);
+        setMaintAmount(String(d.maintenance_fee_amount ?? 0));
+        setMaintDay(String(d.maintenance_fee_day ?? 1));
+        setMaintLabel(d.maintenance_fee_label || "Monthly maintenance fee");
       })
       .finally(() => setSettingsLoading(false));
+    // Load maintenance fee preview
+    api.maintenanceFeePreview().then(r => setMaintPreview(r.data)).catch(() => {});
   }, []);
 
   const savePricing = async () => {
@@ -89,13 +108,51 @@ export default function SubscriptionsPage() {
       await api.updatePayoutSettings({
         subscription_price_per_taxi: parseFloat(pricePerTaxi),
         subscription_free_taxis: parseInt(freeTaxis),
+        subscription_billing_day: parseInt(subBillingDay),
         owner_statement_price: parseFloat(ownerStmtPrice),
         passenger_statement_price: parseFloat(passengerStmtPrice),
       });
-      toast.success("Pricing updated");
+      toast.success("Pricing & billing schedule updated");
       loadAll();
     } catch { toast.error("Failed to save pricing"); }
     finally { setSavingPricing(false); }
+  };
+
+  const saveMaintenance = async () => {
+    setSavingMaint(true);
+    try {
+      await api.updatePayoutSettings({
+        maintenance_fee_enabled: maintEnabled,
+        maintenance_fee_amount: parseFloat(maintAmount),
+        maintenance_fee_day: parseInt(maintDay),
+        maintenance_fee_label: maintLabel,
+      });
+      toast.success("Maintenance fee settings saved");
+      // Refresh preview
+      const preview = await api.maintenanceFeePreview();
+      setMaintPreview(preview.data);
+    } catch { toast.error("Failed to save maintenance fee settings"); }
+    finally { setSavingMaint(false); }
+  };
+
+  const loadMaintPreview = async () => {
+    setPreviewLoading(true);
+    try {
+      const r = await api.maintenanceFeePreview();
+      setMaintPreview(r.data);
+    } catch { toast.error("Failed to load preview"); }
+    finally { setPreviewLoading(false); }
+  };
+
+  const runMaintenanceFee = async () => {
+    if (!confirm(`Deduct ${formatZAR(parseFloat(maintAmount))} from ALL eligible wallets right now? This cannot be undone.`)) return;
+    setRunningMaint(true);
+    try {
+      const r = await api.runMaintenanceFee();
+      toast.success(`Done — ${r.data.charged} wallets charged · ${formatZAR(r.data.total_collected)} collected · ${r.data.skipped} skipped`);
+      loadMaintPreview();
+    } catch (e: any) { toast.error(e?.message || "Failed to run maintenance fee"); }
+    finally { setRunningMaint(false); }
   };
 
   const billNow = async (ownerUserId: string, name: string) => {
@@ -128,9 +185,10 @@ export default function SubscriptionsPage() {
   })) ?? [];
 
   const TABS = [
-    { id: "overview", label: "Overview", icon: BarChart3 },
-    { id: "subscribers", label: "Subscribers", icon: Users },
-    { id: "settings", label: "Pricing Settings", icon: DollarSign },
+    { id: "overview",    label: "Overview",         icon: BarChart3  },
+    { id: "subscribers", label: "Subscribers",       icon: Users      },
+    { id: "settings",    label: "Pricing & Schedule", icon: DollarSign },
+    { id: "maintenance", label: "Maintenance Fee",   icon: Wrench     },
   ] as const;
 
   return (
@@ -217,7 +275,7 @@ export default function SubscriptionsPage() {
                 {[
                   { icon: Gift, title: "Free Tier", desc: `First ${freeTaxis} taxi per owner is always free — zero cost for single-taxi operators`, color: "text-green" },
                   { icon: DollarSign, title: "Paid Tier", desc: `Each additional taxi costs R${pricePerTaxi}/month, deducted automatically from owner wallet`, color: "text-cyan" },
-                  { icon: Calendar, title: "Auto-Billing", desc: "Billing runs on the 1st of each month. Failed billing marks account overdue and sends notification", color: "text-yellow" },
+                  { icon: Calendar, title: "Auto-Billing", desc: `Billing runs on the ${subBillingDay}${["st","nd","rd"][parseInt(subBillingDay)-1]||"th"} of each month. Failed billing marks account overdue and sends notification`, color: "text-yellow" },
                   { icon: Building, title: "Statement Fees", desc: `Owner statements R${ownerStmtPrice} · Passenger statements R${passengerStmtPrice} — deducted on download`, color: "text-purple" },
                 ].map(item => (
                   <div key={item.title} className="flex items-start gap-3 p-3 bg-bg rounded-xl border border-border">
@@ -302,6 +360,146 @@ export default function SubscriptionsPage() {
           </div>
         )}
 
+        {/* ─── TAB: MAINTENANCE FEE ─── */}
+        {activeTab === "maintenance" && (
+          <div className="space-y-6">
+
+            {/* Current status banner */}
+            <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${maintEnabled ? "bg-cyan/10 border-cyan/30" : "bg-bg2 border-border"}`}>
+              {maintEnabled
+                ? <CheckCircle size={16} className="text-cyan flex-shrink-0" />
+                : <Info size={16} className="text-textMuted flex-shrink-0" />}
+              <div className="flex-1">
+                <p className={`text-sm font-bold ${maintEnabled ? "text-cyan" : "text-textMuted"}`}>
+                  Maintenance fee is {maintEnabled ? "ENABLED" : "DISABLED"}
+                </p>
+                {maintEnabled && (
+                  <p className="text-xs text-textMuted mt-0.5">
+                    {formatZAR(parseFloat(maintAmount) || 0)} deducted from ALL active wallets on the {maintDay}{["st","nd","rd"][parseInt(maintDay)-1]||"th"} of every month
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Preview stats */}
+            {maintPreview && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: "Eligible Wallets",    value: maintPreview.eligible_wallets,                          color: "text-cyan",    icon: Users       },
+                  { label: "Total Wallets",        value: maintPreview.total_wallets,                             color: "text-textMuted",icon: Users       },
+                  { label: "Projected Revenue",    value: formatZAR(maintPreview.projected_revenue),              color: "text-green",   icon: TrendingUp  },
+                  { label: "Fee Amount",           value: formatZAR(maintPreview.fee),                            color: "text-yellow",  icon: DollarSign  },
+                ].map(c => (
+                  <div key={c.label} className="bg-bg2 border border-border rounded-xl p-4">
+                    <p className="text-[9px] font-bold text-textDim uppercase tracking-widest mb-1">{c.label}</p>
+                    <p className={`text-xl font-black ${c.color}`}>{c.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Card>
+              <div className="flex items-center gap-2 mb-1">
+                <Wrench size={15} className="text-cyan" />
+                <h2 className="text-sm font-bold text-text">Maintenance Fee Settings</h2>
+              </div>
+              <p className="text-textMuted text-xs mb-5">
+                Charged from all users — passengers, drivers, and owners. Wallets with insufficient balance are skipped.
+              </p>
+
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between p-4 bg-bg border border-border rounded-xl mb-5">
+                <div>
+                  <p className="text-sm font-bold text-text">Enable Maintenance Fee</p>
+                  <p className="text-textDim text-xs mt-0.5">Auto-debit on the configured day each month from all active wallets</p>
+                </div>
+                <button
+                  onClick={() => setMaintEnabled(v => !v)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border font-bold text-sm transition-all ${
+                    maintEnabled
+                      ? "bg-cyan/10 border-cyan/30 text-cyan"
+                      : "bg-bg2 border-border text-textMuted"
+                  }`}
+                >
+                  {maintEnabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                  {maintEnabled ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="bg-bg border border-border rounded-xl p-4">
+                  <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-2">Fee Amount (R)</label>
+                  <input
+                    type="number" min={0} step={0.5} value={maintAmount}
+                    onChange={e => setMaintAmount(e.target.value)}
+                    className="w-full bg-bg2 border border-border rounded-lg px-3 py-2.5 text-text text-sm font-mono focus:outline-none focus:border-cyan transition-colors"
+                    placeholder="e.g. 5.00"
+                  />
+                  <p className="text-textDim text-[10px] mt-1.5">Amount deducted from every active wallet</p>
+                </div>
+
+                <div className="bg-bg border border-border rounded-xl p-4">
+                  <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-2">Debit Day of Month (1–28)</label>
+                  <input
+                    type="number" min={1} max={28} value={maintDay}
+                    onChange={e => setMaintDay(e.target.value)}
+                    className="w-full bg-bg2 border border-border rounded-lg px-3 py-2.5 text-text text-sm font-mono focus:outline-none focus:border-cyan transition-colors"
+                    placeholder="e.g. 1"
+                  />
+                  <p className="text-textDim text-[10px] mt-1.5">Day each month the fee is auto-debited (max 28 to avoid month-end issues)</p>
+                </div>
+
+                <div className="md:col-span-2 bg-bg border border-border rounded-xl p-4">
+                  <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-2">Transaction Label</label>
+                  <input
+                    type="text" value={maintLabel}
+                    onChange={e => setMaintLabel(e.target.value)}
+                    className="w-full bg-bg2 border border-border rounded-lg px-3 py-2.5 text-text text-sm focus:outline-none focus:border-cyan transition-colors"
+                    placeholder="Monthly maintenance fee"
+                  />
+                  <p className="text-textDim text-[10px] mt-1.5">Label shown in user transaction history</p>
+                </div>
+              </div>
+
+              <div className="mt-5 pt-4 border-t border-border flex items-center gap-3 justify-between">
+                <button
+                  onClick={loadMaintPreview}
+                  disabled={previewLoading}
+                  className="flex items-center gap-2 text-xs font-bold text-textMuted border border-border px-3 py-2 rounded-lg hover:border-cyan hover:text-cyan transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={previewLoading ? "animate-spin" : ""} />
+                  Refresh Preview
+                </button>
+                <div className="flex items-center gap-3">
+                  <Button onClick={saveMaintenance} loading={savingMaint}>
+                    <Save size={13} /> Save Settings
+                  </Button>
+                  <button
+                    onClick={runMaintenanceFee}
+                    disabled={runningMaint || !maintEnabled}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red/10 border border-red/30 text-red text-sm font-bold hover:bg-red/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {runningMaint ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+                    Run Now
+                  </button>
+                </div>
+              </div>
+            </Card>
+
+            {/* Warning note */}
+            <div className="flex items-start gap-3 p-4 bg-yellow/10 border border-yellow/20 rounded-xl">
+              <AlertTriangle size={15} className="text-yellow flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-yellow text-xs font-bold">Important</p>
+                <p className="text-textMuted text-xs mt-0.5">
+                  "Run Now" immediately deducts from all eligible wallets. Use it only for manual billing outside the scheduled date.
+                  The auto-debit loop runs hourly and triggers on the configured day.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ─── TAB: SETTINGS ─── */}
         {activeTab === "settings" && (
           <div className="space-y-6">
@@ -319,29 +517,35 @@ export default function SubscriptionsPage() {
                   {[
                     {
                       label: "Price / extra taxi / month (R)",
-                      value: pricePerTaxi, setter: setPricePerTaxi,
+                      value: pricePerTaxi, setter: setPricePerTaxi, min: 0,
                       desc: "Monthly charge per taxi beyond the free tier",
                     },
                     {
                       label: "Free taxis per owner",
-                      value: freeTaxis, setter: setFreeTaxis,
-                      desc: "Number of taxis included for free",
+                      value: freeTaxis, setter: setFreeTaxis, min: 0,
+                      desc: "Number of taxis included at no cost",
+                    },
+                    {
+                      label: "Subscription auto-debit day (1–28)",
+                      value: subBillingDay, setter: setSubBillingDay, min: 1, max: 28,
+                      desc: "Day of each month subscriptions are automatically debited from owner wallets",
                     },
                     {
                       label: "Owner statement price (R)",
-                      value: ownerStmtPrice, setter: setOwnerStmtPrice,
+                      value: ownerStmtPrice, setter: setOwnerStmtPrice, min: 0,
                       desc: "Fee deducted per fleet statement download",
                     },
                     {
                       label: "Passenger statement price (R)",
-                      value: passengerStmtPrice, setter: setPassengerStmtPrice,
+                      value: passengerStmtPrice, setter: setPassengerStmtPrice, min: 0,
                       desc: "Fee deducted per passenger expense statement",
                     },
                   ].map(field => (
                     <div key={field.label} className="bg-bg border border-border rounded-xl p-4">
                       <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-2">{field.label}</label>
                       <input
-                        type="number" min={0} value={field.value}
+                        type="number" min={field.min ?? 0} max={(field as any).max}
+                        value={field.value}
                         onChange={e => field.setter(e.target.value)}
                         className="w-full bg-bg2 border border-border rounded-lg px-3 py-2.5 text-text text-sm font-mono focus:outline-none focus:border-cyan transition-colors"
                       />

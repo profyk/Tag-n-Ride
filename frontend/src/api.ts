@@ -257,11 +257,18 @@ export const api = {
 
   ownerGetBank: () => request<any>("/api/owner/bank-account"),
 
+  ownerPayoutFee: (amount: number) =>
+    request<{ amount: number; gateway_fee: number; total_deducted: number }>(
+      `/api/owner/payout-fee?amount=${amount}`
+    ),
+
   ownerPayout: (amount: number) =>
-    request<any>("/api/owner/payout", {
-      method: "POST",
-      body: JSON.stringify({ amount }),
-    }),
+    request<{ balance: number; gateway_fee: number; net_to_bank: number; total_deducted: number; pending_approval: boolean }>(
+      "/api/owner/payout", {
+        method: "POST",
+        body: JSON.stringify({ amount }),
+      }
+    ),
 
   ownerWallet: () => request<any>("/api/wallet"),
 
@@ -395,13 +402,12 @@ export const api = {
   ownerLinkDriver: (driver_code: string) =>
     request<{
       ok: boolean;
-      driver: {
-        user_id: string;
-        full_name: string;
-        phone_number: string;
-        vehicle_plate: string;
-        qr_code: string;
-      };
+      driver: { user_id: string; full_name: string; phone_number: string; vehicle_plate: string; qr_code: string };
+      subscription_charged: number;
+      subscription_price_per_taxi: number;
+      subscription_insufficient: boolean;
+      taxi_count: number;
+      free_taxis: number;
     }>("/api/owner/drivers/link", {
       method: "POST",
       body: JSON.stringify({ driver_code }),

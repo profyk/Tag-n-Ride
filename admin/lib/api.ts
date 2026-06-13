@@ -575,12 +575,25 @@ export const api = {
       default_commission_pct: number;
       subscription_price_per_taxi: number;
       subscription_free_taxis: number;
+      subscription_billing_day: number;
       owner_statement_price: number;
       passenger_statement_price: number;
+      withdrawal_gateway_fee_fixed: number;
+      maintenance_fee_enabled: boolean;
+      maintenance_fee_amount: number;
+      maintenance_fee_day: number;
+      maintenance_fee_label: string;
       updated_at: string | null;
     }>("/api/admin/payout-settings"),
   updatePayoutSettings: (body: Record<string, unknown>) =>
     client.patch("/api/admin/payout-settings", body),
+  maintenanceFeePreview: () =>
+    client.get<{
+      enabled: boolean; fee: number; billing_day: number; label: string;
+      eligible_wallets: number; total_wallets: number; projected_revenue: number;
+    }>("/api/admin/maintenance-fee/preview"),
+  runMaintenanceFee: () =>
+    client.post<{ ok: boolean; charged: number; skipped: number; total_collected: number }>("/api/admin/maintenance-fee/run-now"),
   triggerCommissionCashup: () =>
     client.post<{ ok: boolean; message: string }>("/api/admin/commission-cashup/run-now"),
 

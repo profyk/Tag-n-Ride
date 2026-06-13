@@ -438,6 +438,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(transfer_escalation_loop())
         asyncio.create_task(commission_auto_cashup_loop())
         asyncio.create_task(subscription_billing_loop())
+        asyncio.create_task(maintenance_fee_billing_loop())
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
@@ -592,6 +593,16 @@ async def get_owner_record(conn, user_id: str):
     if not owner:
         raise HTTPException(status_code=404, detail="Owner account not found")
     return owner
+
+async def require_can_drive(user: dict, conn) -> None:
+    """Allows drivers, and owners who have driver mode active."""
+    if user["role"] == "driver":
+        return
+    if user["role"] == "owner":
+        w = await conn.fetchrow("SELECT driver_mode_active FROM wallets WHERE user_id=$1", user["id"])
+        if w and w["driver_mode_active"]:
+            return
+    raise HTTPException(status_code=403, detail="Driver mode must be active to use trip features")
 
 # ── Withdraw helpers ─────────────────────────────────────────
 
@@ -1130,15 +1141,30 @@ async def update_driver_profile(body: DriverProfileIn, user: dict = Depends(get_
 @api.get("/wallet")
 async def get_wallet(user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
-        wallet = await conn.fetchrow("SELECT * FROM wallets WHERE user_id=$1", user["id"])
-        if not wallet:
-            raise HTTPException(status_code=404, detail="Wallet not found")
-        driver = None
-        if user["role"] in ("driver", "owner"):
-            driver = await conn.fetchrow(
-                "SELECT qr_code,vehicle_plate,total_earnings,is_verified,rating_avg,rating_count FROM drivers WHERE user_id=$1",
-                user["id"]
-            )
+        async with conn.transaction():
+            wallet = await conn.fetchrow("SELECT * FROM wallets WHERE user_id=$1", user["id"])
+            if not wallet:
+                await conn.execute(
+                    "INSERT INTO wallets (id, user_id) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING",
+                    str(uuid.uuid4()), user["id"]
+                )
+                wallet = await conn.fetchrow("SELECT * FROM wallets WHERE user_id=$1", user["id"])
+            driver = None
+            if user["role"] in ("driver", "owner"):
+                driver = await conn.fetchrow(
+                    "SELECT qr_code,vehicle_plate,total_earnings,is_verified,rating_avg,rating_count FROM drivers WHERE user_id=$1",
+                    user["id"]
+                )
+                if not driver and user["role"] == "owner":
+                    qr = generate_qr_code()
+                    await conn.execute(
+                        "INSERT INTO drivers (id, user_id, qr_code, vehicle_plate) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id) DO NOTHING",
+                        str(uuid.uuid4()), user["id"], qr, ""
+                    )
+                    driver = await conn.fetchrow(
+                        "SELECT qr_code,vehicle_plate,total_earnings,is_verified,rating_avg,rating_count FROM drivers WHERE user_id=$1",
+                        user["id"]
+                    )
     result = {
         "balance": float(wallet["balance"]),
         "currency": wallet.get("currency", "ZAR"),
@@ -1876,6 +1902,12 @@ def _fmt_payout_settings(row) -> dict:
         "subscription_free_taxis": int(row["subscription_free_taxis"] or 1),
         "owner_statement_price": float(row["owner_statement_price"]) if row["owner_statement_price"] is not None else 10.0,
         "passenger_statement_price": float(row["passenger_statement_price"]) if row["passenger_statement_price"] is not None else 5.0,
+        "withdrawal_gateway_fee_fixed": float(row["withdrawal_gateway_fee_fixed"]) if row.get("withdrawal_gateway_fee_fixed") is not None else 3.50,
+        "subscription_billing_day": int(row["subscription_billing_day"]) if row.get("subscription_billing_day") is not None else 1,
+        "maintenance_fee_enabled": bool(row["maintenance_fee_enabled"]) if row.get("maintenance_fee_enabled") is not None else False,
+        "maintenance_fee_amount": float(row["maintenance_fee_amount"]) if row.get("maintenance_fee_amount") is not None else 0.0,
+        "maintenance_fee_day": int(row["maintenance_fee_day"]) if row.get("maintenance_fee_day") is not None else 1,
+        "maintenance_fee_label": str(row["maintenance_fee_label"]) if row.get("maintenance_fee_label") else "Monthly maintenance fee",
         "updated_at": iso(row["updated_at"]) if row["updated_at"] else None,
     }
 
@@ -1904,6 +1936,12 @@ class PayoutSettingsIn(BaseModel):
     subscription_free_taxis: Optional[int] = Field(default=None, ge=0, le=10)
     owner_statement_price: Optional[float] = Field(default=None, ge=0)
     passenger_statement_price: Optional[float] = Field(default=None, ge=0)
+    withdrawal_gateway_fee_fixed: Optional[float] = Field(default=None, ge=0)
+    subscription_billing_day: Optional[int] = Field(default=None, ge=1, le=28)
+    maintenance_fee_enabled: Optional[bool] = None
+    maintenance_fee_amount: Optional[float] = Field(default=None, ge=0)
+    maintenance_fee_day: Optional[int] = Field(default=None, ge=1, le=28)
+    maintenance_fee_label: Optional[str] = Field(default=None, max_length=100)
 
     @field_validator("commission_auto_cashup_time")
     @classmethod
@@ -1933,6 +1971,12 @@ async def update_payout_settings(body: PayoutSettingsIn, admin: dict = Depends(r
     if body.subscription_free_taxis is not None: updates["subscription_free_taxis"] = body.subscription_free_taxis
     if body.owner_statement_price is not None: updates["owner_statement_price"] = body.owner_statement_price
     if body.passenger_statement_price is not None: updates["passenger_statement_price"] = body.passenger_statement_price
+    if body.withdrawal_gateway_fee_fixed is not None: updates["withdrawal_gateway_fee_fixed"] = body.withdrawal_gateway_fee_fixed
+    if body.subscription_billing_day is not None: updates["subscription_billing_day"] = body.subscription_billing_day
+    if body.maintenance_fee_enabled is not None: updates["maintenance_fee_enabled"] = body.maintenance_fee_enabled
+    if body.maintenance_fee_amount is not None: updates["maintenance_fee_amount"] = body.maintenance_fee_amount
+    if body.maintenance_fee_day is not None: updates["maintenance_fee_day"] = body.maintenance_fee_day
+    if body.maintenance_fee_label is not None: updates["maintenance_fee_label"] = body.maintenance_fee_label
     if "commission_auto_cashup_time" in body.model_fields_set:
         updates["commission_auto_cashup_time"] = body.commission_auto_cashup_time
     async with pool.acquire() as conn:
@@ -2541,14 +2585,63 @@ async def owner_dashboard(user: dict = Depends(require_owner)):
 @api.post("/owner/drivers/link")
 async def owner_link_driver(body: LinkDriverIn, user: dict = Depends(require_owner)):
     code = body.driver_code.strip().upper()
+    subscription_charged = 0.0
+    subscription_insufficient = False
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
         drv = await conn.fetchrow("SELECT d.user_id,u.full_name,u.phone_number,d.vehicle_plate,d.qr_code FROM drivers d JOIN users u ON u.id=d.user_id WHERE d.qr_code=$1 OR d.user_id=$1", code)
         if not drv: raise HTTPException(status_code=404, detail="Driver not found")
         existing = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], drv["user_id"])
         if existing: raise HTTPException(status_code=400, detail="Driver already linked")
+
+        # Count current fleet before linking
+        prev_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM owner_drivers WHERE owner_id=$1", owner["id"]
+        ) or 0
+
         await conn.execute("INSERT INTO owner_drivers (id,owner_id,driver_user_id) VALUES ($1,$2,$3)", str(uuid.uuid4()), owner["id"], drv["user_id"])
-    return {"ok": True, "driver": dict(drv)}
+
+        # Get subscription pricing from admin settings
+        settings = await conn.fetchrow(
+            "SELECT subscription_free_taxis, subscription_price_per_taxi FROM payout_settings WHERE id='default'"
+        )
+        free_taxis = int(settings["subscription_free_taxis"] or 1) if settings else 1
+        price_per_taxi = float(settings["subscription_price_per_taxi"] or 10.0) if settings else 10.0
+
+        new_count = prev_count + 1
+        # Only charge if this driver pushes count beyond the free tier
+        if new_count > free_taxis and price_per_taxi > 0:
+            wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user["id"])
+            balance = float(wallet["balance"] or 0) if wallet else 0.0
+            if balance >= price_per_taxi:
+                async with conn.transaction():
+                    await conn.execute(
+                        "UPDATE wallets SET balance=balance-$1 WHERE user_id=$2",
+                        price_per_taxi, user["id"]
+                    )
+                    txn_id = str(uuid.uuid4()); ref = gen_ref()
+                    await conn.execute(
+                        "INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note,currency) "
+                        "VALUES ($1,$2,'subscription_fee','completed',$3,$4,NULL,$5,'ZAR')",
+                        txn_id, ref, price_per_taxi, user["id"],
+                        f"Subscription fee: taxi #{new_count} added to fleet"
+                    )
+                subscription_charged = price_per_taxi
+            else:
+                subscription_insufficient = True
+
+        # Refresh subscription record
+        await _refresh_subscription_fee(conn, user["id"])
+
+    return {
+        "ok": True,
+        "driver": dict(drv),
+        "subscription_charged": subscription_charged,
+        "subscription_price_per_taxi": price_per_taxi if new_count > free_taxis else 0.0,
+        "subscription_insufficient": subscription_insufficient,
+        "taxi_count": new_count,
+        "free_taxis": free_taxis,
+    }
 
 @api.delete("/owner/drivers/{driver_user_id}")
 async def owner_unlink_driver(driver_user_id: str, user: dict = Depends(require_owner)):
@@ -2605,7 +2698,11 @@ async def owner_toggle_driver_mode(body: dict, user: dict = Depends(require_owne
             if not existing_driver:
                 await conn.execute("INSERT INTO drivers (id,user_id,qr_code,vehicle_plate,is_verified) VALUES ($1,$2,$3,$4,TRUE)",
                     str(uuid.uuid4()), user["id"], generate_qr_code(), "")
-        await conn.execute("UPDATE wallets SET driver_mode_active=$1 WHERE user_id=$2", active, user["id"])
+        await conn.execute(
+            "INSERT INTO wallets (id, user_id, driver_mode_active) VALUES ($1,$2,$3) "
+            "ON CONFLICT (user_id) DO UPDATE SET driver_mode_active=EXCLUDED.driver_mode_active",
+            str(uuid.uuid4()), user["id"], active
+        )
     return {"ok": True, "driver_mode_active": active}
 
 # ── Owner cashup management ──────────────────────────────────
@@ -2882,18 +2979,35 @@ async def owner_change_password(body: OwnerChangePasswordIn, user: dict = Depend
 class OwnerPayoutIn(BaseModel):
     amount: float = Field(gt=0, le=1_000_000)
 
+@api.get("/owner/payout-fee")
+async def owner_payout_fee_preview(amount: float, user: dict = Depends(require_owner)):
+    """Return fee breakdown for a given payout amount before the owner confirms."""
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow("SELECT withdrawal_gateway_fee_fixed FROM payout_settings WHERE id='default'")
+    fee = float(settings["withdrawal_gateway_fee_fixed"]) if settings and settings["withdrawal_gateway_fee_fixed"] is not None else 3.50
+    total_deduct = round(amount + fee, 2)
+    net_to_bank = round(amount, 2)
+    return {"amount": net_to_bank, "gateway_fee": fee, "total_deducted": total_deduct}
+
 @api.post("/owner/payout")
 async def owner_payout(body: OwnerPayoutIn, user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         fo = await conn.fetchrow(
             "SELECT bank_name, account_number, account_name FROM fleet_owners WHERE user_id=$1", user["id"]
         )
+        settings = await conn.fetchrow("SELECT withdrawal_gateway_fee_fixed FROM payout_settings WHERE id='default'")
     if not fo or not fo["bank_name"] or not fo["account_number"]:
         raise HTTPException(status_code=400, detail="No bank account set up. Add your banking details in Profile first.")
+    gateway_fee = float(settings["withdrawal_gateway_fee_fixed"]) if settings and settings["withdrawal_gateway_fee_fixed"] is not None else 3.50
+    total_deduct = round(body.amount + gateway_fee, 2)
+    # Deduct full amount (payout + gateway fee) from wallet, send payout amount to bank
     result = await _do_withdraw(
-        user, body.amount, fo["bank_name"], fo["account_number"], fo["account_name"],
+        user, total_deduct, fo["bank_name"], fo["account_number"], fo["account_name"],
         payout_type="owner_payout"
     )
+    result["gateway_fee"] = gateway_fee
+    result["net_to_bank"] = round(body.amount, 2)
+    result["total_deducted"] = total_deduct
     return result
 
 @api.get("/owner/outstanding")
@@ -3912,6 +4026,12 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS subscription_free_taxis INTEGER DEFAULT 1")
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS owner_statement_price NUMERIC(14,2) DEFAULT 10.00")
                 await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS passenger_statement_price NUMERIC(14,2) DEFAULT 0.00")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS withdrawal_gateway_fee_fixed NUMERIC(14,2) DEFAULT 3.50")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS subscription_billing_day INTEGER DEFAULT 1")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS maintenance_fee_enabled BOOLEAN DEFAULT FALSE")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS maintenance_fee_amount NUMERIC(14,2) DEFAULT 0.00")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS maintenance_fee_day INTEGER DEFAULT 1")
+                await conn.execute("ALTER TABLE payout_settings ADD COLUMN IF NOT EXISTS maintenance_fee_label TEXT DEFAULT 'Monthly maintenance fee'")
                 # Make passenger statements free if still at the original R5 default
                 await conn.execute("UPDATE payout_settings SET passenger_statement_price=0.00 WHERE id='default' AND passenger_statement_price=5.00")
                 # ── Owner subscription tracking ──
@@ -10999,21 +11119,29 @@ async def owner_get_subscription(user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         await _refresh_subscription_fee(conn, user["id"])
         sub = await _get_or_create_subscription(conn, user["id"])
+        settings = await conn.fetchrow(
+            "SELECT subscription_free_taxis, subscription_price_per_taxi FROM payout_settings WHERE id='default'"
+        )
         billing_rows = await conn.fetch(
             """SELECT * FROM subscription_billing_records
                WHERE owner_user_id=$1 ORDER BY billed_at DESC LIMIT 6""",
             user["id"]
         )
+    free_taxis = int(settings["subscription_free_taxis"] or 1) if settings else 1
+    price_per_taxi = float(settings["subscription_price_per_taxi"] or 10.0) if settings else 10.0
     return {
         "subscription": {
             "status": sub["status"],
             "taxi_count": sub["taxi_count"],
-            "free_taxis": 1,
+            "free_taxis": free_taxis,
             "billable_taxis": sub["billable_taxis"],
+            "price_per_taxi": price_per_taxi,
             "monthly_fee": float(sub["monthly_fee"] or 0),
             "next_billing_date": sub["next_billing_date"].isoformat() if sub["next_billing_date"] else None,
             "last_billed_date": sub["last_billed_date"].isoformat() if sub["last_billed_date"] else None,
             "overdue_since": sub["overdue_since"].isoformat() if sub["overdue_since"] else None,
+            "auto_debit": True,
+            "billing_day": sub["billing_day"] or 1,
         },
         "billing_history": [
             {
@@ -11148,6 +11276,39 @@ async def admin_waive_subscription(owner_user_id: str, admin: dict = Depends(req
             "Your subscription fee for this month has been waived by the Tag-n-Ride team.",
             "subscription", owner_user_id)
     return {"ok": True}
+
+@api.get("/admin/maintenance-fee/preview")
+async def admin_maintenance_fee_preview(admin: dict = Depends(require_admin)):
+    """Return how many wallets would be charged and total revenue if billing ran now."""
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow(
+            "SELECT maintenance_fee_enabled, maintenance_fee_amount, maintenance_fee_day, maintenance_fee_label "
+            "FROM payout_settings WHERE id='default'"
+        )
+        fee = float(settings["maintenance_fee_amount"] or 0) if settings else 0.0
+        eligible = await conn.fetchval(
+            """SELECT COUNT(*) FROM wallets w
+               JOIN users u ON u.id = w.user_id
+               WHERE w.is_frozen = FALSE AND u.is_active = TRUE AND w.balance >= $1""",
+            fee
+        ) or 0
+        total_wallets = await conn.fetchval("SELECT COUNT(*) FROM wallets") or 0
+    return {
+        "enabled": bool(settings["maintenance_fee_enabled"]) if settings else False,
+        "fee": fee,
+        "billing_day": int(settings["maintenance_fee_day"] or 1) if settings else 1,
+        "label": str(settings["maintenance_fee_label"] or "Monthly maintenance fee") if settings else "Monthly maintenance fee",
+        "eligible_wallets": int(eligible),
+        "total_wallets": int(total_wallets),
+        "projected_revenue": round(fee * int(eligible), 2),
+    }
+
+@api.post("/admin/maintenance-fee/run-now")
+async def admin_run_maintenance_fee(admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "edit_system"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    result = await _run_maintenance_fee_billing()
+    return result
 
 # ── Subscription billing engine ───────────────────────────────
 
@@ -11535,19 +11696,95 @@ async def subscription_billing_loop():
                 from datetime import date
                 today = date.today()
                 async with pool.acquire() as conn:
+                    settings = await conn.fetchrow(
+                        "SELECT subscription_billing_day FROM payout_settings WHERE id='default'"
+                    )
+                    billing_day = int(settings["subscription_billing_day"] or 1) if settings else 1
                     due = await conn.fetch(
                         """SELECT owner_user_id FROM owner_subscriptions
                            WHERE status != 'cancelled'
                              AND (next_billing_date IS NULL OR next_billing_date <= $1)""",
                         today
                     )
-                for row in due:
-                    try:
-                        await _bill_owner(row["owner_user_id"])
-                    except Exception as e:
-                        log.error("[SUBSCRIPTION LOOP] owner=%s err=%s", row["owner_user_id"], e)
+                # Only bill if today is the configured billing day OR account is overdue
+                if today.day == billing_day or due:
+                    for row in due:
+                        try:
+                            await _bill_owner(row["owner_user_id"])
+                        except Exception as e:
+                            log.error("[SUBSCRIPTION LOOP] owner=%s err=%s", row["owner_user_id"], e)
         except Exception as e:
             log.error("[SUBSCRIPTION LOOP] %s", e)
+        await asyncio.sleep(3600)  # check every hour
+
+async def _run_maintenance_fee_billing() -> dict:
+    """Deduct maintenance fee from all active wallets for all roles."""
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow(
+            "SELECT maintenance_fee_enabled, maintenance_fee_amount, maintenance_fee_label "
+            "FROM payout_settings WHERE id='default'"
+        )
+    if not settings or not settings["maintenance_fee_enabled"]:
+        return {"ok": False, "reason": "Maintenance fee is disabled"}
+    fee = float(settings["maintenance_fee_amount"] or 0)
+    if fee <= 0:
+        return {"ok": False, "reason": "Maintenance fee amount is zero"}
+    label = settings["maintenance_fee_label"] or "Monthly maintenance fee"
+    charged = 0; skipped = 0; total_collected = 0.0
+    async with pool.acquire() as conn:
+        wallets = await conn.fetch(
+            """SELECT w.user_id, w.balance FROM wallets w
+               JOIN users u ON u.id = w.user_id
+               WHERE w.is_frozen = FALSE AND u.is_active = TRUE AND w.balance >= $1""",
+            fee
+        )
+        for w in wallets:
+            try:
+                async with conn.transaction():
+                    # Re-check balance inside transaction
+                    current = await conn.fetchval(
+                        "SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE", w["user_id"]
+                    )
+                    if current is None or float(current) < fee:
+                        skipped += 1
+                        continue
+                    await conn.execute(
+                        "UPDATE wallets SET balance=balance-$1 WHERE user_id=$2", fee, w["user_id"]
+                    )
+                    txn_id = str(uuid.uuid4()); ref = gen_ref()
+                    await conn.execute(
+                        "INSERT INTO transactions (id,reference,type,status,amount,sender_id,note,currency) "
+                        "VALUES ($1,$2,'maintenance_fee','completed',$3,$4,$5,'ZAR')",
+                        txn_id, ref, fee, w["user_id"], label
+                    )
+                    charged += 1
+                    total_collected += fee
+            except Exception as e:
+                log.error("[MAINTENANCE FEE] user=%s err=%s", w["user_id"], e)
+                skipped += 1
+    log.info("[MAINTENANCE FEE] charged=%d skipped=%d total=%.2f", charged, skipped, total_collected)
+    return {"ok": True, "charged": charged, "skipped": skipped, "total_collected": round(total_collected, 2)}
+
+async def maintenance_fee_billing_loop():
+    await asyncio.sleep(60)
+    last_run_date = None
+    while True:
+        try:
+            if pool:
+                from datetime import date
+                today = date.today()
+                async with pool.acquire() as conn:
+                    settings = await conn.fetchrow(
+                        "SELECT maintenance_fee_enabled, maintenance_fee_day FROM payout_settings WHERE id='default'"
+                    )
+                enabled = settings and settings["maintenance_fee_enabled"]
+                fee_day = int(settings["maintenance_fee_day"] or 1) if settings else 1
+                if enabled and today.day == fee_day and last_run_date != today:
+                    result = await _run_maintenance_fee_billing()
+                    last_run_date = today
+                    log.info("[MAINTENANCE FEE LOOP] %s", result)
+        except Exception as e:
+            log.error("[MAINTENANCE FEE LOOP] %s", e)
         await asyncio.sleep(3600)  # check every hour
 
 async def commission_auto_cashup_loop():
@@ -12604,9 +12841,8 @@ async def patch_safety_profile(body: SafetyProfileIn, user: dict = Depends(get_c
 # ── POST /api/trips/start ──
 @api.post("/trips/start")
 async def trip_start(body: TripStartIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
+        await require_can_drive(user, conn)
         existing = await conn.fetchrow(
             "SELECT * FROM trips WHERE driver_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1",
             user["id"]
@@ -12643,9 +12879,8 @@ async def trip_start(body: TripStartIn, user: dict = Depends(get_current_user)):
 # ── GET /api/trips/active ──
 @api.get("/trips/active")
 async def trip_active(user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
+        await require_can_drive(user, conn)
         trip = await conn.fetchrow(
             "SELECT * FROM trips WHERE driver_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1",
             user["id"]
@@ -12674,9 +12909,8 @@ async def trip_active(user: dict = Depends(get_current_user)):
 # ── POST /api/trips/end ──
 @api.post("/trips/end")
 async def trip_end(body: TripEndIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
+        await require_can_drive(user, conn)
         trip = await conn.fetchrow("SELECT * FROM trips WHERE id=$1 AND driver_id=$2", body.trip_id, user["id"])
         if not trip:
             raise HTTPException(status_code=404, detail="Trip not found")
@@ -12710,13 +12944,12 @@ async def trip_end(body: TripEndIn, user: dict = Depends(get_current_user)):
 # ── POST /api/trips/location ──
 @api.post("/trips/location")
 async def trip_location(body: TripLocationIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     now_ts = time.time()
     if now_ts - _gps_last.get(user["id"], 0) < 30:
         return {"ok": True, "skipped": True}
     _gps_last[user["id"]] = now_ts
     async with pool.acquire() as conn:
+        await require_can_drive(user, conn)
         await conn.execute(
             "INSERT INTO gps_locations (id,user_id,trip_id,latitude,longitude,speed,heading) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7)",
@@ -12735,9 +12968,8 @@ async def trip_location(body: TripLocationIn, user: dict = Depends(get_current_u
 # ── GET /api/trips/history ──
 @api.get("/trips/history")
 async def trips_history(user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
+        await require_can_drive(user, conn)
         rows = await conn.fetch(
             "SELECT t.id, t.trip_reference, t.status, t.started_at, t.ended_at, t.vehicle_plate, "
             "t.total_passengers, t.total_revenue, "
@@ -13546,9 +13778,8 @@ async def admin_end_track_me(trip_id: str, admin: dict = Depends(require_admin))
 # ── PATCH /api/trips/{trip_id}/details ──
 @api.patch("/trips/{trip_id}/details")
 async def update_trip_details(trip_id: str, body: TripDetailsIn, user: dict = Depends(get_current_user)):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Drivers only")
     async with pool.acquire() as conn:
+        await require_can_drive(user, conn)
         trip = await conn.fetchrow("SELECT id FROM trips WHERE id=$1 AND driver_id=$2", trip_id, user["id"])
         if not trip:
             raise HTTPException(status_code=404, detail="Trip not found")
@@ -13572,8 +13803,8 @@ async def update_trip_details(trip_id: str, body: TripDetailsIn, user: dict = De
 @api.post("/trips/share")
 async def trip_share(body: TripShareIn, user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
-        if user["role"] == "driver":
-            # Driver can share any of their own trips
+        if user["role"] in ("driver", "owner"):
+            # Driver or owner-driver can share any of their own trips
             trip = await conn.fetchrow(
                 "SELECT trip_reference FROM trips WHERE id=$1 AND driver_id=$2",
                 body.trip_id, user["id"]
