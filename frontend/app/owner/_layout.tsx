@@ -65,7 +65,7 @@ function OwnerTabs() {
       <Tabs.Screen name="notifications" options={{ href: null, tabBarItemStyle: { display: "none" } }} />
       <Tabs.Screen name="documents"     options={{ href: null, tabBarItemStyle: { display: "none" } }} />
       <Tabs.Screen name="statement"     options={{ href: null, tabBarItemStyle: { display: "none" } }} />
-      <Tabs.Screen name="driver"        options={{ href: null, tabBarItemStyle: { display: "none" } }} />
+      <Tabs.Screen name="driver/[driver_id]" options={{ href: null, tabBarItemStyle: { display: "none" } }} />
     </Tabs>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable,
+  RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -316,10 +316,13 @@ export default function OwnerDashboard() {
                 </View>
               )}
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: async () => { await signOut(); router.replace("/(auth)/welcome"); } },
-            ])} style={s.avatar}>
+            <TouchableOpacity onPress={async () => {
+              if (Platform.OS === "web") { await signOut(); router.replace("/(auth)/welcome"); return; }
+              Alert.alert("Sign out?", "", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Sign out", style: "destructive", onPress: async () => { await signOut(); router.replace("/(auth)/welcome"); } },
+              ]);
+            }} style={s.avatar}>
               <Ionicons name="business-outline" size={20} color={colors.cyan} />
             </TouchableOpacity>
           </View>

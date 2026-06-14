@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal, ActivityIndicator, Pressable } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal, ActivityIndicator, Pressable, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -468,16 +468,20 @@ export default function OwnerProfile() {
 
         {/* Sign out */}
         <TouchableOpacity style={styles.signOutBtn}
-          onPress={() => Alert.alert("Sign out", "Are you sure?", [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Sign out", style: "destructive",
-              onPress: async () => {
+          onPress={async () => {
+            if (Platform.OS === "web") {
+              await signOut();
+              router.replace("/(auth)/welcome");
+              return;
+            }
+            Alert.alert("Sign out", "Are you sure?", [
+              { text: "Cancel", style: "cancel" },
+              { text: "Sign out", style: "destructive", onPress: async () => {
                 await signOut();
                 router.replace("/(auth)/welcome");
-              },
-            },
-          ])}>
+              }},
+            ]);
+          }}>
           <Ionicons name="log-out-outline" size={20} color={colors.red} />
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
