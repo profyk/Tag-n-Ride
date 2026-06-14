@@ -51,7 +51,12 @@ function OwnerTabs() {
       />
       <Tabs.Screen
         name="trip-centre"
-        options={{ href: null, tabBarButton: () => null }}
+        options={{
+          title: "Trip Centre",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="shield-checkmark-outline" size={size} color={color} />
+          ),
+        }}
       />
       <Tabs.Screen
         name="profile"
