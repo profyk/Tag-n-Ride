@@ -1,20 +1,11 @@
-import { Tabs, Redirect } from "expo-router";
+import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "../../src/theme";
-import { useAuth } from "../../src/AuthContext";
 import { NotificationProvider } from "../../src/NotificationContext";
 import { DocumentProvider } from "../../src/DocumentContext";
 
 function OwnerTabs() {
   const colors = useColors();
-  const { state } = useAuth();
-  const insets = useSafeAreaInsets();
-
-  // Redirect guests to the auth screen — declarative, works from any navigator level
-  if (state.status === "guest") {
-    return <Redirect href="/(auth)/welcome" />;
-  }
 
   return (
     <Tabs
@@ -27,8 +18,7 @@ function OwnerTabs() {
           borderTopColor: colors.border,
           borderTopWidth: 1,
           paddingTop: 6,
-          paddingBottom: insets.bottom || 8,
-          height: 64 + (insets.bottom || 0),
+          height: 64,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
       }}>
@@ -61,7 +51,7 @@ function OwnerTabs() {
       />
       <Tabs.Screen
         name="trip-centre"
-        options={{ href: null, tabBarButton: () => null }}
+        options={{ href: null }}
       />
       <Tabs.Screen
         name="profile"
@@ -72,11 +62,10 @@ function OwnerTabs() {
           ),
         }}
       />
-      {/* All hidden screens — tabBarButton: () => null prevents any button rendering */}
-      <Tabs.Screen name="notifications" options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="documents"     options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="statement"     options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="driver"        options={{ href: null, tabBarButton: () => null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="documents"     options={{ href: null }} />
+      <Tabs.Screen name="statement"     options={{ href: null }} />
+      <Tabs.Screen name="driver"        options={{ href: null }} />
     </Tabs>
   );
 }
