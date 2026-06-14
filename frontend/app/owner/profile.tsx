@@ -472,11 +472,9 @@ export default function OwnerProfile() {
             { text: "Cancel", style: "cancel" },
             {
               text: "Sign out", style: "destructive",
-              onPress: () => {
-                // Navigate away first while the component is still mounted,
-                // then clear auth state — avoids navigation-after-unmount race
+              onPress: async () => {
+                await signOut();
                 router.replace("/(auth)/welcome");
-                signOut();
               },
             },
           ])}>

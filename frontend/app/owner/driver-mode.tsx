@@ -192,6 +192,23 @@ export default function OwnerDriveMode() {
           </View>
         )}
 
+        {/* Trip Centre shortcut */}
+        <TouchableOpacity
+          style={[s.tripCentreBtn, { backgroundColor: colors.bg2, borderColor: driverModeActive ? colors.green : colors.border }]}
+          onPress={() => router.push("/owner/trip-centre")}
+          activeOpacity={0.8}>
+          <View style={[s.tripCentreBtnIcon, { backgroundColor: driverModeActive ? colors.greenDim : colors.bg2 }]}>
+            <Ionicons name="shield-checkmark-outline" size={22} color={driverModeActive ? colors.green : colors.textMuted} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.tripCentreBtnTitle, { color: colors.text }]}>Trip Centre</Text>
+            <Text style={[s.tripCentreBtnSub, { color: colors.textMuted }]}>
+              {driverModeActive ? "Start a SafeRide trip & manage passengers" : "Enable driver mode above to start trips"}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {/* Account details */}
         <View style={[s.detailCard, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
           <Text style={[s.detailTitle, { color: colors.text }]}>Account Details</Text>
@@ -242,6 +259,10 @@ const s = StyleSheet.create({
   actionBtn: { flex: 1, borderRadius: radius.md, borderWidth: 1, padding: 16, alignItems: "center", gap: 8 },
   actionBtnIcon: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
   actionBtnLabel: { fontSize: 13, fontWeight: "700" },
+  tripCentreBtn: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: radius.md, borderWidth: 1.5, padding: 16, marginBottom: 16 },
+  tripCentreBtnIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  tripCentreBtnTitle: { fontSize: 15, fontWeight: "800", marginBottom: 2 },
+  tripCentreBtnSub: { fontSize: 12, lineHeight: 16 },
   detailCard: { borderRadius: radius.md, borderWidth: 1, padding: 16 },
   detailTitle: { fontSize: 15, fontWeight: "800", marginBottom: 12 },
   detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10 },
