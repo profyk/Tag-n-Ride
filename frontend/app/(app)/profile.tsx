@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Image, Alert, TextInput, Modal, ActivityIndicator,
-  Platform, Linking, Share,
+  Platform, Linking, Share, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useNavigation } from "expo-router";
+import { useRouter, useNavigation, useFocusEffect } from "expo-router";
 import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
@@ -62,6 +62,17 @@ const APP_VERSION = "1.0.0";export default function Profile() {
   const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
   const [safetyProfileComplete, setSafetyProfileComplete] = useState<boolean | null>(null);
 
+  const [deadManCodeSet, setDeadManCodeSet] = useState(false);
+  const [deadManModal, setDeadManModal] = useState(false);
+  const [deadManCode, setDeadManCode] = useState("");
+  const [deadManCodeConfirm, setDeadManCodeConfirm] = useState("");
+  const [deadManCurrentPin, setDeadManCurrentPin] = useState("");
+  const [deadManSaving, setDeadManSaving] = useState(false);
+  const [deadManResetRequest, setDeadManResetRequest] = useState<{ id: string; status: string; reason: string; admin_reason?: string; created_at: string } | null>(null);
+  const [deadManResetModal, setDeadManResetModal] = useState(false);
+  const [deadManResetReason, setDeadManResetReason] = useState("");
+  const [deadManResetSubmitting, setDeadManResetSubmitting] = useState(false);
+
   const [passengerTrip, setPassengerTrip] = useState<any | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
 
@@ -77,9 +88,23 @@ const APP_VERSION = "1.0.0";export default function Profile() {
       if (state.user.role === "passenger") {
         api.tripsPassengerCurrent().then(r => setPassengerTrip(r?.trip ?? null)).catch(() => {});
       }
-      api.safetyProfile().then(p => setSafetyProfileComplete(!!p?.profile_complete)).catch(() => {});
+      api.safetyProfile().then(p => {
+        setSafetyProfileComplete(!!p?.profile_complete);
+        setDeadManCodeSet(!!p?.dead_man_code_set);
+      }).catch(() => {});
+      api.getDeadManResetStatus().then(r => setDeadManResetRequest(r?.request ?? null)).catch(() => {});
     }
   }, [state]);
+
+  useFocusEffect(useCallback(() => {
+    if (state.status === "authed") {
+      api.safetyProfile().then(p => {
+        setSafetyProfileComplete(!!p?.profile_complete);
+        setDeadManCodeSet(!!p?.dead_man_code_set);
+      }).catch(() => {});
+      api.getDeadManResetStatus().then(r => setDeadManResetRequest(r?.request ?? null)).catch(() => {});
+    }
+  }, [state.status]));
 
   useEffect(() => {
     if (state.status === "guest") router.replace("/(auth)/welcome");
@@ -216,6 +241,48 @@ const APP_VERSION = "1.0.0";export default function Profile() {
     Linking.openURL(WHATSAPP_URL).catch(() => {
       Alert.alert("WhatsApp not available", "Please contact us at support@tagnride.app");
     });
+  };
+
+  const handleSaveDeadManCode = async () => {
+    if (deadManCode.length < 4 || !/^\d+$/.test(deadManCode)) {
+      Alert.alert("Invalid", "Dead man code must be 4–6 digits."); return;
+    }
+    if (deadManCode !== deadManCodeConfirm) {
+      Alert.alert("Mismatch", "Codes do not match."); return;
+    }
+    if (!deadManCurrentPin) {
+      Alert.alert("PIN required", "Enter your current account PIN to confirm."); return;
+    }
+    if (deadManCode === deadManCurrentPin) {
+      Alert.alert("Invalid", "Dead man code must be different from your real PIN."); return;
+    }
+    setDeadManSaving(true);
+    try {
+      await api.setDeadManCode({ dead_man_code: deadManCode, current_pin: deadManCurrentPin });
+      setDeadManCodeSet(true);
+      setDeadManModal(false);
+      setDeadManCode(""); setDeadManCodeConfirm(""); setDeadManCurrentPin("");
+      Alert.alert("Dead Man Code Set", "Saved securely. If you enter this code instead of your real PIN when cancelling an SOS, it will appear cancelled but your location keeps being tracked silently.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not save code.");
+    } finally { setDeadManSaving(false); }
+  };
+
+  const handleSubmitDeadManReset = async () => {
+    if (deadManResetReason.trim().length < 10) {
+      Alert.alert("Too short", "Please provide a detailed reason (at least 10 characters)."); return;
+    }
+    setDeadManResetSubmitting(true);
+    try {
+      await api.requestDeadManReset(deadManResetReason.trim());
+      const res = await api.getDeadManResetStatus();
+      setDeadManResetRequest(res.request);
+      setDeadManResetModal(false);
+      setDeadManResetReason("");
+      Alert.alert("Request Submitted", "Your dead man code reset request has been sent to an admin for review. You will be notified once it is processed.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not submit request.");
+    } finally { setDeadManResetSubmitting(false); }
   };
 
   const kycColor = () => {
@@ -505,6 +572,70 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         <Row icon="lock-closed-outline" label="Change PIN"
           onPress={() => setPinModal(true)} testID="row-change-pin" colors={colors} />
 
+        {/* Emergency Safety */}
+        <Text style={s.section}>EMERGENCY SAFETY</Text>
+        <View style={[s.deadManCard, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.redDim, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="shield-half-outline" size={20} color={colors.red} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: "700", fontSize: 15 }}>Dead Man Code</Text>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2, lineHeight: 17 }}>
+                A secret code you enter instead of your real PIN when cancelling an SOS under duress. It appears to cancel but silently keeps tracking your location and alerts our team.
+              </Text>
+            </View>
+          </View>
+          {deadManCodeSet ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+              <Ionicons name="checkmark-circle" size={15} color={colors.green} />
+              <Text style={{ color: colors.green, fontWeight: "700", fontSize: 13 }}>Dead man code is set</Text>
+            </View>
+          ) : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+              <Ionicons name="warning-outline" size={15} color={colors.red} />
+              <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>No dead man code set</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[s.deadManBtn, { borderColor: colors.red + "60", backgroundColor: colors.redDim }]}
+            onPress={() => { setDeadManCode(""); setDeadManCodeConfirm(""); setDeadManCurrentPin(""); setDeadManModal(true); }}>
+            <Ionicons name="key-outline" size={15} color={colors.red} />
+            <Text style={{ color: colors.red, fontWeight: "700", fontSize: 13 }}>
+              {deadManCodeSet ? "Change Dead Man Code" : "Set Dead Man Code"}
+            </Text>
+          </TouchableOpacity>
+
+          {deadManResetRequest?.status === "pending" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.bg }}>
+              <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, fontSize: 12, flex: 1 }}>Reset request pending admin review</Text>
+            </View>
+          ) : deadManResetRequest?.status === "approved" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.greenDim }}>
+              <Ionicons name="checkmark-circle-outline" size={14} color={colors.green} />
+              <Text style={{ color: colors.green, fontSize: 12, flex: 1 }}>Reset approved — set your new dead man code above</Text>
+            </View>
+          ) : deadManResetRequest?.status === "rejected" ? (
+            <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.redDim }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                <Ionicons name="close-circle-outline" size={14} color={colors.red} />
+                <Text style={{ color: colors.red, fontSize: 12, fontWeight: "700" }}>Reset request rejected</Text>
+              </View>
+              {!!deadManResetRequest.admin_reason && (
+                <Text style={{ color: colors.textMuted, fontSize: 11 }}>Reason: {deadManResetRequest.admin_reason}</Text>
+              )}
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.bg }}
+              onPress={() => { setDeadManResetReason(""); setDeadManResetModal(true); }}>
+              <Ionicons name="refresh-outline" size={14} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>Forgot your code? Request a reset</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Support */}
         <Text style={s.section}>SUPPORT</Text>
         <TouchableOpacity style={s.whatsappRow} onPress={openWhatsApp} testID="row-whatsapp">
@@ -625,6 +756,107 @@ const APP_VERSION = "1.0.0";export default function Profile() {
         </View>
       </Modal>
 
+      {/* Dead Man Code modal */}
+      <Modal visible={deadManModal} transparent animationType="slide" onRequestClose={() => setDeadManModal(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setDeadManModal(false)}>
+          <Pressable style={s.modalSheet} onPress={() => {}}>
+            <View style={s.modalHandle} />
+            <View style={[s.modalIconWrap, { backgroundColor: colors.redDim, borderColor: colors.red + "40" }]}>
+              <Ionicons name="shield-half-outline" size={26} color={colors.red} />
+            </View>
+            <Text style={s.modalTitle}>Dead Man Code</Text>
+            <Text style={s.modalSub}>
+              Enter this code instead of your real PIN when cancelling an SOS if you are under duress.
+              It looks like a cancel but your location keeps being tracked silently.{"\n\n"}
+              Keep it secret — never share it with anyone.
+            </Text>
+            <Text style={s.inputLabel}>NEW DEAD MAN CODE (4–6 digits)</Text>
+            <TextInput
+              style={[s.textInput, { borderColor: colors.red + "60", marginBottom: 16 }]}
+              value={deadManCode}
+              onChangeText={setDeadManCode}
+              placeholder="e.g. 9999"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+            />
+            <Text style={s.inputLabel}>CONFIRM CODE</Text>
+            <TextInput
+              style={[s.textInput, { borderColor: deadManCodeConfirm && deadManCode !== deadManCodeConfirm ? colors.red : colors.red + "60", marginBottom: 4 }]}
+              value={deadManCodeConfirm}
+              onChangeText={setDeadManCodeConfirm}
+              placeholder="Repeat code"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+            />
+            {deadManCodeConfirm.length > 0 && deadManCode !== deadManCodeConfirm && (
+              <Text style={{ color: colors.red, fontSize: 11, marginBottom: 8 }}>Codes do not match</Text>
+            )}
+            <Text style={[s.inputLabel, { marginTop: 8 }]}>YOUR CURRENT ACCOUNT PIN</Text>
+            <TextInput
+              style={[s.textInput, { marginBottom: 16 }]}
+              value={deadManCurrentPin}
+              onChangeText={setDeadManCurrentPin}
+              placeholder="Your regular 4-digit PIN"
+              placeholderTextColor={colors.textDim}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+            />
+            <TouchableOpacity
+              style={[s.signout, { marginTop: 4, backgroundColor: colors.redDim, borderColor: colors.red, opacity: deadManSaving ? 0.6 : 1 }]}
+              onPress={handleSaveDeadManCode}
+              disabled={deadManSaving}>
+              {deadManSaving
+                ? <ActivityIndicator color={colors.red} size="small" />
+                : <><Ionicons name="key-outline" size={18} color={colors.red} /><Text style={s.signoutText}>Save Dead Man Code</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setDeadManModal(false)} style={{ alignItems: "center", paddingVertical: 12 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Dead Man Reset Request modal */}
+      <Modal visible={deadManResetModal} transparent animationType="slide" onRequestClose={() => setDeadManResetModal(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setDeadManResetModal(false)}>
+          <Pressable style={s.modalSheet} onPress={() => {}}>
+            <View style={s.modalHandle} />
+            <Text style={s.modalTitle}>Request Code Reset</Text>
+            <Text style={s.modalSub}>
+              If you have forgotten your dead man code, an admin can clear it so you can set a new one.
+              You must provide a reason — this request will be reviewed and reported to senior management.
+            </Text>
+            <Text style={s.inputLabel}>REASON FOR RESET REQUEST</Text>
+            <TextInput
+              style={[s.textInput, { height: 90, textAlignVertical: "top", marginBottom: 4 }]}
+              value={deadManResetReason}
+              onChangeText={setDeadManResetReason}
+              placeholder="Explain why you need to reset your dead man code..."
+              placeholderTextColor={colors.textDim}
+              multiline
+              maxLength={500}
+            />
+            <Text style={{ color: colors.textMuted, fontSize: 11, textAlign: "right", marginBottom: 16 }}>{deadManResetReason.length}/500</Text>
+            <TouchableOpacity
+              style={[s.signout, { backgroundColor: colors.redDim, borderColor: colors.red, opacity: deadManResetSubmitting ? 0.6 : 1 }]}
+              onPress={handleSubmitDeadManReset}
+              disabled={deadManResetSubmitting}>
+              {deadManResetSubmitting
+                ? <ActivityIndicator color={colors.red} size="small" />
+                : <><Ionicons name="send-outline" size={18} color={colors.red} /><Text style={s.signoutText}>Submit Reset Request</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setDeadManResetModal(false)} style={{ alignItems: "center", paddingVertical: 12 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Bank picker */}
       <Modal visible={showBankPicker} transparent animationType="slide" onRequestClose={() => setShowBankPicker(false)}>
         <View style={s.modalOverlay}>
@@ -737,6 +969,8 @@ const makeStyles = (colors: any) => StyleSheet.create({
   whatsappRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#128C7E", borderRadius: radius.md, padding: 16, gap: 12, marginBottom: 10 },
   whatsappIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   whatsappLabel: { flex: 1, color: "#fff", fontWeight: "700", fontSize: 15 },
+  deadManCard: { borderRadius: radius.md, borderWidth: 1, padding: 16, marginBottom: 8 },
+  deadManBtn: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radius.md, borderWidth: 1, padding: 12, alignSelf: "flex-start" },
   signout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 16, borderWidth: 1, borderColor: colors.red + "40", borderRadius: radius.md, backgroundColor: colors.red + "10" },
   signoutText: { color: colors.red, fontWeight: "700", fontSize: 15 },
   brand: { color: colors.textDim, fontSize: 12, textAlign: "center", marginTop: 16, marginBottom: 4 },
