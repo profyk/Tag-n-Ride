@@ -124,6 +124,23 @@ export default function OwnerDriveMode() {
           )}
         </View>
 
+        {/* Trip Centre shortcut */}
+        <TouchableOpacity
+          style={[s.tripCentreBtn, { backgroundColor: colors.bg2, borderColor: driverModeActive ? colors.green : colors.border }]}
+          onPress={() => router.push("/owner/trip-centre")}
+          activeOpacity={0.8}>
+          <View style={[s.tripCentreBtnIcon, { backgroundColor: driverModeActive ? colors.greenDim : colors.bg2 }]}>
+            <Ionicons name="shield-checkmark-outline" size={22} color={driverModeActive ? colors.green : colors.textMuted} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.tripCentreBtnTitle, { color: colors.text }]}>Trip Centre</Text>
+            <Text style={[s.tripCentreBtnSub, { color: colors.textMuted }]}>
+              {driverModeActive ? "Start a SafeRide trip & manage passengers" : "Enable driver mode above to start trips"}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {/* QR card — always white background, theme-independent */}
         <View style={s.qrCard}>
           <View style={s.qrCardHeader}>
@@ -191,23 +208,6 @@ export default function OwnerDriveMode() {
             ))}
           </View>
         )}
-
-        {/* Trip Centre shortcut */}
-        <TouchableOpacity
-          style={[s.tripCentreBtn, { backgroundColor: colors.bg2, borderColor: driverModeActive ? colors.green : colors.border }]}
-          onPress={() => router.push("/owner/trip-centre")}
-          activeOpacity={0.8}>
-          <View style={[s.tripCentreBtnIcon, { backgroundColor: driverModeActive ? colors.greenDim : colors.bg2 }]}>
-            <Ionicons name="shield-checkmark-outline" size={22} color={driverModeActive ? colors.green : colors.textMuted} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.tripCentreBtnTitle, { color: colors.text }]}>Trip Centre</Text>
-            <Text style={[s.tripCentreBtnSub, { color: colors.textMuted }]}>
-              {driverModeActive ? "Start a SafeRide trip & manage passengers" : "Enable driver mode above to start trips"}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
 
         {/* Account details */}
         <View style={[s.detailCard, { backgroundColor: colors.bg2, borderColor: colors.border }]}>

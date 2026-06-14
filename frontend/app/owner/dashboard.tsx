@@ -318,7 +318,7 @@ export default function OwnerDashboard() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => Alert.alert("Sign out?", "", [
               { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: () => { router.replace("/(auth)/welcome"); signOut(); } },
+              { text: "Sign out", style: "destructive", onPress: async () => { await signOut(); router.replace("/(auth)/welcome"); } },
             ])} style={s.avatar}>
               <Ionicons name="business-outline" size={20} color={colors.cyan} />
             </TouchableOpacity>

@@ -472,9 +472,9 @@ export default function OwnerProfile() {
             { text: "Cancel", style: "cancel" },
             {
               text: "Sign out", style: "destructive",
-              onPress: () => {
+              onPress: async () => {
+                await signOut();
                 router.replace("/(auth)/welcome");
-                signOut();
               },
             },
           ])}>
