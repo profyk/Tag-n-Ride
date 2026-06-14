@@ -20,7 +20,7 @@ type Driver = {
   phone_number: string;
   vehicle_plate: string;
   total_earnings: number;
-  today_earnings?: number;
+  today_earnings: number;
   daily_target: number;
   qr_code: string;
   rating_avg: number;
@@ -29,9 +29,10 @@ type Driver = {
   payment_mode: "daily_target" | "commission_split";
   driver_commission_pct: number;
   commission_status?: string;
+  driver_status: "online" | "on_trip" | "offline";
 };
 
-type Tab = "drivers" | "cashups" | "outstanding" | "performance";
+type Tab = "drivers" | "cashups" | "outstanding" | "performance" | "deductions";
 
 function StatCard({ label, value, sub, color = colors.cyan, icon, bg }: {
   label: string; value: string; sub?: string; color?: string; icon: any; bg?: string;
@@ -176,18 +177,37 @@ export default function OwnerDashboard() {
   const [rejectReason, setRejectReason] = useState("");
   const [actingTransfer, setActingTransfer] = useState(false);
 
+  // Deductions
+  const [deductions, setDeductions] = useState<any[]>([]);
+  const [deductionModal, setDeductionModal] = useState<Driver | null>(null);
+  const [deductionAmt, setDeductionAmt] = useState("");
+  const [deductionReason, setDeductionReason] = useState("");
+  const [deductionType, setDeductionType] = useState("manual");
+  const [addingDeduction, setAddingDeduction] = useState(false);
+
+  // Document expiry
+  const [docModal, setDocModal] = useState<Driver | null>(null);
+  const [driverDocs, setDriverDocs] = useState<any[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docType, setDocType] = useState("pdp");
+  const [docExpiry, setDocExpiry] = useState("");
+  const [docNotes, setDocNotes] = useState("");
+  const [savingDoc, setSavingDoc] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [dashRes, outRes, histRes, txRes] = await Promise.all([
+      const [dashRes, outRes, histRes, txRes, dedRes] = await Promise.all([
         api.ownerDashboard(),
         api.ownerOutstanding().catch(() => null),
         api.ownerCashupHistory().catch(() => null),
         api.ownerTransfers().catch(() => []),
+        api.ownerListDeductions().catch(() => []),
       ]);
       setData(dashRes);
       setOutstanding(outRes);
       setCashupHistory(histRes);
       setTransfers(txRes as DriverTransfer[]);
+      setDeductions(dedRes as any[]);
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to load dashboard");
     } finally { setLoading(false); setRefreshing(false); }
@@ -281,6 +301,53 @@ export default function OwnerDashboard() {
     ]);
   };
 
+  const handleAddDeduction = async (driver: Driver) => {
+    const amt = parseFloat(deductionAmt);
+    if (!deductionAmt || isNaN(amt) || amt <= 0) { Alert.alert("Invalid", "Enter a valid amount"); return; }
+    if (!deductionReason.trim()) { Alert.alert("Required", "Enter a reason for this deduction"); return; }
+    setAddingDeduction(true);
+    try {
+      await api.ownerAddDeduction(driver.user_id, amt, deductionReason.trim(), deductionType);
+      Alert.alert("Deduction Added", `${formatZAR(amt)} will be deducted on next cashup.`);
+      setDeductionModal(null); setDeductionAmt(""); setDeductionReason(""); setDeductionType("manual");
+      load();
+    } catch (e: any) { Alert.alert("Error", e?.message || "Could not add deduction"); }
+    finally { setAddingDeduction(false); }
+  };
+
+  const openDocModal = async (driver: Driver) => {
+    setDocModal(driver); setDocsLoading(true);
+    try {
+      const docs = await api.ownerGetDriverDocs(driver.user_id);
+      setDriverDocs(docs);
+    } catch { setDriverDocs([]); }
+    finally { setDocsLoading(false); }
+  };
+
+  const handleSaveDoc = async (driver: Driver) => {
+    if (!docExpiry) { Alert.alert("Required", "Select an expiry date"); return; }
+    setSavingDoc(true);
+    try {
+      await api.ownerSetDriverDoc(driver.user_id, docType, docExpiry, docNotes);
+      const docs = await api.ownerGetDriverDocs(driver.user_id);
+      setDriverDocs(docs); setDocExpiry(""); setDocNotes("");
+      Alert.alert("Saved", `${docType.toUpperCase()} expiry updated.`);
+    } catch (e: any) { Alert.alert("Error", e?.message || "Could not save"); }
+    finally { setSavingDoc(false); }
+  };
+
+  const handleDeleteDoc = async (driver: Driver, docId: string, docTypeName: string) => {
+    Alert.alert("Remove", `Remove ${docTypeName.toUpperCase()} record?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => {
+        try {
+          await api.ownerDeleteDriverDoc(driver.user_id, docId);
+          setDriverDocs(prev => prev.filter(d => d.id !== docId));
+        } catch (e: any) { Alert.alert("Error", e?.message); }
+      }},
+    ]);
+  };
+
   const drivers: Driver[] = data?.drivers ?? [];
   const topEarner = drivers.reduce<Driver | null>((best, d) => !best || d.total_earnings > best.total_earnings ? d : best, null);
   const avgEarnings = drivers.length ? drivers.reduce((s, d) => s + d.total_earnings, 0) / drivers.length : 0;
@@ -292,7 +359,13 @@ export default function OwnerDashboard() {
     { key: "performance", label: "Performance" },
     { key: "cashups", label: "Cash-Ups" },
     { key: "outstanding", label: "Outstanding", count: outstanding?.items?.length || 0 },
+    { key: "deductions", label: "Deductions", count: deductions.filter((d: any) => d.status === "pending").length },
   ];
+
+  const pendingDeductions = deductions.filter((d: any) => d.status === "pending");
+  const expiringDocs = data?.expiring_docs ?? 0;
+  const onlineDrivers = drivers.filter(d => d.driver_status !== "offline").length;
+  const onTripDrivers = drivers.filter(d => d.driver_status === "on_trip").length;
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
@@ -353,6 +426,25 @@ export default function OwnerDashboard() {
               <StatCard label="Avg Earnings" value={formatZAR(avgEarnings)} sub="per driver" icon="stats-chart-outline" color="#FFD60A" />
             </View>
 
+            {/* Live fleet status row */}
+            {drivers.length > 0 && (
+              <View style={s.liveStatusRow}>
+                <View style={s.liveStatusItem}>
+                  <View style={[s.statusDot, { backgroundColor: colors.green }]} />
+                  <Text style={s.liveStatusText}><Text style={{ color: colors.green, fontWeight: "800" }}>{onlineDrivers}</Text> active</Text>
+                </View>
+                <View style={s.liveStatusItem}>
+                  <View style={[s.statusDot, { backgroundColor: "#FF9F0A" }]} />
+                  <Text style={s.liveStatusText}><Text style={{ color: "#FF9F0A", fontWeight: "800" }}>{onTripDrivers}</Text> on trip</Text>
+                </View>
+                <View style={s.liveStatusItem}>
+                  <View style={[s.statusDot, { backgroundColor: colors.textDim }]} />
+                  <Text style={s.liveStatusText}><Text style={{ color: colors.textDim, fontWeight: "800" }}>{drivers.length - onlineDrivers}</Text> offline</Text>
+                </View>
+                <Text style={s.liveLabel}>LIVE</Text>
+              </View>
+            )}
+
             {/* Alert banners */}
             {cashupHistory?.today_total > 0 && (
               <View style={s.infoBanner}>
@@ -370,6 +462,26 @@ export default function OwnerDashboard() {
                   {formatZAR(outstanding.total_outstanding)} outstanding · {outstanding.items?.length} driver(s)
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color="#FFD60A" />
+              </TouchableOpacity>
+            )}
+            {expiringDocs > 0 && (
+              <TouchableOpacity style={[s.warningBanner, { borderColor: "#FF6B0033", backgroundColor: "#FF6B0011" }]}
+                onPress={() => setActiveTab("drivers")}>
+                <Ionicons name="document-text-outline" size={16} color="#FF6B00" />
+                <Text style={[s.warningBannerText, { color: "#FF6B00" }]}>
+                  {expiringDocs} document(s) expiring soon — tap to review
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#FF6B00" />
+              </TouchableOpacity>
+            )}
+            {pendingDeductions.length > 0 && (
+              <TouchableOpacity style={[s.warningBanner, { borderColor: "#A064FF33", backgroundColor: "#A064FF11" }]}
+                onPress={() => setActiveTab("deductions")}>
+                <Ionicons name="remove-circle-outline" size={16} color="#A064FF" />
+                <Text style={[s.warningBannerText, { color: "#A064FF" }]}>
+                  {pendingDeductions.length} pending deduction(s) — tap to review
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#A064FF" />
               </TouchableOpacity>
             )}
 
@@ -429,8 +541,11 @@ export default function OwnerDashboard() {
                     const isCommission = driver.payment_mode === "commission_split";
                     const progress = !isCommission && driver.daily_target && driver.today_earnings
                       ? driver.today_earnings / driver.daily_target : null;
+                    const statusColor = driver.driver_status === "on_trip" ? "#FF9F0A"
+                      : driver.driver_status === "online" ? colors.green : colors.textDim;
                     return (
-                      <TouchableOpacity key={driver.user_id} style={[s.driverCard, isTop && s.driverCardTop]}
+                      <TouchableOpacity key={driver.user_id} style={[s.driverCard, isTop && s.driverCardTop,
+                        driver.driver_status === "on_trip" && { borderColor: "#FF9F0A44" }]}
                         onPress={() => {
                           setSelectedDriver(driver);
                           setTargetInput("");
@@ -442,6 +557,8 @@ export default function OwnerDashboard() {
                         </View>
                         <View style={[s.driverAvatar, { borderColor: isTop ? "#FFD60A" : colors.cyan }]}>
                           <Ionicons name="car-sport" size={20} color={isTop ? "#FFD60A" : colors.cyan} />
+                          {/* Online status dot */}
+                          <View style={[s.onlineDot, { backgroundColor: statusColor }]} />
                           {isTop && (
                             <View style={s.crownWrap}>
                               <Ionicons name="trophy" size={10} color="#FFD60A" />
@@ -489,11 +606,23 @@ export default function OwnerDashboard() {
                         <View style={s.driverRight}>
                           <Text style={s.driverEarnings}>{formatZAR(driver.total_earnings)}</Text>
                           <Text style={s.driverEarningsLabel}>total</Text>
-                          {driver.today_earnings !== undefined && driver.today_earnings > 0 && (
+                          {driver.today_earnings > 0 && (
                             <Text style={[s.driverEarningsLabel, { color: colors.green, marginTop: 4 }]}>
                               +{formatZAR(driver.today_earnings)} today
                             </Text>
                           )}
+                          <View style={{ flexDirection: "row", gap: 4, marginTop: 6 }}>
+                            <TouchableOpacity
+                              style={s.cardQuickBtn}
+                              onPress={e => { e.stopPropagation(); setDeductionModal(driver); setDeductionAmt(""); setDeductionReason(""); }}>
+                              <Ionicons name="remove-circle-outline" size={13} color="#A064FF" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={s.cardQuickBtn}
+                              onPress={e => { e.stopPropagation(); openDocModal(driver); }}>
+                              <Ionicons name="document-text-outline" size={13} color="#FF6B00" />
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       </TouchableOpacity>
                     );
@@ -550,6 +679,29 @@ export default function OwnerDashboard() {
                       })}
                     </View>
 
+                    {/* Today's earnings bar chart */}
+                    {drivers.some(d => d.today_earnings > 0) && (
+                      <View style={s.perfCard}>
+                        <Text style={s.perfCardTitle}>Today's Earnings by Driver</Text>
+                        {(() => {
+                          const maxE = Math.max(...drivers.map(d => d.today_earnings), 1);
+                          return drivers.filter(d => d.today_earnings > 0)
+                            .sort((a, b) => b.today_earnings - a.today_earnings)
+                            .map((d, i) => (
+                              <View key={d.user_id} style={{ marginBottom: 10 }}>
+                                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 3 }}>
+                                  <Text style={s.lbName} numberOfLines={1}>{d.full_name.split(" ")[0]}</Text>
+                                  <Text style={[s.lbEarnings, { color: i === 0 ? colors.green : colors.cyan }]}>{formatZAR(d.today_earnings)}</Text>
+                                </View>
+                                <View style={s.barBg}>
+                                  <View style={[s.barFill, { width: `${(d.today_earnings / maxE) * 100}%` as any, backgroundColor: i === 0 ? colors.green : colors.cyan + "BB" }]} />
+                                </View>
+                              </View>
+                            ));
+                        })()}
+                      </View>
+                    )}
+
                     {/* Summary stats */}
                     <View style={s.perfCard}>
                       <Text style={s.perfCardTitle}>Fleet Summary</Text>
@@ -557,8 +709,10 @@ export default function OwnerDashboard() {
                         { label: "Total fleet earnings", value: formatZAR(totalFleetEarnings), color: colors.cyan },
                         { label: "Average per driver", value: formatZAR(avgEarnings), color: colors.green },
                         { label: "Top earner", value: topEarner?.full_name || "-", color: "#FFD60A" },
+                        { label: "Active now", value: `${onTripDrivers} on trip · ${onlineDrivers} online`, color: colors.green },
                         { label: "Verified drivers", value: `${verifiedCount} / ${drivers.length}`, color: colors.green },
                         { label: "Today's revenue", value: formatZAR(data?.today_revenue ?? 0), color: colors.cyan },
+                        { label: "Pending deductions", value: `${pendingDeductions.length}`, color: "#A064FF" },
                       ].map(row => (
                         <View key={row.label} style={s.summaryRow}>
                           <Text style={s.summaryLabel}>{row.label}</Text>
@@ -642,6 +796,57 @@ export default function OwnerDashboard() {
                 )}
               </>
             )}
+
+            {/* ── Deductions Tab ── */}
+            {activeTab === "deductions" && (
+              <>
+                <View style={s.sectionRow}>
+                  <Text style={s.sectionLabel}>DRIVER DEDUCTIONS</Text>
+                </View>
+                {!deductions.length ? (
+                  <View style={s.empty}>
+                    <Ionicons name="remove-circle-outline" size={44} color={colors.textDim} />
+                    <Text style={s.emptyTitle}>No deductions</Text>
+                    <Text style={s.emptySub}>Tap the purple button on any driver card to add a deduction</Text>
+                  </View>
+                ) : (
+                  deductions.map((d: any) => (
+                    <View key={d.id} style={[s.outstandingRow, { borderColor: d.status === "pending" ? "#A064FF44" : colors.border }]}>
+                      <View style={[s.outstandingIcon, { backgroundColor: d.status === "pending" ? "#A064FF18" : colors.bg2 }]}>
+                        <Ionicons name="remove-circle" size={18} color={d.status === "pending" ? "#A064FF" : colors.textDim} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.outstandingDriver}>{d.driver_name}</Text>
+                        <Text style={s.outstandingReason}>{d.reason}</Text>
+                        <View style={{ flexDirection: "row", gap: 6, marginTop: 4, alignItems: "center" }}>
+                          <View style={[s.deductionTypePill, { backgroundColor: d.status === "pending" ? "#A064FF18" : colors.bg }]}>
+                            <Text style={[s.deductionTypeText, { color: d.status === "pending" ? "#A064FF" : colors.textDim }]}>
+                              {d.deduction_type} · {d.status}
+                            </Text>
+                          </View>
+                          <Text style={s.outstandingDate}>{formatDate(d.created_at)}</Text>
+                        </View>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 8 }}>
+                        <Text style={[s.outstandingAmt, { color: "#A064FF" }]}>{formatZAR(d.amount)}</Text>
+                        {d.status === "pending" && (
+                          <TouchableOpacity style={[s.cancelBtn, { borderColor: "#A064FF44", backgroundColor: "#A064FF11" }]}
+                            onPress={() => Alert.alert("Cancel Deduction?", `Cancel ${formatZAR(d.amount)} for ${d.driver_name}?`, [
+                              { text: "No", style: "cancel" },
+                              { text: "Cancel It", style: "destructive", onPress: async () => {
+                                try { await api.ownerCancelDeduction(d.id); load(); }
+                                catch (e: any) { Alert.alert("Error", e?.message); }
+                              }},
+                            ])}>
+                            <Text style={[s.cancelBtnText, { color: "#A064FF" }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  ))
+                )}
+              </>
+            )}
           </View>
         )}
       </ScrollView>
@@ -672,6 +877,122 @@ export default function OwnerDashboard() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Add Deduction Modal */}
+      {deductionModal && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setDeductionModal(null)}>
+          <Pressable style={s.overlay} onPress={() => setDeductionModal(null)}>
+            <Pressable style={s.sheet} onPress={() => {}}>
+              <View style={s.sheetHandle} />
+              <View style={[s.sheetIconWrap, { backgroundColor: "#A064FF18", borderColor: "#A064FF44" }]}>
+                <Ionicons name="remove-circle-outline" size={26} color="#A064FF" />
+              </View>
+              <Text style={s.sheetTitle}>Add Deduction</Text>
+              <Text style={s.sheetSub}>{deductionModal.full_name} · deducted on next cashup</Text>
+
+              <Text style={s.inputLabel}>TYPE</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {[
+                    { key: "fuel", label: "Fuel" },
+                    { key: "damage", label: "Damage" },
+                    { key: "advance", label: "Advance" },
+                    { key: "fine", label: "Fine" },
+                    { key: "manual", label: "Other" },
+                  ].map(t => (
+                    <TouchableOpacity key={t.key}
+                      style={[s.modeToggleBtn, { paddingHorizontal: 14 }, deductionType === t.key && s.modeToggleActiveCommission]}
+                      onPress={() => setDeductionType(t.key)}>
+                      <Text style={[s.modeToggleText, deductionType === t.key && { color: colors.bg }]}>{t.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+
+              <Text style={s.inputLabel}>AMOUNT (ZAR)</Text>
+              <TextInput style={s.input} value={deductionAmt} onChangeText={setDeductionAmt}
+                placeholder="e.g. 150" placeholderTextColor={colors.textDim} keyboardType="decimal-pad" />
+              <Text style={s.inputLabel}>REASON</Text>
+              <TextInput style={[s.input, { marginBottom: 12 }]} value={deductionReason} onChangeText={setDeductionReason}
+                placeholder="e.g. Fuel advance on Monday" placeholderTextColor={colors.textDim} />
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Button label="Cancel" variant="secondary" onPress={() => setDeductionModal(null)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button label="Add Deduction" onPress={() => handleAddDeduction(deductionModal)} loading={addingDeduction} />
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Document Expiry Modal */}
+      {docModal && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setDocModal(null)}>
+          <Pressable style={s.overlay} onPress={() => setDocModal(null)}>
+            <Pressable style={[s.sheet, { maxHeight: "85%" }]} onPress={() => {}}>
+              <View style={s.sheetHandle} />
+              <View style={[s.sheetIconWrap, { backgroundColor: "#FF6B0018", borderColor: "#FF6B0044" }]}>
+                <Ionicons name="document-text-outline" size={26} color="#FF6B00" />
+              </View>
+              <Text style={s.sheetTitle}>Document Expiry</Text>
+              <Text style={s.sheetSub}>{docModal.full_name}</Text>
+              {docsLoading ? <ActivityIndicator color={colors.cyan} style={{ marginVertical: 16 }} /> : (
+                <>
+                  {driverDocs.length > 0 && (
+                    <View style={{ marginBottom: 12 }}>
+                      {driverDocs.map((doc: any) => (
+                        <View key={doc.id} style={[s.docRow, { borderColor: doc.status === "expired" ? colors.red + "44" : doc.status === "expiring_soon" ? "#FF6B0044" : colors.border }]}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.docType}>{doc.document_type.toUpperCase()}</Text>
+                            <Text style={s.docExpiry}>Expires {doc.expiry_date}</Text>
+                            <View style={[s.docStatusPill, { backgroundColor: doc.status === "expired" ? colors.red + "22" : doc.status === "expiring_soon" ? "#FF6B0022" : colors.greenDim }]}>
+                              <Text style={[s.docStatusText, { color: doc.status === "expired" ? colors.red : doc.status === "expiring_soon" ? "#FF6B00" : colors.green }]}>
+                                {doc.status === "expired" ? "EXPIRED" : doc.status === "expiring_soon" ? `${doc.days_left}d left` : "VALID"}
+                              </Text>
+                            </View>
+                          </View>
+                          <TouchableOpacity onPress={() => handleDeleteDoc(docModal, doc.id, doc.document_type)}>
+                            <Ionicons name="trash-outline" size={16} color={colors.red} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Text style={s.inputLabel}>ADD / UPDATE DOCUMENT</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {["pdp", "license", "roadworthy", "insurance"].map(t => (
+                        <TouchableOpacity key={t}
+                          style={[s.modeToggleBtn, { paddingHorizontal: 12 }, docType === t && { backgroundColor: "#FF6B00", borderColor: "#FF6B00" }]}
+                          onPress={() => setDocType(t)}>
+                          <Text style={[s.modeToggleText, docType === t && { color: "#fff" }]}>{t.toUpperCase()}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                  <Text style={s.inputLabel}>EXPIRY DATE (YYYY-MM-DD)</Text>
+                  <TextInput style={s.input} value={docExpiry} onChangeText={setDocExpiry}
+                    placeholder="e.g. 2025-12-31" placeholderTextColor={colors.textDim} />
+                  <Text style={s.inputLabel}>NOTES (OPTIONAL)</Text>
+                  <TextInput style={[s.input, { marginBottom: 12 }]} value={docNotes} onChangeText={setDocNotes}
+                    placeholder="e.g. PDP renewal pending" placeholderTextColor={colors.textDim} />
+                </>
+              )}
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Button label="Close" variant="secondary" onPress={() => setDocModal(null)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button label="Save" onPress={() => handleSaveDoc(docModal)} loading={savingDoc} />
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
 
       {/* Driver detail modal */}
       {selectedDriver && (
@@ -791,6 +1112,22 @@ export default function OwnerDashboard() {
                   </TouchableOpacity>
                 </>
               )}
+
+              {/* Quick fleet actions */}
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[s.actionBtn, { backgroundColor: "#A064FF11", borderColor: "#A064FF33", flex: 1 }]}
+                  onPress={() => { setSelectedDriver(null); setDeductionModal(selectedDriver); setDeductionAmt(""); setDeductionReason(""); }}>
+                  <Ionicons name="remove-circle-outline" size={14} color="#A064FF" />
+                  <Text style={[s.actionBtnText, { color: "#A064FF" }]}>Add Deduction</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.actionBtn, { backgroundColor: "#FF6B0011", borderColor: "#FF6B0033", flex: 1 }]}
+                  onPress={() => { setSelectedDriver(null); openDocModal(selectedDriver); }}>
+                  <Ionicons name="document-text-outline" size={14} color="#FF6B00" />
+                  <Text style={[s.actionBtnText, { color: "#FF6B00" }]}>Documents</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* View full earnings + confirm + action buttons */}
               <TouchableOpacity
@@ -1109,6 +1446,25 @@ const s = StyleSheet.create({
   // Driver card payment mode badge
   modeBadge: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, alignSelf: "flex-start", backgroundColor: colors.bg, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
   modeBadgeText: { fontSize: 9, fontWeight: "700" },
+  // Online status dot on driver avatar
+  onlineDot: { position: "absolute", bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.bg2 },
+  // Quick action buttons on driver card
+  cardQuickBtn: { width: 26, height: 26, borderRadius: 6, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  // Live status row
+  liveStatusRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 10, marginTop: 10, marginBottom: 4 },
+  liveStatusItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  liveStatusText: { color: colors.textMuted, fontSize: 12 },
+  liveLabel: { marginLeft: "auto" as any, color: colors.cyan, fontSize: 9, fontWeight: "900", letterSpacing: 1.4 },
+  // Deductions tab
+  deductionTypePill: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  deductionTypeText: { fontSize: 10, fontWeight: "700" },
+  // Document modal
+  docRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, padding: 12, marginBottom: 8 },
+  docType: { color: colors.text, fontWeight: "800", fontSize: 13 },
+  docExpiry: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  docStatusPill: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4, alignSelf: "flex-start" },
+  docStatusText: { fontSize: 10, fontWeight: "800" },
   // Driver detail modal: payment mode toggle
   modeToggleRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
   modeToggleBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bg },

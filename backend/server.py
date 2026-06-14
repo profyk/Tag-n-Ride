@@ -18,7 +18,7 @@ import hashlib
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Optional, List
 
 import asyncio
@@ -402,6 +402,34 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS commission_status TEXT",
                 "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS daily_target NUMERIC(14,2) DEFAULT 0",
                 "ALTER TABLE owner_drivers ADD COLUMN IF NOT EXISTS confirmed BOOLEAN DEFAULT FALSE",
+                # driver online status
+                "ALTER TABLE drivers ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+                # fleet management: document expiry tracking
+                """CREATE TABLE IF NOT EXISTS driver_doc_expiry (
+                    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                    owner_id TEXT NOT NULL REFERENCES fleet_owners(id),
+                    driver_user_id TEXT NOT NULL REFERENCES users(id),
+                    document_type TEXT NOT NULL,
+                    expiry_date DATE NOT NULL,
+                    notes TEXT DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(owner_id, driver_user_id, document_type)
+                )""",
+                # fleet management: driver deductions
+                """CREATE TABLE IF NOT EXISTS driver_deductions (
+                    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                    owner_id TEXT NOT NULL REFERENCES fleet_owners(id),
+                    driver_user_id TEXT NOT NULL REFERENCES users(id),
+                    amount NUMERIC(14,2) NOT NULL,
+                    reason TEXT NOT NULL,
+                    deduction_type TEXT DEFAULT 'manual',
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    applied_at TIMESTAMPTZ,
+                    cashup_id TEXT
+                )""",
                 PLATFORM_LEDGER_SQL,
                 """CREATE TABLE IF NOT EXISTS statement_requests (
                     id TEXT PRIMARY KEY,
@@ -2565,25 +2593,48 @@ async def superadmin_delete_user(user_id: str, request: Request, admin: dict = D
 async def owner_dashboard(user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
-        drivers = await conn.fetch(
-            "SELECT od.driver_user_id,od.payment_mode,od.driver_commission_pct,od.commission_status,od.daily_target,u.full_name,u.phone_number,d.qr_code,d.vehicle_plate,d.total_earnings,d.rating_avg,d.rating_count,d.is_verified FROM owner_drivers od JOIN users u ON u.id=od.driver_user_id JOIN drivers d ON d.user_id=od.driver_user_id WHERE od.owner_id=$1",
-            owner["id"]
-        )
+        drivers = await conn.fetch("""
+            SELECT od.driver_user_id,od.payment_mode,od.driver_commission_pct,od.commission_status,od.daily_target,
+                   u.full_name,u.phone_number,d.qr_code,d.vehicle_plate,d.total_earnings,d.rating_avg,d.rating_count,
+                   d.is_verified,d.is_online,d.last_seen_at,
+                   COALESCE((SELECT SUM(tr.amount) FROM transactions tr WHERE tr.receiver_id=od.driver_user_id
+                       AND tr.type='payment' AND tr.status='completed' AND DATE(tr.created_at)=CURRENT_DATE),0) AS today_earnings,
+                   COALESCE((SELECT COUNT(*) FROM trips t WHERE t.driver_id=od.driver_user_id AND t.status='active'),0) AS active_trips
+            FROM owner_drivers od
+            JOIN users u ON u.id=od.driver_user_id
+            JOIN drivers d ON d.user_id=od.driver_user_id
+            WHERE od.owner_id=$1
+        """, owner["id"])
         driver_ids = [d["driver_user_id"] for d in drivers]
         total_earnings = 0; today_revenue = 0
         if driver_ids:
             total_earnings = await conn.fetchval("SELECT COALESCE(SUM(total_earnings),0) FROM drivers WHERE user_id=ANY($1::text[])", driver_ids)
             today_revenue = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM transactions WHERE receiver_id=ANY($1::text[]) AND type='payment' AND status='completed' AND DATE(created_at)=CURRENT_DATE", driver_ids)
+        # Count expiring docs for alert
+        expiring_docs = await conn.fetchval("""
+            SELECT COUNT(*) FROM driver_doc_expiry dde
+            JOIN owner_drivers od ON od.driver_user_id=dde.driver_user_id AND od.owner_id=dde.owner_id
+            WHERE dde.owner_id=$1 AND dde.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+        """, owner["id"]) or 0
+        pending_deductions = await conn.fetchval(
+            "SELECT COUNT(*) FROM driver_deductions WHERE owner_id=$1 AND status='pending'", owner["id"]) or 0
+    def driver_status(d):
+        if d["active_trips"] > 0: return "on_trip"
+        if d["is_online"]: return "online"
+        return "offline"
     return {
         "total_earnings": float(total_earnings or 0), "today_revenue": float(today_revenue or 0),
-        "driver_count": len(drivers),
+        "driver_count": len(drivers), "expiring_docs": int(expiring_docs),
+        "pending_deductions": int(pending_deductions),
         "drivers": [{"user_id": d["driver_user_id"], "full_name": d["full_name"], "phone_number": d["phone_number"],
                      "qr_code": d["qr_code"], "vehicle_plate": d["vehicle_plate"], "total_earnings": float(d["total_earnings"] or 0),
+                     "today_earnings": float(d["today_earnings"] or 0),
                      "rating_avg": float(d["rating_avg"] or 0), "rating_count": d["rating_count"] or 0, "is_verified": d["is_verified"],
                      "payment_mode": d["payment_mode"] or "daily_target",
                      "driver_commission_pct": float(d["driver_commission_pct"] or 0),
                      "commission_status": d["commission_status"],
-                     "daily_target": float(d["daily_target"] or 0)} for d in drivers]
+                     "daily_target": float(d["daily_target"] or 0),
+                     "driver_status": driver_status(d)} for d in drivers]
     }
 
 @api.post("/owner/drivers/link")
@@ -3099,6 +3150,125 @@ async def owner_cashup_history(user: dict = Depends(require_owner)):
              "driver_profit": float(r["driver_profit"] or 0), "cashup_method": r["cashup_method"],
              "payout_fee": float(r["payout_fee"] or 0), "status": r["status"],
              "created_at": iso(r["created_at"])} for r in rows]
+
+# ── Owner fleet management ────────────────────────────────────
+
+@api.get("/owner/fleet/live")
+async def owner_fleet_live(user: dict = Depends(require_owner)):
+    """Live status of all fleet drivers: online/on_trip/offline + today's earnings."""
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        rows = await conn.fetch("""
+            SELECT od.driver_user_id, u.full_name, u.phone_number, d.vehicle_plate,
+                   d.is_online, d.last_seen_at,
+                   COALESCE((
+                       SELECT COUNT(*) FROM trips t WHERE t.driver_id=od.driver_user_id
+                       AND t.status='active'
+                   ),0) AS active_trips,
+                   COALESCE((
+                       SELECT SUM(tr.amount) FROM transactions tr
+                       WHERE tr.receiver_id=od.driver_user_id AND tr.type='payment'
+                       AND tr.status='completed' AND DATE(tr.created_at)=CURRENT_DATE
+                   ),0) AS today_earnings
+            FROM owner_drivers od
+            JOIN users u ON u.id=od.driver_user_id
+            JOIN drivers d ON d.user_id=od.driver_user_id
+            WHERE od.owner_id=$1
+        """, owner["id"])
+    def status(r):
+        if r["active_trips"] > 0: return "on_trip"
+        if r["is_online"]: return "online"
+        return "offline"
+    return [{"user_id": r["driver_user_id"], "full_name": r["full_name"],
+             "phone_number": r["phone_number"], "vehicle_plate": r["vehicle_plate"],
+             "status": status(r), "last_seen_at": iso(r["last_seen_at"]),
+             "today_earnings": float(r["today_earnings"] or 0)} for r in rows]
+
+@api.get("/owner/drivers/{driver_user_id}/documents")
+async def owner_get_driver_docs(driver_user_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
+        if not link: raise HTTPException(status_code=404, detail="Driver not in your fleet")
+        rows = await conn.fetch("SELECT * FROM driver_doc_expiry WHERE owner_id=$1 AND driver_user_id=$2 ORDER BY expiry_date", owner["id"], driver_user_id)
+    today = date_type.today()
+    def days_left(d):
+        if not d: return None
+        return (d - today).days
+    return [{"id": r["id"], "document_type": r["document_type"], "expiry_date": r["expiry_date"].isoformat() if r["expiry_date"] else None,
+             "notes": r["notes"], "days_left": days_left(r["expiry_date"]),
+             "status": "expired" if r["expiry_date"] and r["expiry_date"] < today else ("expiring_soon" if r["expiry_date"] and days_left(r["expiry_date"]) <= 30 else "valid")} for r in rows]
+
+class DocExpiryIn(BaseModel):
+    document_type: str
+    expiry_date: str
+    notes: str = ""
+
+@api.post("/owner/drivers/{driver_user_id}/documents")
+async def owner_set_driver_doc(driver_user_id: str, body: DocExpiryIn, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
+        if not link: raise HTTPException(status_code=404, detail="Driver not in your fleet")
+        try:
+            expiry = date_type.fromisoformat(body.expiry_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+        existing = await conn.fetchrow("SELECT id FROM driver_doc_expiry WHERE owner_id=$1 AND driver_user_id=$2 AND document_type=$3", owner["id"], driver_user_id, body.document_type)
+        if existing:
+            await conn.execute("UPDATE driver_doc_expiry SET expiry_date=$1, notes=$2, updated_at=NOW() WHERE id=$3", expiry, body.notes, existing["id"])
+            doc_id = existing["id"]
+        else:
+            doc_id = str(uuid.uuid4())
+            await conn.execute("INSERT INTO driver_doc_expiry (id,owner_id,driver_user_id,document_type,expiry_date,notes) VALUES ($1,$2,$3,$4,$5,$6)", doc_id, owner["id"], driver_user_id, body.document_type, expiry, body.notes)
+    return {"ok": True, "id": doc_id}
+
+@api.delete("/owner/drivers/{driver_user_id}/documents/{doc_id}")
+async def owner_delete_driver_doc(driver_user_id: str, doc_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        await conn.execute("DELETE FROM driver_doc_expiry WHERE id=$1 AND owner_id=$2", doc_id, owner["id"])
+    return {"ok": True}
+
+@api.get("/owner/deductions")
+async def owner_list_deductions(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        rows = await conn.fetch("""
+            SELECT dd.*, u.full_name AS driver_name FROM driver_deductions dd
+            JOIN users u ON u.id=dd.driver_user_id
+            WHERE dd.owner_id=$1 ORDER BY dd.created_at DESC LIMIT 100
+        """, owner["id"])
+    return [{"id": r["id"], "driver_user_id": r["driver_user_id"], "driver_name": r["driver_name"],
+             "amount": float(r["amount"]), "reason": r["reason"], "deduction_type": r["deduction_type"],
+             "status": r["status"], "created_at": iso(r["created_at"]), "applied_at": iso(r["applied_at"])} for r in rows]
+
+class DeductionIn(BaseModel):
+    amount: float
+    reason: str
+    deduction_type: str = "manual"
+
+@api.post("/owner/drivers/{driver_user_id}/deductions")
+async def owner_add_deduction(driver_user_id: str, body: DeductionIn, user: dict = Depends(require_owner)):
+    if body.amount <= 0: raise HTTPException(status_code=400, detail="Amount must be positive")
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
+        if not link: raise HTTPException(status_code=404, detail="Driver not in your fleet")
+        doc_id = str(uuid.uuid4())
+        await conn.execute("INSERT INTO driver_deductions (id,owner_id,driver_user_id,amount,reason,deduction_type) VALUES ($1,$2,$3,$4,$5,$6)",
+                           doc_id, owner["id"], driver_user_id, body.amount, body.reason, body.deduction_type)
+    return {"ok": True, "id": doc_id}
+
+@api.delete("/owner/deductions/{deduction_id}")
+async def owner_cancel_deduction(deduction_id: str, user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        owner = await get_owner_record(conn, user["id"])
+        row = await conn.fetchrow("SELECT id,status FROM driver_deductions WHERE id=$1 AND owner_id=$2", deduction_id, owner["id"])
+        if not row: raise HTTPException(status_code=404, detail="Deduction not found")
+        if row["status"] == "applied": raise HTTPException(status_code=400, detail="Cannot cancel an already-applied deduction")
+        await conn.execute("UPDATE driver_deductions SET status='cancelled' WHERE id=$1", deduction_id)
+    return {"ok": True}
 
 # ── Driver cashup v2 endpoints ───────────────────────────────
 

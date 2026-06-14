@@ -364,12 +364,15 @@ export const api = {
       total_earnings: number;
       today_revenue: number;
       driver_count: number;
+      expiring_docs: number;
+      pending_deductions: number;
       drivers: {
         user_id: string;
         full_name: string;
         phone_number: string;
         vehicle_plate: string;
         total_earnings: number;
+        today_earnings: number;
         qr_code: string;
         rating_avg: number;
         rating_count: number;
@@ -378,8 +381,45 @@ export const api = {
         driver_commission_pct: number;
         commission_status: string | null;
         daily_target: number;
+        driver_status: "online" | "on_trip" | "offline";
       }[];
     }>("/api/owner/dashboard"),
+
+  ownerFleetLive: () =>
+    request<{
+      user_id: string; full_name: string; phone_number: string; vehicle_plate: string;
+      status: "online" | "on_trip" | "offline"; last_seen_at: string | null; today_earnings: number;
+    }[]>("/api/owner/fleet/live"),
+
+  ownerGetDriverDocs: (driver_user_id: string) =>
+    request<{
+      id: string; document_type: string; expiry_date: string | null;
+      notes: string; days_left: number | null; status: "valid" | "expiring_soon" | "expired";
+    }[]>(`/api/owner/drivers/${driver_user_id}/documents`),
+
+  ownerSetDriverDoc: (driver_user_id: string, document_type: string, expiry_date: string, notes?: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/api/owner/drivers/${driver_user_id}/documents`,
+      { method: "POST", body: JSON.stringify({ document_type, expiry_date, notes: notes || "" }) }
+    ),
+
+  ownerDeleteDriverDoc: (driver_user_id: string, doc_id: string) =>
+    request<{ ok: boolean }>(`/api/owner/drivers/${driver_user_id}/documents/${doc_id}`, { method: "DELETE" }),
+
+  ownerListDeductions: () =>
+    request<{
+      id: string; driver_user_id: string; driver_name: string; amount: number;
+      reason: string; deduction_type: string; status: string; created_at: string; applied_at: string | null;
+    }[]>("/api/owner/deductions"),
+
+  ownerAddDeduction: (driver_user_id: string, amount: number, reason: string, deduction_type?: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/api/owner/drivers/${driver_user_id}/deductions`,
+      { method: "POST", body: JSON.stringify({ amount, reason, deduction_type: deduction_type || "manual" }) }
+    ),
+
+  ownerCancelDeduction: (deduction_id: string) =>
+    request<{ ok: boolean }>(`/api/owner/deductions/${deduction_id}`, { method: "DELETE" }),
 
   ownerSetCommission: (driver_user_id: string, driver_commission_pct: number) =>
     request<{ ok: boolean; commission_status: string; message: string }>(
