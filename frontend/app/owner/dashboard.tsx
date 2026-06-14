@@ -1,11 +1,10 @@
 import React, { useCallback, useState, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable, Platform,
+  RefreshControl, ActivityIndicator, Alert, TextInput, Modal, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter, useNavigation } from "expo-router";
-import { CommonActions } from "@react-navigation/native";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { useAuth } from "../../src/AuthContext";
@@ -22,11 +21,14 @@ type Driver = {
   vehicle_plate: string;
   total_earnings: number;
   today_earnings?: number;
-  daily_target?: number;
+  daily_target: number;
   qr_code: string;
   rating_avg: number;
   rating_count: number;
   is_verified: boolean;
+  payment_mode: "daily_target" | "commission_split";
+  driver_commission_pct: number;
+  commission_status?: string;
 };
 
 type Tab = "drivers" | "cashups" | "outstanding" | "performance";
@@ -56,15 +58,9 @@ function MiniBar({ progress, color }: { progress: number; color: string }) {
 
 export default function OwnerDashboard() {
   const router = useRouter();
-  const navigation = useNavigation();
-  const { state, signOut } = useAuth();
+  const { state } = useAuth();
   const colors = useColors();
 
-  const handleSignOut = async () => {
-    await signOut();
-    if (Platform.OS === "web") { window.location.replace("/"); return; }
-    navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: "(auth)", state: { routes: [{ name: "welcome" }] } }] }));
-  };
   const { unreadCount: notifUnread } = useNotifications();
   const { unreadCount: docsUnread } = useDocuments();
   const totalInboxUnread = notifUnread + docsUnread;
@@ -171,6 +167,9 @@ export default function OwnerDashboard() {
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [targetInput, setTargetInput] = useState("");
   const [settingTarget, setSettingTarget] = useState(false);
+  const [commissionInput, setCommissionInput] = useState("");
+  const [settingCommission, setSettingCommission] = useState(false);
+  const [driverMode, setDriverMode] = useState<"daily_target" | "commission_split">("daily_target");
   const [activeTab, setActiveTab] = useState<Tab>("drivers");
   const [transfers, setTransfers] = useState<DriverTransfer[]>([]);
   const [transferModal, setTransferModal] = useState<DriverTransfer | null>(null);
@@ -242,6 +241,18 @@ export default function OwnerDashboard() {
       setTargetInput(""); setSelectedDriver(null); load();
     } catch (e: any) { Alert.alert("Error", e?.message || "Could not set target"); }
     finally { setSettingTarget(false); }
+  };
+
+  const handleSetCommission = async (driver: Driver) => {
+    const pct = parseFloat(commissionInput);
+    if (!commissionInput || isNaN(pct) || pct < 0 || pct > 100) { Alert.alert("Invalid", "Enter a commission % between 0 and 100"); return; }
+    setSettingCommission(true);
+    try {
+      await api.ownerSetCommission(driver.user_id, pct);
+      Alert.alert("Commission Set", `Driver receives ${pct}%, you receive ${(100 - pct).toFixed(0)}%`);
+      setCommissionInput(""); setSelectedDriver(null); load();
+    } catch (e: any) { Alert.alert("Error", e?.message || "Could not set commission"); }
+    finally { setSettingCommission(false); }
   };
 
   const handleCancelOutstanding = async (id: string, driverName: string, amount: number) => {
@@ -323,15 +334,6 @@ export default function OwnerDashboard() {
                   <Text style={s.bellBadgeText}>{totalInboxUnread > 9 ? "9+" : String(totalInboxUnread)}</Text>
                 </View>
               )}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => {
-              if (Platform.OS === "web") { handleSignOut(); return; }
-              Alert.alert("Sign out?", "", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Sign out", style: "destructive", onPress: handleSignOut },
-              ]);
-            }} style={s.avatar}>
-              <Ionicons name="business-outline" size={20} color={colors.cyan} />
             </TouchableOpacity>
           </View>
         </View>
@@ -424,11 +426,17 @@ export default function OwnerDashboard() {
                 ) : (
                   drivers.map((driver, idx) => {
                     const isTop = driver.user_id === topEarner?.user_id;
-                    const progress = driver.daily_target && driver.today_earnings
+                    const isCommission = driver.payment_mode === "commission_split";
+                    const progress = !isCommission && driver.daily_target && driver.today_earnings
                       ? driver.today_earnings / driver.daily_target : null;
                     return (
                       <TouchableOpacity key={driver.user_id} style={[s.driverCard, isTop && s.driverCardTop]}
-                        onPress={() => { setSelectedDriver(driver); setTargetInput(""); }} activeOpacity={0.82}>
+                        onPress={() => {
+                          setSelectedDriver(driver);
+                          setTargetInput("");
+                          setCommissionInput("");
+                          setDriverMode(driver.payment_mode || "daily_target");
+                        }} activeOpacity={0.82}>
                         <View style={s.driverRank}>
                           <Text style={s.driverRankNum}>#{idx + 1}</Text>
                         </View>
@@ -451,10 +459,19 @@ export default function OwnerDashboard() {
                               <Text style={s.plateText}>{driver.vehicle_plate}</Text>
                             </View>
                           )}
+                          {/* Payment mode badge */}
+                          <View style={s.modeBadge}>
+                            <Ionicons name={isCommission ? "pie-chart-outline" : "flag-outline"} size={9} color={isCommission ? "#A064FF" : colors.cyan} />
+                            <Text style={[s.modeBadgeText, { color: isCommission ? "#A064FF" : colors.cyan }]}>
+                              {isCommission
+                                ? `${driver.driver_commission_pct ?? 0}% commission`
+                                : driver.daily_target ? `Target ${formatZAR(driver.daily_target)}` : "Daily target"}
+                            </Text>
+                          </View>
                           {progress !== null && (
-                            <View style={{ marginTop: 6 }}>
+                            <View style={{ marginTop: 4 }}>
                               <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                <Text style={s.targetLabel}>Daily target</Text>
+                                <Text style={s.targetLabel}>Today {formatZAR(driver.today_earnings ?? 0)}</Text>
                                 <Text style={[s.targetLabel, { color: progress >= 1 ? colors.green : colors.yellow }]}>
                                   {Math.round(progress * 100)}%
                                 </Text>
@@ -472,6 +489,11 @@ export default function OwnerDashboard() {
                         <View style={s.driverRight}>
                           <Text style={s.driverEarnings}>{formatZAR(driver.total_earnings)}</Text>
                           <Text style={s.driverEarningsLabel}>total</Text>
+                          {driver.today_earnings !== undefined && driver.today_earnings > 0 && (
+                            <Text style={[s.driverEarningsLabel, { color: colors.green, marginTop: 4 }]}>
+                              +{formatZAR(driver.today_earnings)} today
+                            </Text>
+                          )}
                         </View>
                       </TouchableOpacity>
                     );
@@ -657,13 +679,15 @@ export default function OwnerDashboard() {
           <Pressable style={s.overlay} onPress={() => setSelectedDriver(null)}>
             <Pressable style={s.sheet} onPress={() => {}}>
               <View style={s.sheetHandle} />
+
+              {/* Driver header */}
               <View style={s.driverDetailHeader}>
                 <View style={[s.driverAvatar, { width: 52, height: 52, borderRadius: 26 }]}>
                   <Ionicons name="car-sport" size={24} color={colors.cyan} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.sheetTitle}>{selectedDriver.full_name}</Text>
-                  <Text style={s.sheetSub}>{selectedDriver.phone_number}</Text>
+                  <Text style={[s.sheetSub, { textAlign: "left", marginBottom: 0, marginTop: 2 }]}>{selectedDriver.phone_number}</Text>
                   {selectedDriver.vehicle_plate && (
                     <View style={[s.platePill, { marginTop: 4 }]}>
                       <Text style={s.plateText}>{selectedDriver.vehicle_plate}</Text>
@@ -678,47 +702,121 @@ export default function OwnerDashboard() {
                 )}
               </View>
 
+              {/* Stats row */}
               <View style={s.detailGrid}>
                 <View style={s.detailItem}>
-                  <Text style={s.detailLabel}>TOTAL EARNINGS</Text>
+                  <Text style={s.detailLabel}>TOTAL EARNED</Text>
                   <Text style={[s.detailVal, { color: colors.green }]}>{formatZAR(selectedDriver.total_earnings)}</Text>
+                </View>
+                <View style={s.detailItem}>
+                  <Text style={s.detailLabel}>TODAY</Text>
+                  <Text style={[s.detailVal, { color: colors.cyan }]}>{formatZAR(selectedDriver.today_earnings ?? 0)}</Text>
                 </View>
                 <View style={s.detailItem}>
                   <Text style={s.detailLabel}>RATING</Text>
                   <Text style={[s.detailVal, { color: "#FFD60A" }]}>
-                    {selectedDriver.rating_count > 0
-                      ? `⭐ ${selectedDriver.rating_avg.toFixed(1)} (${selectedDriver.rating_count})`
-                      : "New driver"}
+                    {selectedDriver.rating_count > 0 ? `${selectedDriver.rating_avg.toFixed(1)}★` : "—"}
                   </Text>
                 </View>
               </View>
 
-              <Text style={s.inputLabel}>SET DAILY TARGET (ZAR)</Text>
-              <TextInput style={s.input} value={targetInput} onChangeText={setTargetInput}
-                placeholder="e.g. 2500" placeholderTextColor={colors.textDim} keyboardType="decimal-pad" />
+              {/* Payment mode toggle */}
+              <Text style={[s.inputLabel, { marginBottom: 6 }]}>PAYMENT MODE</Text>
+              <View style={s.modeToggleRow}>
+                <TouchableOpacity
+                  style={[s.modeToggleBtn, driverMode === "daily_target" && s.modeToggleActive]}
+                  onPress={() => setDriverMode("daily_target")}>
+                  <Ionicons name="flag-outline" size={14} color={driverMode === "daily_target" ? colors.bg : colors.textMuted} />
+                  <Text style={[s.modeToggleText, driverMode === "daily_target" && { color: colors.bg }]}>Daily Target</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.modeToggleBtn, driverMode === "commission_split" && s.modeToggleActiveCommission]}
+                  onPress={() => setDriverMode("commission_split")}>
+                  <Ionicons name="pie-chart-outline" size={14} color={driverMode === "commission_split" ? colors.bg : colors.textMuted} />
+                  <Text style={[s.modeToggleText, driverMode === "commission_split" && { color: colors.bg }]}>Commission %</Text>
+                </TouchableOpacity>
+              </View>
 
-              <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+              {/* Daily target section */}
+              {driverMode === "daily_target" && (
+                <>
+                  {selectedDriver.daily_target > 0 && (
+                    <View style={s.currentValueRow}>
+                      <Ionicons name="flag" size={13} color={colors.cyan} />
+                      <Text style={s.currentValueText}>Current target: <Text style={{ color: colors.cyan, fontWeight: "800" }}>{formatZAR(selectedDriver.daily_target)}</Text></Text>
+                    </View>
+                  )}
+                  <Text style={s.inputLabel}>SET DAILY TARGET (ZAR)</Text>
+                  <TextInput style={s.input} value={targetInput} onChangeText={setTargetInput}
+                    placeholder={selectedDriver.daily_target > 0 ? `Current: ${formatZAR(selectedDriver.daily_target)}` : "e.g. 2500"}
+                    placeholderTextColor={colors.textDim} keyboardType="decimal-pad" />
+                  <TouchableOpacity
+                    style={[s.actionBtn, { backgroundColor: colors.green + "22", borderColor: colors.green + "44" }]}
+                    onPress={() => handleSetTarget(selectedDriver)} disabled={settingTarget}>
+                    <Ionicons name="flag-outline" size={15} color={colors.green} />
+                    <Text style={[s.actionBtnText, { color: colors.green }]}>{settingTarget ? "Saving…" : "Save Daily Target"}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* Commission section */}
+              {driverMode === "commission_split" && (
+                <>
+                  {(selectedDriver.driver_commission_pct ?? 0) > 0 && (
+                    <View style={s.currentValueRow}>
+                      <Ionicons name="pie-chart" size={13} color="#A064FF" />
+                      <Text style={s.currentValueText}>
+                        Driver gets <Text style={{ color: "#A064FF", fontWeight: "800" }}>{selectedDriver.driver_commission_pct}%</Text>
+                        {" · "}You get <Text style={{ color: colors.green, fontWeight: "800" }}>{(100 - (selectedDriver.driver_commission_pct ?? 0)).toFixed(0)}%</Text>
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={s.inputLabel}>DRIVER'S COMMISSION (%)</Text>
+                  <TextInput style={s.input} value={commissionInput} onChangeText={setCommissionInput}
+                    placeholder={`Current: ${selectedDriver.driver_commission_pct ?? 0}%`}
+                    placeholderTextColor={colors.textDim} keyboardType="decimal-pad" />
+                  {commissionInput && !isNaN(parseFloat(commissionInput)) && (
+                    <View style={s.commissionHint}>
+                      <Text style={s.commissionHintText}>
+                        Driver keeps <Text style={{ color: "#A064FF", fontWeight: "800" }}>{parseFloat(commissionInput).toFixed(0)}%</Text>
+                        {" · "}Owner earns <Text style={{ color: colors.green, fontWeight: "800" }}>{(100 - parseFloat(commissionInput)).toFixed(0)}%</Text> of every trip
+                      </Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={[s.actionBtn, { backgroundColor: "#A064FF22", borderColor: "#A064FF44" }]}
+                    onPress={() => handleSetCommission(selectedDriver)} disabled={settingCommission}>
+                    <Ionicons name="pie-chart-outline" size={15} color="#A064FF" />
+                    <Text style={[s.actionBtnText, { color: "#A064FF" }]}>{settingCommission ? "Saving…" : "Save Commission"}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* View full earnings + confirm + action buttons */}
+              <TouchableOpacity
+                style={[s.actionBtn, { backgroundColor: colors.cyanDim, borderColor: colors.cyan + "55", marginTop: 10 }]}
+                onPress={() => { setSelectedDriver(null); router.push(`/owner/driver/${selectedDriver.user_id}` as any); }}>
+                <Ionicons name="stats-chart-outline" size={15} color={colors.cyan} />
+                <Text style={[s.actionBtnText, { color: colors.cyan }]}>View Full Earnings & Trips</Text>
+              </TouchableOpacity>
+
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                 <TouchableOpacity
-                  style={[s.actionBtn, { backgroundColor: colors.green + "22", borderColor: colors.green + "44", flex: 1 }]}
-                  onPress={() => handleSetTarget(selectedDriver)} disabled={settingTarget}>
-                  <Ionicons name="flag-outline" size={15} color={colors.green} />
-                  <Text style={[s.actionBtnText, { color: colors.green }]}>{settingTarget ? "Setting…" : "Set Target"}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.actionBtn, { backgroundColor: colors.cyanDim, borderColor: colors.cyan + "44", flex: 1 }]}
+                  style={[s.actionBtn, { backgroundColor: colors.green + "15", borderColor: colors.green + "44", flex: 1 }]}
                   onPress={() => handleConfirmDriver(selectedDriver)}>
-                  <Ionicons name="checkmark-circle-outline" size={15} color={colors.cyan} />
-                  <Text style={[s.actionBtnText, { color: colors.cyan }]}>Confirm</Text>
+                  <Ionicons name="checkmark-circle-outline" size={15} color={colors.green} />
+                  <Text style={[s.actionBtnText, { color: colors.green }]}>Confirm</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.actionBtn, { backgroundColor: colors.redDim, borderColor: colors.red + "44", flex: 1 }]}
+                  onPress={() => { setSelectedDriver(null); handleUnlink(selectedDriver); }}>
+                  <Ionicons name="trash-outline" size={15} color={colors.red} />
+                  <Text style={[s.actionBtnText, { color: colors.red }]}>Remove</Text>
                 </TouchableOpacity>
               </View>
-              <View style={{ flexDirection: "row", gap: 12, marginTop: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Button label="Close" variant="secondary" onPress={() => setSelectedDriver(null)} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Button label="Remove" variant="destructive" onPress={() => { setSelectedDriver(null); handleUnlink(selectedDriver); }} />
-                </View>
-              </View>
+              <TouchableOpacity onPress={() => setSelectedDriver(null)} style={{ alignItems: "center", paddingVertical: 14 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: "600" }}>Close</Text>
+              </TouchableOpacity>
             </Pressable>
           </Pressable>
         </Modal>
@@ -1008,4 +1106,17 @@ const s = StyleSheet.create({
   input: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 16, fontWeight: "700", marginBottom: 4 },
   actionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1 },
   actionBtnText: { fontWeight: "700", fontSize: 13 },
+  // Driver card payment mode badge
+  modeBadge: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, alignSelf: "flex-start", backgroundColor: colors.bg, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
+  modeBadgeText: { fontSize: 9, fontWeight: "700" },
+  // Driver detail modal: payment mode toggle
+  modeToggleRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  modeToggleBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bg },
+  modeToggleActive: { backgroundColor: colors.cyan, borderColor: colors.cyan },
+  modeToggleActiveCommission: { backgroundColor: "#A064FF", borderColor: "#A064FF" },
+  modeToggleText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
+  currentValueRow: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.bg, borderRadius: radius.sm, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
+  currentValueText: { color: colors.textMuted, fontSize: 12 },
+  commissionHint: { backgroundColor: "#A064FF11", borderRadius: radius.sm, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: "#A064FF33" },
+  commissionHintText: { color: colors.textMuted, fontSize: 12, textAlign: "center" },
 });
