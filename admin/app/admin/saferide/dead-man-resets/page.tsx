@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Badge, Spinner } from "@/components/ui";
 import client, { hasPermission } from "@/lib/api";
-import { ShieldAlert, Clock, CheckCircle, XCircle, RefreshCw, User, Phone, FileText } from "lucide-react";
+import { CheckCircle, XCircle, RefreshCw, User, Phone } from "lucide-react";
 import toast from "react-hot-toast";
 
 type ResetRequest = {
@@ -89,29 +89,18 @@ export default function DeadManResetsPage() {
   const pending = requests.filter(r => r.status === "pending").length;
 
   return (
-    <AdminShell>
+    <AdminShell title="Dead Man Code Resets" subtitle="User-submitted requests to clear their dead man code">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red/10 border border-red/20 flex items-center justify-center">
-              <ShieldAlert size={20} className="text-red" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-text">Dead Man Code Resets</h1>
-              <p className="text-xs text-textMuted">User-submitted requests to clear their dead man code</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {pending > 0 && (
-              <span className="px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-400 text-xs font-bold border border-yellow-500/20">
-                {pending} pending
-              </span>
-            )}
-            <button onClick={load} className="p-2 rounded-lg border border-border hover:border-cyan text-textMuted hover:text-cyan transition-colors">
-              <RefreshCw size={14} />
-            </button>
-          </div>
+        {/* Actions */}
+        <div className="flex items-center justify-end gap-2">
+          {pending > 0 && (
+            <span className="px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-400 text-xs font-bold border border-yellow-500/20">
+              {pending} pending
+            </span>
+          )}
+          <button onClick={load} className="p-2 rounded-lg border border-border hover:border-cyan text-textMuted hover:text-cyan transition-colors">
+            <RefreshCw size={14} />
+          </button>
         </div>
 
         {/* Security notice */}
