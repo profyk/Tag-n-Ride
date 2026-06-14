@@ -541,6 +541,12 @@ export const api = {
   unblockUser: (id: string) => client.post(`/api/admin/unblock/${id}`),
   resetPin: (id: string) =>
     client.post<{ ok: boolean; temporary_pin: string }>(`/api/admin/reset-pin/${id}`),
+  deadManResetRequests: (status?: string) =>
+    client.get(`/api/admin/deadman-reset-requests${status ? `?status=${status}` : ""}`),
+  approveDeadManReset: (id: string, reason: string) =>
+    client.post(`/api/admin/deadman-reset-requests/${id}/approve`, { reason }),
+  rejectDeadManReset: (id: string, reason: string) =>
+    client.post(`/api/admin/deadman-reset-requests/${id}/reject`, { reason }),
   flagUser: (id: string, reason: string) =>
     client.post(`/api/admin/flag/${id}`, { reason }),
   unflagUser: (id: string) => client.post(`/api/admin/unflag/${id}`),

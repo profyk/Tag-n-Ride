@@ -70,6 +70,12 @@ export default function OwnerProfile() {
   const [deadManCurrentPin, setDeadManCurrentPin] = useState("");
   const [deadManSaving, setDeadManSaving] = useState(false);
 
+  // Dead man code reset request
+  const [deadManResetRequest, setDeadManResetRequest] = useState<{ id: string; status: string; reason: string; admin_reason?: string; created_at: string } | null>(null);
+  const [deadManResetModal, setDeadManResetModal] = useState(false);
+  const [deadManResetReason, setDeadManResetReason] = useState("");
+  const [deadManResetSubmitting, setDeadManResetSubmitting] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const [bankRes, walletRes, subRes, safetyRes] = await Promise.all([
@@ -88,6 +94,8 @@ export default function OwnerProfile() {
       if (walletRes) setWalletBalance(walletRes.balance ?? null);
       if (subRes) setSubscription(subRes.subscription);
       if (safetyRes) setDeadManCodeSet(!!safetyRes.dead_man_code_set);
+      const resetRes = await api.getDeadManResetStatus().catch(() => null);
+      if (resetRes) setDeadManResetRequest(resetRes.request);
     } catch {}
   }, []);
 
@@ -212,6 +220,23 @@ export default function OwnerProfile() {
     } catch (e: any) {
       Alert.alert("Failed", e?.message || "Could not save code.");
     } finally { setDeadManSaving(false); }
+  };
+
+  const handleSubmitDeadManReset = async () => {
+    if (deadManResetReason.trim().length < 10) {
+      Alert.alert("Too short", "Please provide a detailed reason (at least 10 characters)."); return;
+    }
+    setDeadManResetSubmitting(true);
+    try {
+      await api.requestDeadManReset(deadManResetReason.trim());
+      const res = await api.getDeadManResetStatus();
+      setDeadManResetRequest(res.request);
+      setDeadManResetModal(false);
+      setDeadManResetReason("");
+      Alert.alert("Request Submitted", "Your dead man code reset request has been sent to an admin for review. You will be notified once it is processed.");
+    } catch (e: any) {
+      Alert.alert("Failed", e?.message || "Could not submit request.");
+    } finally { setDeadManResetSubmitting(false); }
   };
 
   const styles = makeStyles(colors);
@@ -472,6 +497,36 @@ export default function OwnerProfile() {
               {deadManCodeSet ? "Change Dead Man Code" : "Set Dead Man Code"}
             </Text>
           </TouchableOpacity>
+
+          {/* Reset request status / button */}
+          {deadManResetRequest?.status === "pending" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.bg }}>
+              <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, fontSize: 12, flex: 1 }}>Reset request pending admin review</Text>
+            </View>
+          ) : deadManResetRequest?.status === "approved" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.greenDim }}>
+              <Ionicons name="checkmark-circle-outline" size={14} color={colors.green} />
+              <Text style={{ color: colors.green, fontSize: 12, flex: 1 }}>Reset approved — set your new dead man code above</Text>
+            </View>
+          ) : deadManResetRequest?.status === "rejected" ? (
+            <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.redDim }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                <Ionicons name="close-circle-outline" size={14} color={colors.red} />
+                <Text style={{ color: colors.red, fontSize: 12, fontWeight: "700" }}>Reset request rejected</Text>
+              </View>
+              {!!deadManResetRequest.admin_reason && (
+                <Text style={{ color: colors.textMuted, fontSize: 11 }}>Reason: {deadManResetRequest.admin_reason}</Text>
+              )}
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: colors.bg }}
+              onPress={() => { setDeadManResetReason(""); setDeadManResetModal(true); }}>
+              <Ionicons name="refresh-outline" size={14} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>Forgot your code? Request a reset</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Sign out */}
@@ -729,6 +784,43 @@ export default function OwnerProfile() {
                    <Text style={styles.signOutText}>Save Dead Man Code</Text></>}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setDeadManModal(false)} style={{ alignItems: "center", paddingVertical: 12 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Dead Man Code Reset Request modal ── */}
+      <Modal visible={deadManResetModal} transparent animationType="slide" onRequestClose={() => setDeadManResetModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setDeadManResetModal(false)}>
+          <Pressable style={[styles.modalSheet, { backgroundColor: colors.bg2 }]} onPress={e => e.stopPropagation()}>
+            <View style={styles.modalHandle} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Request Dead Man Code Reset</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+              If you have forgotten your dead man code, an admin can clear it so you can set a new one.
+              You must provide a reason — this request will be reviewed and reported to senior management.
+            </Text>
+            <Text style={[styles.inputLabel, { color: colors.textMuted }]}>REASON FOR RESET REQUEST</Text>
+            <TextInput
+              style={[styles.modalInput, { backgroundColor: colors.bg, color: colors.text, borderColor: colors.border, height: 90, textAlignVertical: "top" }]}
+              value={deadManResetReason}
+              onChangeText={setDeadManResetReason}
+              placeholder="Explain why you need to reset your dead man code..."
+              placeholderTextColor={colors.textMuted}
+              multiline
+              maxLength={500}
+            />
+            <Text style={{ color: colors.textMuted, fontSize: 11, textAlign: "right", marginBottom: 16 }}>{deadManResetReason.length}/500</Text>
+            <TouchableOpacity
+              style={[styles.signOutBtn, { marginTop: 0, opacity: deadManResetSubmitting ? 0.6 : 1 }]}
+              onPress={handleSubmitDeadManReset}
+              disabled={deadManResetSubmitting}>
+              {deadManResetSubmitting
+                ? <ActivityIndicator color={colors.red} size="small" />
+                : <><Ionicons name="send-outline" size={18} color={colors.red} />
+                   <Text style={styles.signOutText}>Submit Reset Request</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setDeadManResetModal(false)} style={{ alignItems: "center", paddingVertical: 12 }}>
               <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
             </TouchableOpacity>
           </Pressable>

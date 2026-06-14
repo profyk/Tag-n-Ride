@@ -154,6 +154,10 @@ ROLE_PERMISSIONS["ceo"] += [
     "broadcast_messages", "manage_limits", "view_risk", "manage_staff",
 ]
 ROLE_PERMISSIONS["cfo"] += ["manage_refunds", "manage_limits", "view_risk", "manage_staff"]
+ROLE_PERMISSIONS["superadmin"] += ["approve_deadman_reset"]
+ROLE_PERMISSIONS["ceo"]        += ["approve_deadman_reset"]
+ROLE_PERMISSIONS["admin"]      += ["approve_deadman_reset"]
+ROLE_PERMISSIONS["support"]    += ["approve_deadman_reset"]
 
 def get_all_permissions(user: dict) -> list:
     perms = set(ROLE_PERMISSIONS.get(user.get("role", ""), []))
@@ -4497,6 +4501,24 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE passenger_safety_profiles ADD COLUMN IF NOT EXISTS dead_man_code TEXT")
                 await conn.execute("ALTER TABLE sos_requests ADD COLUMN IF NOT EXISTS is_dead_man BOOLEAN DEFAULT FALSE")
                 await conn.execute("ALTER TABLE sos_requests ADD COLUMN IF NOT EXISTS dead_man_triggered_at TIMESTAMPTZ")
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS dead_man_reset_requests (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id TEXT NOT NULL REFERENCES users(id),
+                        user_name TEXT,
+                        user_phone TEXT,
+                        user_role TEXT,
+                        reason TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        admin_id TEXT,
+                        admin_name TEXT,
+                        admin_reason TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_dmrr_user ON dead_man_reset_requests(user_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_dmrr_status ON dead_man_reset_requests(status)")
 
         except Exception as e:
             print("New tables error:", e)
@@ -12665,6 +12687,12 @@ class DeadManCodeIn(BaseModel):
     dead_man_code: str   # 4–6 digit code
     current_pin: str     # user's real PIN to authorise change
 
+class DeadManResetRequestIn(BaseModel):
+    reason: str = Field(min_length=10, max_length=500)
+
+class DeadManResetReviewIn(BaseModel):
+    reason: str = Field(min_length=10, max_length=500)
+
 class TripEndPinIn(BaseModel):
     trip_id: str
     pin: str
@@ -13374,6 +13402,162 @@ async def set_dead_man_code(body: DeadManCodeIn, user: dict = Depends(get_curren
                 "INSERT INTO passenger_safety_profiles (id,user_id,dead_man_code,created_at,updated_at) VALUES (gen_random_uuid()::text,$1,$2,NOW(),NOW())",
                 user["id"], hashed
             )
+    return {"ok": True}
+
+
+# ── POST /api/saferide/deadman-code/reset-request ── user submits reset request
+@api.post("/saferide/deadman-code/reset-request")
+async def request_dead_man_reset(body: DeadManResetRequestIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id, status FROM dead_man_reset_requests WHERE user_id=$1 AND status='pending'", user["id"]
+        )
+        if existing:
+            raise HTTPException(400, "You already have a pending dead man code reset request.")
+        await conn.execute(
+            """INSERT INTO dead_man_reset_requests (id,user_id,user_name,user_phone,user_role,reason,status,created_at,updated_at)
+               VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,'pending',NOW(),NOW())""",
+            user["id"], user.get("full_name"), user.get("phone_number"), user.get("role"), body.reason
+        )
+        admins = await conn.fetch(
+            "SELECT id FROM users WHERE role IN ('superadmin','admin','support') AND is_active=true"
+        )
+        for au in admins:
+            await notify_user(
+                conn,
+                "🔑 Dead Man Code Reset Request",
+                f"{user.get('full_name') or 'A user'} ({user.get('phone_number','')}) has requested a dead man code reset. Reason: {body.reason}",
+                "deadman_reset_request", au["id"]
+            )
+    return {"ok": True}
+
+# ── GET /api/saferide/deadman-code/reset-request ── user checks own request status
+@api.get("/saferide/deadman-code/reset-request")
+async def get_dead_man_reset_status(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id,status,reason,admin_reason,created_at,updated_at FROM dead_man_reset_requests WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1",
+            user["id"]
+        )
+        if not row:
+            return {"request": None}
+        r = dict(row)
+        r["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
+        r["updated_at"] = r["updated_at"].isoformat() if r["updated_at"] else None
+        return {"request": r}
+
+# ── GET /api/admin/deadman-reset-requests ── admin lists all requests
+@api.get("/admin/deadman-reset-requests")
+async def admin_list_dead_man_resets(status: Optional[str] = None, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "approve_deadman_reset"):
+        raise HTTPException(403, "Permission denied")
+    async with pool.acquire() as conn:
+        q = """SELECT r.*, u.full_name, u.phone_number, u.role as urole
+               FROM dead_man_reset_requests r JOIN users u ON r.user_id=u.id"""
+        if status:
+            rows = await conn.fetch(q + " WHERE r.status=$1 ORDER BY r.created_at DESC", status)
+        else:
+            rows = await conn.fetch(q + " ORDER BY r.created_at DESC LIMIT 100")
+        result = []
+        for r in rows:
+            d = dict(r)
+            for k in ("created_at", "updated_at"):
+                if d.get(k): d[k] = d[k].isoformat()
+            result.append(d)
+        return result
+
+# ── POST /api/admin/deadman-reset-requests/{id}/approve ── admin approves
+@api.post("/admin/deadman-reset-requests/{request_id}/approve")
+async def admin_approve_dead_man_reset(request_id: str, body: DeadManResetReviewIn, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "approve_deadman_reset"):
+        raise HTTPException(403, "Permission denied")
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow(
+            "SELECT * FROM dead_man_reset_requests WHERE id=$1", request_id
+        )
+        if not req:
+            raise HTTPException(404, "Request not found")
+        if req["status"] != "pending":
+            raise HTTPException(400, f"Request is already {req['status']}")
+        await conn.execute(
+            """UPDATE dead_man_reset_requests
+               SET status='approved', admin_id=$1, admin_name=$2, admin_reason=$3, updated_at=NOW()
+               WHERE id=$4""",
+            admin["id"], admin.get("full_name"), body.reason, request_id
+        )
+        # Clear the dead man code so user can set a fresh one
+        await conn.execute(
+            "UPDATE passenger_safety_profiles SET dead_man_code=NULL, updated_at=NOW() WHERE user_id=$1",
+            req["user_id"]
+        )
+        # Notify the user
+        await notify_user(
+            conn,
+            "✅ Dead Man Code Reset Approved",
+            f"Your dead man code reset request has been approved. You can now set a new dead man code in your profile.",
+            "deadman_reset_approved", req["user_id"]
+        )
+        # Notify CEO + superadmin about this admin action
+        leaders = await conn.fetch(
+            "SELECT id FROM users WHERE role IN ('superadmin','ceo') AND is_active=true"
+        )
+        for lu in leaders:
+            if lu["id"] == admin["id"]:
+                continue
+            await notify_user(
+                conn,
+                "📋 Dead Man Code Reset — Admin Action",
+                f"Admin {admin.get('full_name') or admin.get('email','')} approved a dead man code reset for "
+                f"{req.get('user_name') or req['user_id']} ({req.get('user_phone','')}). "
+                f"User reason: {req['reason']}. Admin reason: {body.reason}",
+                "deadman_reset_report", lu["id"]
+            )
+        await audit(conn, admin["id"], "APPROVE_DEADMAN_RESET", req["user_id"], "user",
+                    {"user_name": req.get("user_name"), "admin_reason": body.reason}, request.client.host)
+    return {"ok": True}
+
+# ── POST /api/admin/deadman-reset-requests/{id}/reject ── admin rejects
+@api.post("/admin/deadman-reset-requests/{request_id}/reject")
+async def admin_reject_dead_man_reset(request_id: str, body: DeadManResetReviewIn, request: Request, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "approve_deadman_reset"):
+        raise HTTPException(403, "Permission denied")
+    async with pool.acquire() as conn:
+        req = await conn.fetchrow(
+            "SELECT * FROM dead_man_reset_requests WHERE id=$1", request_id
+        )
+        if not req:
+            raise HTTPException(404, "Request not found")
+        if req["status"] != "pending":
+            raise HTTPException(400, f"Request is already {req['status']}")
+        await conn.execute(
+            """UPDATE dead_man_reset_requests
+               SET status='rejected', admin_id=$1, admin_name=$2, admin_reason=$3, updated_at=NOW()
+               WHERE id=$4""",
+            admin["id"], admin.get("full_name"), body.reason, request_id
+        )
+        await notify_user(
+            conn,
+            "❌ Dead Man Code Reset Rejected",
+            f"Your dead man code reset request was rejected. Reason: {body.reason}. If you believe this is an error, please contact support.",
+            "deadman_reset_rejected", req["user_id"]
+        )
+        # Notify CEO + superadmin about rejection too
+        leaders = await conn.fetch(
+            "SELECT id FROM users WHERE role IN ('superadmin','ceo') AND is_active=true"
+        )
+        for lu in leaders:
+            if lu["id"] == admin["id"]:
+                continue
+            await notify_user(
+                conn,
+                "📋 Dead Man Code Reset — Rejected",
+                f"Admin {admin.get('full_name') or admin.get('email','')} rejected a dead man code reset for "
+                f"{req.get('user_name') or req['user_id']} ({req.get('user_phone','')}). "
+                f"User reason: {req['reason']}. Admin reason: {body.reason}",
+                "deadman_reset_report", lu["id"]
+            )
+        await audit(conn, admin["id"], "REJECT_DEADMAN_RESET", req["user_id"], "user",
+                    {"user_name": req.get("user_name"), "admin_reason": body.reason}, request.client.host)
     return {"ok": True}
 
 

@@ -648,6 +648,10 @@ export const api = {
 
   setDeadManCode: (body: { dead_man_code: string; current_pin: string }) =>
     request<{ ok: boolean }>("/api/saferide/deadman-code", { method: "POST", body: JSON.stringify(body) }),
+  requestDeadManReset: (reason: string) =>
+    request<{ ok: boolean }>("/api/saferide/deadman-code/reset-request", { method: "POST", body: JSON.stringify({ reason }) }),
+  getDeadManResetStatus: () =>
+    request<{ request: { id: string; status: string; reason: string; admin_reason?: string; created_at: string } | null }>("/api/saferide/deadman-code/reset-request"),
 
   sosCancelPin: (body: { sos_id: string; pin: string }) =>
     request<{ ok: boolean; cancelled: boolean; stealth: boolean }>("/api/saferide/sos/cancel-pin", {
