@@ -16,6 +16,7 @@ import {
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
   Landmark, ClipboardList, Download, Zap,
+  FileWarning, MinusCircle,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -78,10 +79,12 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Truck,
     color: "text-cyan",
     items: [
-      { label: "Driver Transfers",   href: "/admin/transfers",   icon: Repeat2,  permission: "manage_drivers" },
-      { label: "Commission Splits",  href: "/admin/commissions", icon: Percent,  permission: "manage_drivers" },
-      { label: "Performance",        href: "/admin/performance", icon: PieChart, permission: "view_analytics" },
-      { label: "Fleet Reports",      href: "/admin/fleet",       icon: BarChart3,permission: "view_analytics" },
+      { label: "Driver Transfers",   href: "/admin/transfers",           icon: Repeat2,      permission: "manage_drivers" },
+      { label: "Commission Splits",  href: "/admin/commissions",         icon: Percent,      permission: "manage_drivers" },
+      { label: "Performance",        href: "/admin/performance",         icon: PieChart,     permission: "view_analytics" },
+      { label: "Fleet Reports",      href: "/admin/fleet",               icon: BarChart3,    permission: "view_analytics" },
+      { label: "Document Expiry",    href: "/admin/fleet/documents",     icon: FileWarning,  permission: "manage_drivers" },
+      { label: "Driver Deductions",  href: "/admin/fleet/deductions",    icon: MinusCircle,  permission: "manage_drivers" },
     ],
   },
   // ── Finance ─────────────────────────────────────────────────

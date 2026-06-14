@@ -5583,6 +5583,83 @@ async def fleet_owner_drivers(owner_id: str, admin: dict = Depends(require_admin
         "commission_status": r["commission_status"]
     } for r in rows]
 
+@api.get("/admin/fleet/deductions")
+async def admin_fleet_deductions(status: str = "all", admin: dict = Depends(require_admin)):
+    """Admin oversight of all driver deductions across every fleet."""
+    async with pool.acquire() as conn:
+        where = "" if status == "all" else f"AND dd.status='{status}'"
+        rows = await conn.fetch(f"""
+            SELECT dd.*, u_driver.full_name AS driver_name, u_driver.phone_number AS driver_phone,
+                   u_owner.full_name AS owner_name, u_owner.phone_number AS owner_phone
+            FROM driver_deductions dd
+            JOIN users u_driver ON u_driver.id=dd.driver_user_id
+            JOIN fleet_owners fo ON fo.id=dd.owner_id
+            JOIN users u_owner ON u_owner.id=fo.user_id
+            WHERE 1=1 {where}
+            ORDER BY dd.created_at DESC LIMIT 500
+        """)
+    return [{"id": r["id"], "driver_name": r["driver_name"], "driver_phone": r["driver_phone"],
+             "owner_name": r["owner_name"], "owner_phone": r["owner_phone"],
+             "amount": float(r["amount"]), "reason": r["reason"], "deduction_type": r["deduction_type"],
+             "status": r["status"], "created_at": iso(r["created_at"]),
+             "applied_at": iso(r["applied_at"])} for r in rows]
+
+@api.get("/admin/fleet/document-expiry")
+async def admin_fleet_document_expiry(status: str = "all", admin: dict = Depends(require_admin)):
+    """Admin oversight of driver document expiry across every fleet."""
+    today = date_type.today()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT dde.*, u.full_name AS driver_name, u.phone_number AS driver_phone,
+                   u_owner.full_name AS owner_name
+            FROM driver_doc_expiry dde
+            JOIN users u ON u.id=dde.driver_user_id
+            JOIN fleet_owners fo ON fo.id=dde.owner_id
+            JOIN users u_owner ON u_owner.id=fo.user_id
+            ORDER BY dde.expiry_date ASC
+        """)
+    def doc_status(r):
+        if not r["expiry_date"]: return "unknown"
+        days = (r["expiry_date"] - today).days
+        if days < 0: return "expired"
+        if days <= 30: return "expiring_soon"
+        return "valid"
+    result = []
+    for r in rows:
+        ds = doc_status(r)
+        if status != "all" and ds != status: continue
+        days_left = (r["expiry_date"] - today).days if r["expiry_date"] else None
+        result.append({"id": r["id"], "driver_name": r["driver_name"], "driver_phone": r["driver_phone"],
+                       "owner_name": r["owner_name"], "document_type": r["document_type"],
+                       "expiry_date": r["expiry_date"].isoformat() if r["expiry_date"] else None,
+                       "days_left": days_left, "status": ds, "notes": r["notes"],
+                       "driver_user_id": r["driver_user_id"]})
+    return result
+
+@api.get("/admin/fleet/live-status")
+async def admin_fleet_live_status(admin: dict = Depends(require_admin)):
+    """Fleet-wide live driver status for admin monitoring."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT d.user_id, u.full_name, u.phone_number, d.vehicle_plate,
+                   d.is_online, d.last_seen_at,
+                   COALESCE((SELECT COUNT(*) FROM trips t WHERE t.driver_id=d.user_id AND t.status='active'),0) AS active_trips,
+                   fo_u.full_name AS owner_name
+            FROM drivers d
+            JOIN users u ON u.id=d.user_id
+            LEFT JOIN owner_drivers od ON od.driver_user_id=d.user_id
+            LEFT JOIN fleet_owners fo ON fo.id=od.owner_id
+            LEFT JOIN users fo_u ON fo_u.id=fo.user_id
+            ORDER BY d.is_online DESC, d.last_seen_at DESC NULLS LAST
+        """)
+    def status(r):
+        if r["active_trips"] > 0: return "on_trip"
+        if r["is_online"]: return "online"
+        return "offline"
+    return [{"user_id": r["user_id"], "full_name": r["full_name"], "phone_number": r["phone_number"],
+             "vehicle_plate": r["vehicle_plate"], "status": status(r),
+             "last_seen_at": iso(r["last_seen_at"]), "owner_name": r["owner_name"]} for r in rows]
+
 # ── 10. ONBOARDING PIPELINE ──────────────────────────────────
 @api.get("/admin/onboarding/pipeline")
 async def onboarding_pipeline(admin: dict = Depends(require_admin)):
