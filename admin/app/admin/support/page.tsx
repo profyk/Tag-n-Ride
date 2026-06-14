@@ -282,7 +282,7 @@ export default function SupportPage() {
           message: notifMsg.trim(),
           type: notifType,
           target: "user",
-          user_id: result.user.id,
+          target_user_id: result.user.id,
         }),
       });
       toast.success(`Notification sent to ${result.user.full_name}`);

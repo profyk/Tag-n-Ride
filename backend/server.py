@@ -2189,6 +2189,51 @@ async def admin_analytics(range: Optional[str] = "30d", admin: dict = Depends(re
         "day_of_week": [{"day": dow_labels[i], "rides": dow_map.get(i, {}).get("count", 0), "revenue": dow_map.get(i, {}).get("amount", 0)} for i in range(7)],
     }
 
+# ── Admin: Revenue breakdown by stream ───────────────────────
+@api.get("/admin/revenue/summary")
+async def admin_revenue_summary(range: str = "30d", offset: int = 0, admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_analytics"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    days_map = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
+    days = days_map.get(range, 30)
+    end   = datetime.now(timezone.utc) - timedelta(days=days * offset)
+    start = end - timedelta(days=days)
+    async with pool.acquire() as conn:
+        platform = await conn.fetchrow(
+            "SELECT COALESCE(SUM(platform_fee),0) AS amount, COUNT(*) AS count FROM transactions WHERE type='payment' AND status='completed' AND created_at BETWEEN $1 AND $2 AND is_test IS NOT TRUE",
+            start, end
+        )
+        sos = await conn.fetchrow(
+            "SELECT COALESCE(SUM(amount),0) AS amount, COUNT(*) AS count FROM transactions WHERE type='sos_fee' AND status='completed' AND created_at BETWEEN $1 AND $2",
+            start, end
+        )
+        topup = await conn.fetchrow(
+            "SELECT COALESCE(SUM(COALESCE(platform_fee,0)),0) AS amount, COUNT(*) AS count FROM transactions WHERE type='topup' AND status='completed' AND created_at BETWEEN $1 AND $2 AND is_test IS NOT TRUE",
+            start, end
+        )
+        subs = await conn.fetchrow(
+            "SELECT COALESCE(SUM(amount),0) AS amount, COUNT(*) AS count FROM transactions WHERE type='subscription' AND status='completed' AND created_at BETWEEN $1 AND $2",
+            start, end
+        )
+        w_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM withdrawal_requests WHERE status IN ('approved','paid') AND updated_at BETWEEN $1 AND $2",
+            start, end
+        ) or 0
+    return {
+        "breakdown": {
+            "platform_fees":          {"amount": float(platform["amount"]), "count": int(platform["count"])},
+            "subscriptions":          {"amount": float(subs["amount"]),     "count": int(subs["count"])},
+            "topup_fees":             {"amount": float(topup["amount"]),    "count": int(topup["count"])},
+            "sos_fees":               {"amount": float(sos["amount"]),      "count": int(sos["count"])},
+            "withdrawal_fees":        {"amount": round(float(w_count) * 3.50, 2), "count": int(w_count)},
+            "tracking_fees":          {"amount": 0, "count": 0},
+            "owner_statements":       {"amount": 0, "count": 0},
+            "passenger_statements":   {"amount": 0, "count": 0},
+            "payslips":               {"amount": 0, "count": 0},
+        }
+    }
+
+
 # ── Admin: Audit log ─────────────────────────────────────────
 @api.get("/admin/audit-logs")
 async def admin_audit_logs(admin: dict = Depends(require_admin)):

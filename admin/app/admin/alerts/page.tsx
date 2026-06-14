@@ -85,7 +85,7 @@ export default function AlertsPage() {
       ]);
 
       const d = dash.status === "fulfilled" ? dash.value : null;
-      const openDisputes: any[] = disputes.status === "fulfilled" ? disputes.value : [];
+      const openDisputes: any[] = (disputes.status === "fulfilled" ? disputes.value : []).filter((d: any) => d.status === "open" || d.status === "escalated");
       const riskUsers: any[] = riskData.status === "fulfilled" ? riskData.value : [];
       const allWithdrawals: any[] = withdrawals.status === "fulfilled" ? withdrawals.value : [];
 

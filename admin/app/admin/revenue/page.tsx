@@ -558,7 +558,7 @@ export default function RevenuePage() {
 
             {/* Export */}
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => window.open(`${BASE}/api/admin/export/revenue?range=${range}`, "_blank")}>
+              <Button variant="secondary" onClick={() => window.open(`${BASE}/api/admin/export/financial-report`, "_blank")}>
                 <Download size={13} /> Export Revenue Report
               </Button>
               <Button variant="secondary" onClick={() => window.open(`${BASE}/api/admin/export/transactions`, "_blank")}>
