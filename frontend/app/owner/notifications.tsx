@@ -15,7 +15,6 @@ import { api, Notification, UserDocument } from "../../src/api";
 import { formatDate, radius } from "../../src/theme";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import * as Location from "expo-location";
 import { buildOwnerStatementPDF } from "./statement";
 
 // ── Notification helpers ──────────────────────────────────────
@@ -85,16 +84,6 @@ function filterDocs(docs: UserDocument[], tab: DocTab) {
   return docs;
 }
 
-// ── SOS helpers ───────────────────────────────────────────────
-async function getLocation() {
-  try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") return null;
-    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    return { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-  } catch { return null; }
-}
-
 export default function OwnerNotifications() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -117,10 +106,6 @@ export default function OwnerNotifications() {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [fullContent, setFullContent] = useState<any>(null);
   const [contentLoading, setContentLoading] = useState(false);
-
-  // SOS state
-  const [sosActive, setSosActive] = useState<{ sos_id: string; type: string } | null>(null);
-  const [sosLoading, setSosLoading] = useState(false);
 
   const docUnreadCount = docs.filter(d => !d.is_read).length;
   const totalUnread = unreadCount + docUnreadCount;
@@ -215,37 +200,6 @@ export default function OwnerNotifications() {
     finally { setDownloading(null); }
   };
 
-  // SOS handler
-  const handleSOS = (type: "police" | "ambulance") => {
-    Alert.alert(
-      type === "police" ? "Call Police (Emergency)" : "Call Ambulance (Emergency)",
-      "This will send your location to emergency services via Tag n Ride. Only use in a genuine emergency.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "SEND SOS", style: "destructive", onPress: async () => {
-            setSosLoading(true);
-            try {
-              const loc = await getLocation();
-              const res = await api.sosRequest({
-                emergency_type: type,
-                latitude: loc?.latitude,
-                longitude: loc?.longitude,
-              });
-              setSosActive({ sos_id: res.sos_id, type });
-              Alert.alert(
-                "SOS Sent",
-                `Your emergency alert has been sent. Help is on the way.\n\nSOS ID: ${res.sos_id}`,
-              );
-            } catch (e: any) {
-              Alert.alert("SOS Failed", e?.message || "Could not send emergency alert. Please call 10111 directly.");
-            } finally { setSosLoading(false); }
-          },
-        },
-      ]
-    );
-  };
-
   const filteredDocs = filterDocs(docs, docTab);
   const DOC_TABS: { key: DocTab; label: string }[] = [
     { key: "all", label: "All" },
@@ -283,32 +237,6 @@ export default function OwnerNotifications() {
               <Text style={s.markAllText}>Mark all read</Text>
             </TouchableOpacity>
           )}
-        </View>
-      </View>
-
-      {/* SOS Panel */}
-      <View style={s.sosPanel}>
-        <View style={s.sosPanelLeft}>
-          <View style={s.sosIconWrap}>
-            <Ionicons name="warning" size={16} color={colors.red} />
-          </View>
-          <Text style={s.sosLabel}>EMERGENCY SOS</Text>
-        </View>
-        <View style={s.sosBtns}>
-          <TouchableOpacity
-            style={[s.sosBtn, { borderColor: "#1D4ED8" }]}
-            onPress={() => handleSOS("police")}
-            disabled={sosLoading}>
-            {sosLoading ? <ActivityIndicator size="small" color="#1D4ED8" /> : <Ionicons name="shield-outline" size={14} color="#1D4ED8" />}
-            <Text style={[s.sosBtnText, { color: "#1D4ED8" }]}>Police</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.sosBtn, { borderColor: colors.red }]}
-            onPress={() => handleSOS("ambulance")}
-            disabled={sosLoading}>
-            {sosLoading ? <ActivityIndicator size="small" color={colors.red} /> : <Ionicons name="medkit-outline" size={14} color={colors.red} />}
-            <Text style={[s.sosBtnText, { color: colors.red }]}>Ambulance</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -636,14 +564,6 @@ const makeStyles = (colors: any) => StyleSheet.create({
   badgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   markAllBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan + "30" },
   markAllText: { color: colors.cyan, fontSize: 11, fontWeight: "700" },
-  // SOS panel
-  sosPanel: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 10, backgroundColor: colors.redDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.red + "40", paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
-  sosPanelLeft: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
-  sosIconWrap: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.red + "20", alignItems: "center", justifyContent: "center" },
-  sosLabel: { color: colors.red, fontSize: 11, fontWeight: "800", letterSpacing: 1 },
-  sosBtns: { flexDirection: "row", gap: 8 },
-  sosBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, backgroundColor: colors.bg },
-  sosBtnText: { fontSize: 12, fontWeight: "800" },
   // Tabs
   topTabs: { flexDirection: "row", marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 3, gap: 2 },
   topTab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 9, borderRadius: 10, gap: 6 },

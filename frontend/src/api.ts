@@ -429,9 +429,23 @@ export const api = {
         qr_code: string;
         rating_avg: number;
         rating_count: number;
+        payment_mode: string;
+        commission_pct: number;
+        daily_target: number;
       };
       today_total: number;
       today_trip_count: number;
+      avg_per_trip_today: number;
+      avg_per_trip_all: number;
+      all_trip_count: number;
+      owner_total_received: number;
+      last_cashup: {
+        amount: number;
+        owner_received: number;
+        fuel_deducted: number;
+        driver_profit: number;
+        date: string;
+      } | null;
       today_trips: {
         reference: string;
         amount: number;

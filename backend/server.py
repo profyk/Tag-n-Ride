@@ -2658,18 +2658,62 @@ async def owner_unlink_driver(driver_user_id: str, user: dict = Depends(require_
 async def owner_driver_earnings(driver_user_id: str, user: dict = Depends(require_owner)):
     async with pool.acquire() as conn:
         owner = await get_owner_record(conn, user["id"])
-        link = await conn.fetchrow("SELECT id FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2", owner["id"], driver_user_id)
-        if not link: raise HTTPException(status_code=403, detail="Driver not in fleet")
+        od = await conn.fetchrow(
+            "SELECT id,payment_mode,driver_commission_pct,daily_target FROM owner_drivers WHERE owner_id=$1 AND driver_user_id=$2",
+            owner["id"], driver_user_id
+        )
+        if not od: raise HTTPException(status_code=403, detail="Driver not in fleet")
         driver = await conn.fetchrow("SELECT d.*,u.full_name,u.phone_number FROM drivers d JOIN users u ON u.id=d.user_id WHERE d.user_id=$1", driver_user_id)
         if not driver: raise HTTPException(status_code=404, detail="Driver not found")
-        today_trips = await conn.fetch("SELECT t.reference,t.amount,t.driver_net,t.created_at,su.full_name as passenger_name FROM transactions t LEFT JOIN users su ON su.id=t.sender_id WHERE t.receiver_id=$1 AND t.type='payment' AND DATE(t.created_at)=CURRENT_DATE ORDER BY t.created_at DESC", driver_user_id)
-        all_trips = await conn.fetch("SELECT t.reference,t.amount,t.driver_net,t.created_at,su.full_name as passenger_name FROM transactions t LEFT JOIN users su ON su.id=t.sender_id WHERE t.receiver_id=$1 AND t.type='payment' ORDER BY t.created_at DESC LIMIT 50", driver_user_id)
-        today_total = sum(float(t["driver_net"] or t["amount"] or 0) for t in today_trips)
+        today_trips = await conn.fetch(
+            "SELECT t.reference,t.amount,t.driver_net,t.created_at,su.full_name as passenger_name "
+            "FROM transactions t LEFT JOIN users su ON su.id=t.sender_id "
+            "WHERE t.receiver_id=$1 AND t.type='payment' AND DATE(t.created_at)=CURRENT_DATE ORDER BY t.created_at DESC",
+            driver_user_id
+        )
+        all_trips = await conn.fetch(
+            "SELECT t.reference,t.amount,t.driver_net,t.created_at,su.full_name as passenger_name "
+            "FROM transactions t LEFT JOIN users su ON su.id=t.sender_id "
+            "WHERE t.receiver_id=$1 AND t.type='payment' ORDER BY t.created_at DESC LIMIT 100",
+            driver_user_id
+        )
+        last_cashup = await conn.fetchrow(
+            "SELECT cashup_amount,owner_received,fuel_deducted,driver_profit,created_at "
+            "FROM cashup_records WHERE driver_user_id=$1 AND owner_user_id=$2 ORDER BY created_at DESC LIMIT 1",
+            driver_user_id, user["id"]
+        )
+        owner_total = await conn.fetchval(
+            "SELECT COALESCE(SUM(cashup_amount),0) FROM cashup_records WHERE driver_user_id=$1 AND owner_user_id=$2",
+            driver_user_id, user["id"]
+        )
+        today_total = sum(float(t["amount"] or 0) for t in today_trips)
+        today_trip_count = len(today_trips)
+        all_trip_count = len(all_trips)
+        avg_per_trip_today = round(today_total / today_trip_count, 2) if today_trip_count else 0
+        all_gross = sum(float(t["amount"] or 0) for t in all_trips)
+        avg_per_trip_all = round(all_gross / all_trip_count, 2) if all_trip_count else 0
     return {
-        "driver": {"user_id": driver["user_id"], "full_name": driver["full_name"], "phone_number": driver["phone_number"],
-                   "vehicle_plate": driver["vehicle_plate"], "total_earnings": float(driver["total_earnings"] or 0),
-                   "qr_code": driver["qr_code"], "rating_avg": float(driver["rating_avg"] or 0), "rating_count": driver["rating_count"] or 0},
-        "today_total": today_total, "today_trip_count": len(today_trips),
+        "driver": {
+            "user_id": driver["user_id"], "full_name": driver["full_name"], "phone_number": driver["phone_number"],
+            "vehicle_plate": driver["vehicle_plate"], "total_earnings": float(driver["total_earnings"] or 0),
+            "qr_code": driver["qr_code"], "rating_avg": float(driver["rating_avg"] or 0), "rating_count": driver["rating_count"] or 0,
+            "payment_mode": od["payment_mode"] or "daily_target",
+            "commission_pct": float(od["driver_commission_pct"] or 0),
+            "daily_target": float(od["daily_target"] or 0),
+        },
+        "today_total": today_total,
+        "today_trip_count": today_trip_count,
+        "avg_per_trip_today": avg_per_trip_today,
+        "avg_per_trip_all": avg_per_trip_all,
+        "all_trip_count": all_trip_count,
+        "owner_total_received": float(owner_total or 0),
+        "last_cashup": {
+            "amount": float(last_cashup["cashup_amount"]),
+            "owner_received": float(last_cashup["owner_received"] or last_cashup["cashup_amount"]),
+            "fuel_deducted": float(last_cashup["fuel_deducted"] or 0),
+            "driver_profit": float(last_cashup["driver_profit"] or 0),
+            "date": iso(last_cashup["created_at"]),
+        } if last_cashup else None,
         "today_trips": [{"reference": t["reference"], "amount": float(t["amount"]), "driver_net": float(t["driver_net"] or t["amount"]), "passenger": t["passenger_name"] or "Passenger", "created_at": iso(t["created_at"])} for t in today_trips],
         "all_trips": [{"reference": t["reference"], "amount": float(t["amount"]), "driver_net": float(t["driver_net"] or t["amount"]), "passenger": t["passenger_name"] or "Passenger", "created_at": iso(t["created_at"])} for t in all_trips],
     }
@@ -11433,6 +11477,13 @@ async def _bill_owner(owner_user_id: str):
 class StatementRequestIn(BaseModel):
     period_start: str  # "YYYY-MM-DD"
     period_end: str
+
+@api.get("/owner/statement/pricing")
+async def owner_statement_pricing(user: dict = Depends(require_owner)):
+    async with pool.acquire() as conn:
+        settings = await conn.fetchrow("SELECT owner_statement_price FROM payout_settings WHERE id='default'")
+        price = float(settings["owner_statement_price"] or 10) if settings else 10.0
+    return {"enabled": True, "price": price}
 
 @api.post("/owner/statement/request")
 async def owner_request_statement(body: StatementRequestIn, user: dict = Depends(require_owner)):
