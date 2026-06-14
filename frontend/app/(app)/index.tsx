@@ -123,6 +123,8 @@ export default function Home() {
   const [trackMeConfirmModal, setTrackMeConfirmModal] = useState(false);
   const [trackMeStartLocation, setTrackMeStartLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const trackMePingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [fleetStatus, setFleetStatus] = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
@@ -134,6 +136,10 @@ export default function Home() {
       setAllTxns(t);
       setTxns(t.filter((tx: Txn) => !hidden.includes(tx.id)).slice(0, 5));
       if (sp !== null) setSafetyProfileComplete(!!sp?.profile_complete);
+      // Driver: fetch fleet/cashup status for payment mode & deduction display
+      if (state.status === "authed" && state.user.role === "driver") {
+        api.driverCashupStatus().then(setFleetStatus).catch(() => {});
+      }
       // Passenger: check active trip + active track-me session + fee
       if (state.status === "authed" && state.user.role === "passenger") {
         const [pt, tm, fee] = await Promise.all([
@@ -151,7 +157,22 @@ export default function Home() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    load();
+    // Driver heartbeat: mark online while screen is focused
+    if (state.status === "authed" && state.user.role === "driver") {
+      api.driverHeartbeat().catch(() => {});
+      heartbeatRef.current = setInterval(() => {
+        api.driverHeartbeat().catch(() => {});
+      }, 90000); // every 90s
+    }
+    return () => {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+      if (state.status === "authed" && state.user.role === "driver") {
+        api.driverOffline().catch(() => {});
+      }
+    };
+  }, [load]));
 
   if (state.status !== "authed") return null;
   const isDriver = state.user.role === "driver";
@@ -757,6 +778,104 @@ export default function Home() {
           </TouchableOpacity>
         )}
 
+        {/* Driver: fleet status card (payment mode + target/commission + deductions) */}
+        {isDriver && fleetStatus?.has_owner && (
+          <>
+            {/* Payment mode card */}
+            <View style={s.fleetCard}>
+              {fleetStatus.payment_mode === "commission_split" ? (
+                <>
+                  <View style={s.fleetCardHeader}>
+                    <View style={[s.fleetCardIcon, { backgroundColor: "#A064FF18" }]}>
+                      <Ionicons name="pie-chart-outline" size={16} color="#A064FF" />
+                    </View>
+                    <Text style={s.fleetCardTitle}>Commission Split</Text>
+                    <View style={s.fleetModePill}>
+                      <Text style={[s.fleetModePillText, { color: "#A064FF" }]}>
+                        You {fleetStatus.commission_pct}% · Owner {(100 - fleetStatus.commission_pct).toFixed(0)}%
+                      </Text>
+                    </View>
+                  </View>
+                  {fleetStatus.fuel_deducted > 0 && (
+                    <View style={s.fleetRow}>
+                      <Text style={s.fleetRowLabel}>Fuel deducted today</Text>
+                      <Text style={[s.fleetRowVal, { color: colors.red }]}>−{formatZAR(fleetStatus.fuel_deducted)}</Text>
+                    </View>
+                  )}
+                  <View style={s.fleetRow}>
+                    <Text style={s.fleetRowLabel}>Your share (after fuel)</Text>
+                    <Text style={[s.fleetRowVal, { color: colors.green }]}>{formatZAR(fleetStatus.driver_profit)}</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={s.fleetCardHeader}>
+                    <View style={[s.fleetCardIcon, { backgroundColor: colors.cyanDim }]}>
+                      <Ionicons name="flag-outline" size={16} color={colors.cyan} />
+                    </View>
+                    <Text style={s.fleetCardTitle}>Daily Target</Text>
+                    {fleetStatus.daily_target > 0 && (
+                      <Text style={[s.fleetModePillText, { color: colors.cyan, marginLeft: "auto" as any }]}>
+                        {formatZAR(fleetStatus.daily_target)}
+                      </Text>
+                    )}
+                  </View>
+                  {fleetStatus.daily_target > 0 && (
+                    <>
+                      {(() => {
+                        const pct = Math.min(1, fleetStatus.today_earned / fleetStatus.daily_target);
+                        const met = pct >= 1;
+                        return (
+                          <>
+                            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                              <Text style={s.fleetRowLabel}>{formatZAR(fleetStatus.today_earned)} collected</Text>
+                              <Text style={[s.fleetRowLabel, { color: met ? colors.green : "#FFD60A", fontWeight: "800" }]}>
+                                {Math.round(pct * 100)}%
+                              </Text>
+                            </View>
+                            <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden" }}>
+                              <View style={{ height: 6, width: `${pct * 100}%` as any, borderRadius: 3, backgroundColor: met ? colors.green : "#FFD60A" }} />
+                            </View>
+                            {met ? (
+                              <Text style={[s.fleetRowLabel, { color: colors.green, marginTop: 6 }]}>
+                                Target met! +{formatZAR(fleetStatus.driver_profit)} bonus
+                              </Text>
+                            ) : (
+                              <Text style={[s.fleetRowLabel, { color: colors.textMuted, marginTop: 6 }]}>
+                                {formatZAR(fleetStatus.shortfall)} still needed
+                              </Text>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                  <View style={[s.fleetRow, { marginTop: fleetStatus.daily_target > 0 ? 8 : 0 }]}>
+                    <Text style={s.fleetRowLabel}>Fleet: {fleetStatus.owner_name}</Text>
+                    <Text style={[s.fleetRowVal, { color: fleetStatus.is_confirmed ? colors.green : "#FFD60A" }]}>
+                      {fleetStatus.is_confirmed ? "Confirmed" : "Pending"}
+                    </Text>
+                  </View>
+                </>
+              )}
+            </View>
+
+            {/* Pending deductions warning */}
+            {fleetStatus.total_deductions > 0 && (
+              <View style={s.deductionBanner}>
+                <Ionicons name="remove-circle-outline" size={18} color="#A064FF" />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.deductionBannerTitle}>Pending Deductions</Text>
+                  <Text style={s.deductionBannerSub}>
+                    {formatZAR(fleetStatus.total_deductions)} will be deducted from your profit at next cashup
+                    {fleetStatus.pending_deductions.map((d: any) => ` · ${d.reason} (${formatZAR(d.amount)})`).join("")}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </>
+        )}
+
         {/* Passenger: you are in a SafeRide trip */}
         {!isDriver && passengerTrip && (
           <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#00E5FF10", borderWidth: 1.5, borderColor: "#00E5FF40", borderRadius: 12, padding: 14, marginBottom: 16, gap: 10 }} testID="passenger-trip-banner">
@@ -1064,13 +1183,45 @@ export default function Home() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.cashupOwnerName}>{cashupStatus.owner_name}</Text>
                     <Text style={s.cashupOwnerSub}>
-                      Today's earnings: {formatZAR(cashupStatus.today_earned)}
-                      {cashupStatus.cashup_amount < cashupStatus.today_earned
-                        ? `  ·  Cashup: ${formatZAR(cashupStatus.cashup_amount)}`
-                        : ""}
+                      {cashupStatus.payment_mode === "commission_split"
+                        ? `Commission ${cashupStatus.commission_pct}% · Earned: ${formatZAR(cashupStatus.today_earned)}`
+                        : `Target ${formatZAR(cashupStatus.daily_target)} · Earned: ${formatZAR(cashupStatus.today_earned)}`}
                     </Text>
                   </View>
+                  <View style={[s.fleetModePill, { backgroundColor: cashupStatus.payment_mode === "commission_split" ? "#A064FF18" : colors.cyanDim }]}>
+                    <Ionicons name={cashupStatus.payment_mode === "commission_split" ? "pie-chart-outline" : "flag-outline"} size={11} color={cashupStatus.payment_mode === "commission_split" ? "#A064FF" : colors.cyan} />
+                  </View>
                 </View>
+
+                {/* Earnings breakdown */}
+                {cashupStatus.shortfall > 0 && (
+                  <View style={[s.cashupOwnerRow, { backgroundColor: "#FFD60A11", borderColor: "#FFD60A33" }]}>
+                    <Ionicons name="warning-outline" size={16} color="#FFD60A" />
+                    <Text style={{ color: "#FFD60A", fontSize: 12, flex: 1, marginLeft: 8 }}>
+                      {formatZAR(cashupStatus.shortfall)} short of your daily target
+                    </Text>
+                  </View>
+                )}
+
+                {/* Pending deductions warning in modal */}
+                {cashupStatus.total_deductions > 0 && (
+                  <View style={[s.cashupOwnerRow, { backgroundColor: "#A064FF11", borderColor: "#A064FF33" }]}>
+                    <Ionicons name="remove-circle-outline" size={16} color="#A064FF" />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={{ color: "#A064FF", fontSize: 12, fontWeight: "700" }}>
+                        {formatZAR(cashupStatus.total_deductions)} will be deducted from your profit
+                      </Text>
+                      {cashupStatus.pending_deductions.map((d: any, i: number) => (
+                        <Text key={i} style={{ color: "#A064FF99", fontSize: 11, marginTop: 2 }}>
+                          · {d.reason}: {formatZAR(d.amount)}
+                        </Text>
+                      ))}
+                      <Text style={{ color: "#A064FF", fontSize: 12, marginTop: 4, fontWeight: "800" }}>
+                        Your profit after deductions: {formatZAR(cashupStatus.net_driver_profit)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
 
                 {/* Method options */}
                 <Text style={s.inputLabel}>SEND TO</Text>
@@ -1456,6 +1607,20 @@ const makeStyles = (colors: any) => StyleSheet.create({
   safetyBanner: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFD60A15", borderRadius: 10, borderWidth: 1, borderColor: "#FFD60A40", padding: 12, marginBottom: 16 },
   safetyBannerTitle: { color: "#FFD60A", fontWeight: "700", fontSize: 13 },
   safetyBannerSub: { color: "#FFD60Aaa", fontSize: 11, marginTop: 1 },
+  // Fleet status card (driver home)
+  fleetCard: { backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 12 },
+  fleetCardHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  fleetCardIcon: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  fleetCardTitle: { color: colors.text, fontWeight: "700", fontSize: 13 },
+  fleetModePill: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
+  fleetModePillText: { fontSize: 11, fontWeight: "700" },
+  fleetRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 4 },
+  fleetRowLabel: { color: colors.textMuted, fontSize: 12 },
+  fleetRowVal: { fontSize: 12, fontWeight: "700" },
+  // Deduction banner
+  deductionBanner: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: "#A064FF11", borderRadius: radius.md, borderWidth: 1, borderColor: "#A064FF33", padding: 12, marginBottom: 12 },
+  deductionBannerTitle: { color: "#A064FF", fontWeight: "700", fontSize: 13 },
+  deductionBannerSub: { color: "#A064FF99", fontSize: 11, marginTop: 2, lineHeight: 16 },
   trackMeBtn: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 12, paddingVertical: 16, paddingHorizontal: 18, borderRadius: radius.md, borderWidth: 1.5 },
   trackMeIconWrap: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
   trackMeLiveBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(74,222,128,0.12)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(74,222,128,0.25)" },

@@ -3272,6 +3272,20 @@ async def owner_cancel_deduction(deduction_id: str, user: dict = Depends(require
 
 # ── Driver cashup v2 endpoints ───────────────────────────────
 
+@api.put("/driver/heartbeat")
+async def driver_heartbeat(user: dict = Depends(get_current_user)):
+    """Called by the driver app periodically to mark driver as online."""
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE drivers SET is_online=TRUE, last_seen_at=NOW() WHERE user_id=$1", user["id"])
+    return {"ok": True}
+
+@api.put("/driver/offline")
+async def driver_go_offline(user: dict = Depends(get_current_user)):
+    """Called by the driver app when it goes to background or is closed."""
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE drivers SET is_online=FALSE WHERE user_id=$1", user["id"])
+    return {"ok": True}
+
 @api.get("/driver/cashup-status")
 async def driver_cashup_status(user: dict = Depends(get_current_user)):
     if user["role"] != "driver":
@@ -3322,6 +3336,18 @@ async def driver_cashup_status(user: dict = Depends(get_current_user)):
             driver_profit = max(0, today_earned - daily_target) if daily_target > 0 else 0
             shortfall = max(0, daily_target - today_earned) if daily_target > 0 else 0
 
+        # Pending deductions from owner
+        pending_ded_rows = await conn.fetch("""
+            SELECT id, amount, reason, deduction_type FROM driver_deductions
+            WHERE driver_user_id=$1 AND owner_id=$2 AND status='pending'
+            ORDER BY created_at
+        """, user["id"], link["owner_id"])
+        pending_deductions = [{"id": r["id"], "amount": float(r["amount"]), "reason": r["reason"], "deduction_type": r["deduction_type"]} for r in pending_ded_rows]
+        total_deductions = sum(d["amount"] for d in pending_deductions)
+
+    net_driver_profit = max(0, driver_profit - total_deductions)
+    deduction_shortfall = max(0, total_deductions - driver_profit)
+
     return {
         "has_owner": True, "owner_user_id": link["owner_user_id"], "owner_name": link["owner_name"],
         "payment_mode": payment_mode,
@@ -3330,6 +3356,8 @@ async def driver_cashup_status(user: dict = Depends(get_current_user)):
         "daily_target": daily_target, "today_earned": today_earned,
         "fuel_deducted": fuel_today if payment_mode == "commission_split" else 0.0,
         "cashup_amount": cashup_amount, "driver_profit": driver_profit, "shortfall": shortfall,
+        "pending_deductions": pending_deductions, "total_deductions": total_deductions,
+        "net_driver_profit": net_driver_profit, "deduction_shortfall": deduction_shortfall,
         "is_confirmed": link["confirmed"] or False, "cashup_method": link["cashup_method"] or "wallet",
         "outstanding_balance": float(outstanding or 0),
     }
@@ -3492,6 +3520,33 @@ async def driver_cashup_v2(body: DriverCashupV2In, user: dict = Depends(get_curr
                     INSERT INTO outstanding_balances (id,owner_user_id,driver_user_id,amount,reason,status)
                     VALUES ($1,$2,$3,$4,'Daily target shortfall','outstanding')
                 """, str(uuid.uuid4()), body.owner_user_id, user["id"], shortfall)
+
+            # Apply pending deductions from owner: deduct from driver_profit
+            pending_deds = await conn.fetch("""
+                SELECT id, amount FROM driver_deductions
+                WHERE driver_user_id=$1 AND owner_id=(
+                    SELECT id FROM fleet_owners WHERE user_id=$2
+                ) AND status='pending'
+            """, user["id"], body.owner_user_id)
+            remaining_profit = driver_profit
+            for ded in pending_deds:
+                ded_amount = float(ded["amount"])
+                applied_amount = min(ded_amount, max(0, remaining_profit))
+                remaining_profit -= applied_amount
+                shortfall_from_ded = ded_amount - applied_amount
+                # Mark deduction as applied
+                await conn.execute(
+                    "UPDATE driver_deductions SET status='applied', applied_at=NOW(), cashup_id=$1 WHERE id=$2",
+                    record_id, ded["id"]
+                )
+                # If driver doesn't have enough profit to cover it, create outstanding balance
+                if shortfall_from_ded > 0:
+                    await conn.execute("""
+                        INSERT INTO outstanding_balances (id,owner_user_id,driver_user_id,amount,reason,status)
+                        VALUES ($1,$2,$3,$4,$5,'outstanding')
+                    """, str(uuid.uuid4()), body.owner_user_id, user["id"], shortfall_from_ded,
+                        f"Deduction shortfall: {ded_amount:.2f}")
+            driver_profit = max(0, remaining_profit)
 
     async with pool.acquire() as conn:
         dest_label = "owner's wallet" if method == "wallet" else "owner's bank account"

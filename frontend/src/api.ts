@@ -202,6 +202,8 @@ export const api = {
     }),
 
   // ── Driver cash-up ──
+  driverHeartbeat: () => request<{ ok: boolean }>("/api/driver/heartbeat", { method: "PUT" }),
+  driverOffline: () => request<{ ok: boolean }>("/api/driver/offline", { method: "PUT" }),
   driverCashupStatus: () => request<any>("/api/driver/cashup-status"),
 
   driverCashupDestination: () => request<any>("/api/driver/cashup-destination"),
