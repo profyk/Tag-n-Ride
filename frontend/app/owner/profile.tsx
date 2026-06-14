@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal, ActivityIndicator, Pressable, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, useNavigation } from "expo-router";
+import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
@@ -14,7 +15,14 @@ const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank",
 export default function OwnerProfile() {
   const { state, signOut } = useAuth();
   const router = useRouter();
+  const navigation = useNavigation();
   const { colors } = useTheme();
+
+  const handleSignOut = async () => {
+    await signOut();
+    if (Platform.OS === "web") { window.location.replace("/"); return; }
+    navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: "(auth)", state: { routes: [{ name: "welcome" }] } }] }));
+  };
 
   // Bank / cashup
   const [bankData, setBankData] = useState<any>(null);
@@ -468,18 +476,11 @@ export default function OwnerProfile() {
 
         {/* Sign out */}
         <TouchableOpacity style={styles.signOutBtn}
-          onPress={async () => {
-            if (Platform.OS === "web") {
-              await signOut();
-              router.replace("/(auth)/welcome");
-              return;
-            }
+          onPress={() => {
+            if (Platform.OS === "web") { handleSignOut(); return; }
             Alert.alert("Sign out", "Are you sure?", [
               { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: async () => {
-                await signOut();
-                router.replace("/(auth)/welcome");
-              }},
+              { text: "Sign out", style: "destructive", onPress: handleSignOut },
             ]);
           }}>
           <Ionicons name="log-out-outline" size={20} color={colors.red} />

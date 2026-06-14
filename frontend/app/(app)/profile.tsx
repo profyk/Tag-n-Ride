@@ -5,7 +5,8 @@ import {
   Platform, Linking, Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useNavigation } from "expo-router";
+import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
@@ -30,6 +31,7 @@ const SA_BANKS = [
 
 const APP_VERSION = "1.0.0";export default function Profile() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { state, signOut, refresh } = useAuth();
   const { colors } = useTheme();
 
@@ -196,15 +198,17 @@ const APP_VERSION = "1.0.0";export default function Profile() {
     setPayoutModal(true);
   };
 
+  const handleSignOut = async () => {
+    await signOut();
+    if (Platform.OS === "web") { window.location.replace("/"); return; }
+    navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: "(auth)", state: { routes: [{ name: "welcome" }] } }] }));
+  };
+
   const confirmLogout = () => {
-    if (Platform.OS === "web") {
-      signOut().then(() => { window.location.href = "/login"; }); return;
-    }
+    if (Platform.OS === "web") { handleSignOut(); return; }
     Alert.alert("Sign out?", "You will need to sign back in to use Tag n Ride.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: async () => {
-        await signOut(); router.replace("/(auth)/welcome");
-      }},
+      { text: "Sign out", style: "destructive", onPress: handleSignOut },
     ]);
   };
 
