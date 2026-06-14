@@ -51,7 +51,7 @@ function OwnerTabs() {
       />
       <Tabs.Screen
         name="trip-centre"
-        options={{ href: null, tabBarButton: () => null }}
+        options={{ href: null, tabBarItemStyle: { display: "none" } }}
       />
       <Tabs.Screen
         name="profile"
@@ -62,10 +62,10 @@ function OwnerTabs() {
           ),
         }}
       />
-      <Tabs.Screen name="notifications" options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="documents"     options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="statement"     options={{ href: null, tabBarButton: () => null }} />
-      <Tabs.Screen name="driver"        options={{ href: null, tabBarButton: () => null }} />
+      <Tabs.Screen name="notifications" options={{ href: null, tabBarItemStyle: { display: "none" } }} />
+      <Tabs.Screen name="documents"     options={{ href: null, tabBarItemStyle: { display: "none" } }} />
+      <Tabs.Screen name="statement"     options={{ href: null, tabBarItemStyle: { display: "none" } }} />
+      <Tabs.Screen name="driver"        options={{ href: null, tabBarItemStyle: { display: "none" } }} />
     </Tabs>
   );
 }
