@@ -10,7 +10,7 @@ import {
   Wallet, ArrowLeftRight, ShieldAlert, Bell, FileText,
   Phone, Calendar, Shield, AlertTriangle, RefreshCw,
   XCircle, Flag, Unlock, ChevronDown, ChevronUp,
-  MessageCircle, PlusCircle, MinusCircle, RotateCcw,
+  MessageCircle, PlusCircle, MinusCircle, ExternalLink,
   Send,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -82,13 +82,6 @@ export default function SupportPage() {
   const [flagModal, setFlagModal] = useState(false);
   const [flagReason, setFlagReason] = useState("");
   const [flagging, setFlagging] = useState(false);
-
-  // Create refund modal
-  const [refundModal, setRefundModal] = useState(false);
-  const [refundTxnId, setRefundTxnId] = useState("");
-  const [refundAmount, setRefundAmount] = useState("");
-  const [refundReason, setRefundReason] = useState("");
-  const [refunding, setRefunding] = useState(false);
 
   // Block/unblock confirm
   const [blockConfirm, setBlockConfirm] = useState(false);
@@ -249,26 +242,6 @@ export default function SupportPage() {
     finally { setAdjusting(false); }
   };
 
-  const handleCreateRefund = async () => {
-    if (!result?.user?.id) return;
-    if (!refundTxnId.trim()) { toast.error("Transaction ID required"); return; }
-    if (!refundAmount || parseFloat(refundAmount) <= 0) { toast.error("Valid amount required"); return; }
-    if (!refundReason.trim()) { toast.error("Reason required"); return; }
-    setRefunding(true);
-    try {
-      await api.createRefund({
-        user_id: result.user.id,
-        transaction_id: refundTxnId.trim(),
-        amount: parseFloat(refundAmount),
-        reason: refundReason.trim(),
-      });
-      toast.success("Refund request created — pending approval");
-      setRefundModal(false);
-      setRefundTxnId(""); setRefundAmount(""); setRefundReason("");
-    } catch (e: any) { toast.error(e.message); }
-    finally { setRefunding(false); }
-  };
-
   const handleSendNotification = async () => {
     if (!notifTitle.trim() || !notifMsg.trim()) { toast.error("Title and message required"); return; }
     if (!result?.user?.id) return;
@@ -387,11 +360,11 @@ export default function SupportPage() {
                   <Bell size={12} /> Notify User
                 </button>
 
-                {/* Create refund */}
-                <button onClick={() => setRefundModal(true)}
+                {/* Refunds page link */}
+                <a href="/admin/refunds" target="_blank"
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow/10 border border-yellow/20 rounded-lg text-yellow text-xs font-bold hover:bg-yellow/20 transition-colors">
-                  <RotateCcw size={12} /> Create Refund
-                </button>
+                  <ExternalLink size={12} /> Refunds
+                </a>
 
                 {canReset && (
                   <button onClick={handleResetPin} disabled={actionLoading === "pin"}
@@ -576,13 +549,11 @@ export default function SupportPage() {
                               {t.note && <div className="flex justify-between"><span className="text-textMuted">Note</span><span className="text-text">{t.note}</span></div>}
                               {t.counterparty_name && <div className="flex justify-between"><span className="text-textMuted">Counterparty</span><span className="text-text">{t.counterparty_name}</span></div>}
                               {t.platform_fee > 0 && <div className="flex justify-between"><span className="text-textMuted">Platform fee</span><span className="text-text">{formatZAR(t.platform_fee)}</span></div>}
-                              {/* Quick refund shortcut */}
                               <div className="pt-1.5 border-t border-border">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setRefundTxnId(t.id || t.reference); setRefundAmount(String(t.amount)); setRefundModal(true); }}
+                                <a href="/admin/refunds" target="_blank"
                                   className="text-yellow text-[10px] font-bold flex items-center gap-1 hover:text-yellow/80 transition-colors">
-                                  <RotateCcw size={10} /> Create refund for this transaction
-                                </button>
+                                  <ExternalLink size={10} /> Process refund in Refund Center
+                                </a>
                               </div>
                             </div>
                           )}
@@ -765,31 +736,6 @@ export default function SupportPage() {
             <Button variant="secondary" onClick={() => setFlagModal(false)}>Cancel</Button>
             <Button variant="danger" onClick={confirmFlag} loading={flagging} disabled={!flagReason.trim()}>
               <Flag size={13} /> Flag User
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ── Create Refund Modal ── */}
-      <Modal open={refundModal} onClose={() => setRefundModal(false)} title="Create Refund Request">
-        <div className="space-y-4">
-          <p className="text-textMuted text-sm">Create a refund for <strong className="text-text">{result?.user?.full_name}</strong>. The refund will be queued for approval.</p>
-          <div>
-            <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest block mb-1.5">Transaction ID *</label>
-            <Input placeholder="Transaction ID or reference..." value={refundTxnId} onChange={e => setRefundTxnId(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest block mb-1.5">Amount (ZAR) *</label>
-            <Input type="number" step="0.01" min="0.01" placeholder="0.00" value={refundAmount} onChange={e => setRefundAmount(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest block mb-1.5">Reason *</label>
-            <Input placeholder="Reason for refund..." value={refundReason} onChange={e => setRefundReason(e.target.value)} />
-          </div>
-          <div className="flex gap-3 justify-end">
-            <Button variant="secondary" onClick={() => setRefundModal(false)}>Cancel</Button>
-            <Button onClick={handleCreateRefund} loading={refunding} disabled={!refundTxnId || !refundAmount || !refundReason}>
-              <RotateCcw size={13} /> Submit Refund
             </Button>
           </div>
         </div>

@@ -109,6 +109,7 @@ export type Driver = {
   rating_count: number;
   qr_code: string;
   kyc_status: string;
+  taxi_association_id?: string | null;
   created_at: string;
 };
 
@@ -819,6 +820,40 @@ export const api = {
     client.post<{ ok: boolean }>(`/api/admin/transfers/${id}/admin-approve`, { note }),
   adminTransferReject: (id: string, note: string) =>
     client.post<{ ok: boolean }>(`/api/admin/transfers/${id}/admin-reject`, { note }),
+
+  // Taxi Associations
+  taxiAssociations: () => client.get<TaxiAssociation[]>("/api/admin/taxi-associations"),
+  createTaxiAssociation: (body: Partial<TaxiAssociation>) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/taxi-associations", body),
+  updateTaxiAssociation: (id: string, body: Partial<TaxiAssociation>) =>
+    client.patch<{ ok: boolean }>(`/api/admin/taxi-associations/${id}`, body),
+  deleteTaxiAssociation: (id: string) =>
+    client.delete<{ ok: boolean }>(`/api/admin/taxi-associations/${id}`),
+  associationDrivers: (id: string) =>
+    client.get<any[]>(`/api/admin/taxi-associations/${id}/drivers`),
+  associationRevenue: (id: string, months?: number) =>
+    client.get<{ monthly: any[]; totals: any }>(`/api/admin/taxi-associations/${id}/revenue`, {
+      params: months ? { months } : {},
+    }),
+  associationRevenuePeriod: (id: string, period_month: number, period_year: number) =>
+    client.get<{ monthly: any[]; totals: any; period: { month: number; year: number } }>(
+      `/api/admin/taxi-associations/${id}/revenue`,
+      { params: { period_month, period_year } }
+    ),
+  associationPayouts: (id: string) =>
+    client.get<AssociationPayout[]>(`/api/admin/taxi-associations/${id}/payouts`),
+  createAssociationPayout: (id: string, body: { period_month: number; period_year: number; payout_amount: number; notes?: string }) =>
+    client.post<{ ok: boolean; id: string; reference: string }>(`/api/admin/taxi-associations/${id}/payouts`, body),
+  markPayoutPaid: (assocId: string, payoutId: string) =>
+    client.patch<{ ok: boolean }>(`/api/admin/taxi-associations/${assocId}/payouts/${payoutId}/mark-paid`, {}),
+  updateDriverAssociation: (userId: string, associationId: string | null) =>
+    client.patch<{ ok: boolean }>(`/api/admin/users/${userId}/taxi-association`, { association_id: associationId }),
+  payAssociationNow: (id: string, body: { period_month?: number; period_year?: number; amount?: number; notes?: string }) =>
+    client.post<{ ok: boolean; id: string; reference: string; amount: number; tnr_revenue: number }>(
+      `/api/admin/taxi-associations/${id}/pay-now`, body
+    ),
+  processAutoPayments: () =>
+    client.post<{ ok: boolean; processed: number; results: any[] }>("/api/admin/taxi-associations/process-auto-payments", {}),
 };
 
 export type DriverTransfer = {
@@ -849,4 +884,52 @@ export type ContactAttempt = {
   outcome: string;
   notes: string | null;
   attempted_at: string;
+};
+
+export type TaxiAssociation = {
+  id: string;
+  name: string;
+  registration_number: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  province: string | null;
+  city: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  account_holder: string | null;
+  branch_code: string | null;
+  agreement_type: "per_driver" | "fixed" | "percentage";
+  agreement_amount: number;
+  auto_pay_enabled: boolean;
+  auto_pay_day: number | null;
+  auto_pay_amount: number | null;
+  is_active: boolean;
+  notes: string | null;
+  driver_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssociationPayout = {
+  id: string;
+  association_id: string;
+  period_month: number;
+  period_year: number;
+  driver_count: number;
+  platform_fees: number;
+  subscription_fees: number;
+  statement_fees: number;
+  total_revenue: number;
+  payout_amount: number;
+  bank_name: string | null;
+  account_number: string | null;
+  account_holder: string | null;
+  reference: string | null;
+  status: "pending" | "paid" | "cancelled";
+  paid_at: string | null;
+  paid_by: string | null;
+  paid_by_name: string | null;
+  notes: string | null;
+  created_at: string;
 };

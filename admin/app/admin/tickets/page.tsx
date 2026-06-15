@@ -153,10 +153,6 @@ export default function TicketsPage() {
           method: "PATCH", headers: authHeaders(),
           body: JSON.stringify({ status: "resolved" }),
         });
-      } else if (ticket.type === "refund") {
-        await fetch(`${BASE}/api/admin/refunds/${ticket.id}/approve`, {
-          method: "POST", headers: authHeaders(),
-        });
       } else if (ticket.type === "flagged") {
         await fetch(`${BASE}/api/admin/users/${ticket.user_id}/unflag`, {
           method: "POST", headers: authHeaders(),
@@ -282,7 +278,7 @@ export default function TicketsPage() {
 
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <span className="text-textDim text-[10px] whitespace-nowrap">{formatDate(t.created_at)}</span>
-                        {!isRes && (
+                        {!isRes && t.type !== "refund" && (
                           <div onClick={ev => ev.stopPropagation()}>
                             <Button
                               onClick={() => handleResolve(t)}
@@ -328,13 +324,13 @@ export default function TicketsPage() {
                               <RotateCcw size={11} /> Open in Refunds
                             </a>
                           )}
-                          {!isRes && (
+                          {!isRes && t.type !== "refund" && (
                             <button
                               onClick={() => handleResolve(t)}
                               disabled={resolvingId === t.id}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-green/20 bg-green/10 text-green text-xs font-bold hover:bg-green/20 transition-colors disabled:opacity-50">
                               <CheckCircle size={11} />
-                              {resolvingId === t.id ? "Resolving..." : `Mark ${t.type === "refund" ? "Approved" : "Resolved"}`}
+                              {resolvingId === t.id ? "Resolving..." : "Mark Resolved"}
                             </button>
                           )}
                         </div>

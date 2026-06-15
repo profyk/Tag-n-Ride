@@ -6,12 +6,24 @@ import { formatZAR, formatDate } from "@/lib/utils";
 import {
   Banknote, Lock, Unlock, PlusCircle, MinusCircle, X,
   Search, Download, RefreshCw, AlertCircle, History,
+  ArrowUpRight, ArrowDownLeft, ExternalLink, SortAsc, SortDesc,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import Link from "next/link";
 import { api, WalletEntry, Transaction } from "@/lib/api";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
 type RoleFilter = "all" | "driver" | "passenger" | "owner";
+type SortDir = "asc" | "desc" | null;
+
+const FREEZE_PRESETS = [
+  "Suspicious activity",
+  "Fraud investigation",
+  "Compliance hold",
+  "User requested freeze",
+  "Chargeback risk",
+  "Account verification required",
+];
 
 function txTone(type: string) {
   if (["payment", "ride", "topup"].includes(type)) return "green";
@@ -27,6 +39,10 @@ export default function WalletOpsPage() {
   const [search, setSearch] = useState("");
   const [filterFrozen, setFilterFrozen] = useState<"all" | "frozen" | "active">("all");
   const [filterRole, setFilterRole] = useState<RoleFilter>("all");
+  const [sortBalance, setSortBalance] = useState<SortDir>(null);
+
+  // Keyed by "userId_action" — prevents double-clicks
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Modals
   const [selected, setSelected] = useState<WalletEntry | null>(null);
@@ -54,10 +70,12 @@ export default function WalletOpsPage() {
     const token = await dangerPin.request();
     if (!token) return;
     const frozenList = allWallets.filter(w => w.is_frozen);
+    setActionLoading("bulk");
     let done = 0;
     for (const w of frozenList) {
       try { await api.unfreezeWalletAdmin(w.user_id); done++; } catch {}
     }
+    setActionLoading(null);
     toast.success(`${done}/${frozenList.length} wallets unfrozen`);
     const r = await api.wallets(); setAllWallets(r.data);
   };
@@ -65,7 +83,7 @@ export default function WalletOpsPage() {
   const load = () => {
     setLoading(true);
     setError(null);
-    api.wallets({})
+    api.wallets()
       .then((r) => setAllWallets(r.data))
       .catch((e: Error) => {
         setError(e.message);
@@ -76,30 +94,37 @@ export default function WalletOpsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const wallets = useMemo(() => allWallets.filter((w) => {
-    const q = search.toLowerCase();
-    const matchesSearch =
-      !q ||
-      w.full_name.toLowerCase().includes(q) ||
-      w.phone_number.includes(q) ||
-      w.role.toLowerCase().includes(q);
-    const matchesFrozen =
-      filterFrozen === "all" ||
-      (filterFrozen === "frozen" && w.is_frozen) ||
-      (filterFrozen === "active" && !w.is_frozen);
-    const matchesRole = filterRole === "all" || w.role === filterRole;
-    return matchesSearch && matchesFrozen && matchesRole;
-  }), [allWallets, search, filterFrozen, filterRole]);
+  const wallets = useMemo(() => {
+    let list = allWallets.filter((w) => {
+      const q = search.toLowerCase();
+      const matchesSearch =
+        !q ||
+        w.full_name.toLowerCase().includes(q) ||
+        w.phone_number.includes(q) ||
+        w.role.toLowerCase().includes(q);
+      const matchesFrozen =
+        filterFrozen === "all" ||
+        (filterFrozen === "frozen" && w.is_frozen) ||
+        (filterFrozen === "active" && !w.is_frozen);
+      const matchesRole = filterRole === "all" || w.role === filterRole;
+      return matchesSearch && matchesFrozen && matchesRole;
+    });
+    if (sortBalance === "asc") list = [...list].sort((a, b) => a.balance - b.balance);
+    if (sortBalance === "desc") list = [...list].sort((a, b) => b.balance - a.balance);
+    return list;
+  }, [allWallets, search, filterFrozen, filterRole, sortBalance]);
 
   const toggleFreeze = async (w: WalletEntry) => {
     if (w.is_frozen) {
       const token = await dangerPin.request();
       if (!token) return;
+      setActionLoading(`${w.user_id}_unfreeze`);
       try {
         await api.unfreezeWalletAdmin(w.user_id);
         toast.success(`${w.full_name}'s wallet unfrozen`);
         load();
       } catch (e: any) { toast.error(e.message); }
+      finally { setActionLoading(null); }
     } else {
       setSelected(w);
       setFreezeReason("");
@@ -111,20 +136,27 @@ export default function WalletOpsPage() {
     if (!freezeReason.trim()) { toast.error("Provide a freeze reason"); return; }
     const token = await dangerPin.request();
     if (!token) return;
+    setActionLoading(`${selected!.user_id}_freeze`);
     try {
       await api.freezeWalletAdmin(selected!.user_id, freezeReason);
       toast.success(`${selected!.full_name}'s wallet frozen`);
       setFreezeModal(false);
       load();
     } catch (e: any) { toast.error(e.message); }
+    finally { setActionLoading(null); }
   };
 
   const handleAdjust = async () => {
     const amt = parseFloat(adjustAmount);
     if (isNaN(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!adjustNote.trim()) { toast.error("Provide a reason"); return; }
+    if (adjustType === "debit" && amt > (selected?.balance ?? 0)) {
+      toast.error(`Cannot debit more than current balance (${formatZAR(selected?.balance ?? 0)})`);
+      return;
+    }
     const token = await dangerPin.request();
     if (!token) return;
+    setActionLoading(`${selected!.user_id}_adjust`);
     try {
       const finalAmt = adjustType === "debit" ? -amt : amt;
       const res = await api.adjustWallet(selected!.user_id, finalAmt, adjustNote);
@@ -134,6 +166,7 @@ export default function WalletOpsPage() {
       setAdjustNote("");
       load();
     } catch (e: any) { toast.error(e.message); }
+    finally { setActionLoading(null); }
   };
 
   const openTxHistory = async (w: WalletEntry) => {
@@ -175,6 +208,17 @@ export default function WalletOpsPage() {
   const frozenBalance = frozenList.reduce((s, w) => s + w.balance, 0);
 
   const roleCount = (role: string) => allWallets.filter((w) => w.role === role).length;
+  const roleBalance = (role: string) =>
+    allWallets.filter((w) => w.role === role).reduce((s, w) => s + w.balance, 0);
+
+  // Adjust modal computed values
+  const adjAmt = parseFloat(adjustAmount) || 0;
+  const adjOverdraft = adjustType === "debit" && adjAmt > (selected?.balance ?? 0);
+  const previewBalance = selected
+    ? adjustType === "credit"
+      ? selected.balance + adjAmt
+      : selected.balance - adjAmt
+    : 0;
 
   return (
     <AdminShell title="Wallet Operations">
@@ -198,7 +242,9 @@ export default function WalletOpsPage() {
             <div className="flex items-center gap-3">
               <Lock size={15} className="text-red" />
               <div>
-                <p className="text-red text-sm font-bold">{frozenList.length} wallet{frozenList.length !== 1 ? "s" : ""} frozen</p>
+                <p className="text-red text-sm font-bold">
+                  {frozenList.length} wallet{frozenList.length !== 1 ? "s" : ""} frozen
+                </p>
                 <p className="text-textMuted text-xs">{formatZAR(frozenBalance)} total locked balance</p>
               </div>
             </div>
@@ -206,8 +252,15 @@ export default function WalletOpsPage() {
               <Button variant="secondary" onClick={() => setFilterFrozen("frozen")}>
                 <Lock size={13} /> View Frozen
               </Button>
-              <Button variant="danger" onClick={() => setBulkUnfreezeConfirm(true)}>
-                <Unlock size={13} /> Bulk Unfreeze All
+              <Button
+                variant="danger"
+                onClick={() => setBulkUnfreezeConfirm(true)}
+                disabled={actionLoading === "bulk"}
+              >
+                {actionLoading === "bulk"
+                  ? <RefreshCw size={13} className="animate-spin" />
+                  : <Unlock size={13} />}
+                Bulk Unfreeze All
               </Button>
             </div>
           </div>
@@ -221,7 +274,6 @@ export default function WalletOpsPage() {
               <h2 className="text-text font-bold">Wallet Management</h2>
             </div>
             <div className="flex gap-2 items-center flex-wrap">
-              {/* Search */}
               <div className="relative">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-textDim" />
                 <input
@@ -240,7 +292,6 @@ export default function WalletOpsPage() {
                 )}
               </div>
 
-              {/* Status filter */}
               <div className="flex gap-1">
                 {(["all", "active", "frozen"] as const).map((f) => (
                   <button
@@ -268,14 +319,14 @@ export default function WalletOpsPage() {
             </div>
           </div>
 
-          {/* Role tabs */}
+          {/* Role tabs with balance totals */}
           <div className="flex gap-1 mb-4 border-b border-border pb-3 flex-wrap">
             {([
-              { value: "all", label: `All (${allWallets.length})` },
-              { value: "driver", label: `Drivers (${roleCount("driver")})` },
-              { value: "passenger", label: `Passengers (${roleCount("passenger")})` },
-              { value: "owner", label: `Owners (${roleCount("owner")})` },
-            ] as { value: RoleFilter; label: string }[]).map(({ value, label }) => (
+              { value: "all" as RoleFilter, label: "All", count: allWallets.length, bal: totalBalance },
+              { value: "driver" as RoleFilter, label: "Drivers", count: roleCount("driver"), bal: roleBalance("driver") },
+              { value: "passenger" as RoleFilter, label: "Passengers", count: roleCount("passenger"), bal: roleBalance("passenger") },
+              { value: "owner" as RoleFilter, label: "Owners", count: roleCount("owner"), bal: roleBalance("owner") },
+            ]).map(({ value, label, count, bal }) => (
               <button
                 key={value}
                 onClick={() => setFilterRole(value)}
@@ -285,7 +336,7 @@ export default function WalletOpsPage() {
                     : "bg-bg3 text-textMuted border-border hover:text-text"
                 }`}
               >
-                {label}
+                {label} ({count}) · {formatZAR(bal)}
               </button>
             ))}
           </div>
@@ -303,7 +354,8 @@ export default function WalletOpsPage() {
               <AlertCircle size={28} className="text-red" />
               <p className="text-red font-semibold text-sm">{error}</p>
               <p className="text-textMuted text-xs max-w-xs">
-                This usually means the admin account lacks <code className="text-textDim">manage_users</code> or{" "}
+                This usually means the admin account lacks{" "}
+                <code className="text-textDim">manage_users</code> or{" "}
                 <code className="text-textDim">freeze_wallet</code> permission.
               </p>
               <Button variant="secondary" onClick={load}>
@@ -321,83 +373,101 @@ export default function WalletOpsPage() {
             </div>
           ) : (
             <Table
-              headers={["User", "Role", "Balance", "Status", "Last Updated", "Actions"]}
+              headers={[
+                "User",
+                "Role",
+                <button
+                  key="balance-sort"
+                  onClick={() => setSortBalance(s => s === "desc" ? "asc" : "desc")}
+                  className="flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-textMuted hover:text-cyan transition-colors"
+                >
+                  Balance
+                  {sortBalance === "desc" ? <SortDesc size={11} /> : <SortAsc size={11} />}
+                </button>,
+                "Status",
+                "Last Updated",
+                "Actions",
+              ]}
               empty={false}
             >
-              {wallets.map((w) => (
-                <Tr key={w.user_id}>
-                  <Td>
-                    <p className="font-semibold">{w.full_name}</p>
-                    <p className="text-[10px] text-textMuted font-mono">{w.phone_number}</p>
-                  </Td>
-                  <Td>
-                    <Badge
-                      label={w.role}
-                      tone={w.role === "driver" ? "green" : w.role === "owner" ? "purple" : "cyan"}
-                    />
-                  </Td>
-                  <Td
-                    className={`font-bold text-lg ${
-                      w.is_frozen ? "text-textMuted line-through" : "text-green"
-                    }`}
-                  >
-                    {formatZAR(w.balance)}
-                  </Td>
-                  <Td>
-                    {w.is_frozen ? (
-                      <div>
-                        <Badge label="frozen" tone="red" />
-                        {w.frozen_reason && (
-                          <p
-                            className="text-[10px] text-textMuted mt-0.5 max-w-[150px] truncate"
-                            title={w.frozen_reason}
-                          >
-                            {w.frozen_reason}
-                          </p>
-                        )}
+              {wallets.map((w) => {
+                const isActing = !!actionLoading?.startsWith(w.user_id);
+                return (
+                  <Tr key={w.user_id}>
+                    <Td>
+                      <p className="font-semibold">{w.full_name}</p>
+                      <p className="text-[10px] text-textMuted font-mono">{w.phone_number}</p>
+                    </Td>
+                    <Td>
+                      <Badge
+                        label={w.role}
+                        tone={w.role === "driver" ? "green" : w.role === "owner" ? "purple" : "cyan"}
+                      />
+                    </Td>
+                    <Td className={`font-bold text-lg ${w.is_frozen ? "text-textMuted line-through" : "text-green"}`}>
+                      {formatZAR(w.balance)}
+                    </Td>
+                    <Td>
+                      {w.is_frozen ? (
+                        <div>
+                          <Badge label="frozen" tone="red" />
+                          {w.frozen_reason && (
+                            <p
+                              className="text-[10px] text-textMuted mt-0.5 max-w-[150px] truncate"
+                              title={w.frozen_reason}
+                            >
+                              {w.frozen_reason}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <Badge label="active" tone="green" />
+                      )}
+                    </Td>
+                    <Td className="text-textMuted text-xs">{formatDate(w.updated_at)}</Td>
+                    <Td>
+                      <div className="flex gap-1.5 flex-wrap">
+                        <Button variant="ghost" onClick={() => openTxHistory(w)} title="Transaction history">
+                          <History size={13} />
+                        </Button>
+                        <Link href={`/admin/support?q=${encodeURIComponent(w.phone_number)}`}>
+                          <Button variant="ghost" title="View in Support">
+                            <ExternalLink size={13} />
+                          </Button>
+                        </Link>
+                        <Button
+                          variant={w.is_frozen ? "secondary" : "ghost"}
+                          onClick={() => toggleFreeze(w)}
+                          title={w.is_frozen ? "Unfreeze wallet" : "Freeze wallet"}
+                          disabled={isActing}
+                        >
+                          {isActing && actionLoading?.endsWith("_unfreeze") ? (
+                            <RefreshCw size={13} className="animate-spin" />
+                          ) : w.is_frozen ? (
+                            <Unlock size={13} />
+                          ) : (
+                            <Lock size={13} className="text-red" />
+                          )}
+                          {w.is_frozen ? "Unfreeze" : "Freeze"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          disabled={isActing}
+                          onClick={() => {
+                            setSelected(w);
+                            setAdjustModal(true);
+                            setAdjustAmount("");
+                            setAdjustNote("");
+                            setAdjustType("credit");
+                          }}
+                        >
+                          <PlusCircle size={13} /> Adjust
+                        </Button>
                       </div>
-                    ) : (
-                      <Badge label="active" tone="green" />
-                    )}
-                  </Td>
-                  <Td className="text-textMuted text-xs">{formatDate(w.updated_at)}</Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      <Button
-                        variant="ghost"
-                        onClick={() => openTxHistory(w)}
-                        title="View transaction history"
-                      >
-                        <History size={13} />
-                      </Button>
-                      <Button
-                        variant={w.is_frozen ? "secondary" : "ghost"}
-                        onClick={() => toggleFreeze(w)}
-                        title={w.is_frozen ? "Unfreeze wallet" : "Freeze wallet"}
-                      >
-                        {w.is_frozen ? (
-                          <Unlock size={13} />
-                        ) : (
-                          <Lock size={13} className="text-red" />
-                        )}
-                        {w.is_frozen ? "Unfreeze" : "Freeze"}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          setSelected(w);
-                          setAdjustModal(true);
-                          setAdjustAmount("");
-                          setAdjustNote("");
-                          setAdjustType("credit");
-                        }}
-                      >
-                        <PlusCircle size={13} /> Adjust
-                      </Button>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
+                    </Td>
+                  </Tr>
+                );
+              })}
             </Table>
           )}
         </Card>
@@ -413,6 +483,21 @@ export default function WalletOpsPage() {
           <p className="text-sm text-textMuted">
             This will prevent all transactions on the wallet until unfrozen.
           </p>
+          <div className="flex flex-wrap gap-1.5">
+            {FREEZE_PRESETS.map(p => (
+              <button
+                key={p}
+                onClick={() => setFreezeReason(p)}
+                className={`text-[10px] px-2 py-1 rounded-md border transition-all ${
+                  freezeReason === p
+                    ? "bg-red/10 text-red border-red/20"
+                    : "bg-bg3 text-textMuted border-border hover:text-text"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
           <div>
             <label className="block text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1.5">
               Freeze Reason *
@@ -427,8 +512,11 @@ export default function WalletOpsPage() {
             <Button variant="secondary" onClick={() => setFreezeModal(false)}>
               Cancel
             </Button>
-            <Button variant="danger" onClick={confirmFreeze}>
-              <Lock size={13} /> Freeze Wallet
+            <Button variant="danger" onClick={confirmFreeze} disabled={!!actionLoading}>
+              {actionLoading?.endsWith("_freeze")
+                ? <RefreshCw size={13} className="animate-spin" />
+                : <Lock size={13} />}
+              Freeze Wallet
             </Button>
           </div>
         </div>
@@ -441,12 +529,10 @@ export default function WalletOpsPage() {
         title={`Adjust Wallet — ${selected?.full_name}`}
       >
         <div className="space-y-4">
-          <p className="text-sm text-textMuted">
-            Current balance:{" "}
-            <span className="text-green font-bold">
-              {selected && formatZAR(selected.balance)}
-            </span>
-          </p>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-textMuted">Current balance</span>
+            <span className="text-green font-bold">{selected && formatZAR(selected.balance)}</span>
+          </div>
           <div className="flex gap-3">
             {(["credit", "debit"] as const).map((t) => (
               <button
@@ -460,11 +546,9 @@ export default function WalletOpsPage() {
                     : "bg-bg3 text-textMuted border-border"
                 }`}
               >
-                {t === "credit" ? (
-                  <PlusCircle size={14} className="inline mr-1" />
-                ) : (
-                  <MinusCircle size={14} className="inline mr-1" />
-                )}
+                {t === "credit"
+                  ? <PlusCircle size={14} className="inline mr-1" />
+                  : <MinusCircle size={14} className="inline mr-1" />}
                 {t}
               </button>
             ))}
@@ -492,22 +576,34 @@ export default function WalletOpsPage() {
               onChange={(e) => setAdjustNote(e.target.value)}
             />
           </div>
-          {adjustType === "debit" && adjustAmount && parseFloat(adjustAmount) > (selected?.balance ?? 0) && (
+          {adjAmt > 0 && (
+            <div className={`flex items-center justify-between p-3 rounded-xl border text-sm ${
+              adjOverdraft ? "bg-red/5 border-red/20" : "bg-bg3 border-border"
+            }`}>
+              <span className="text-textMuted text-xs">New balance after {adjustType}</span>
+              <span className={`font-black ${
+                adjOverdraft ? "text-red" : adjustType === "credit" ? "text-green" : "text-yellow"
+              }`}>
+                {formatZAR(Math.max(0, previewBalance))}
+              </span>
+            </div>
+          )}
+          {adjOverdraft && (
             <p className="text-xs text-red flex items-center gap-1.5">
               <AlertCircle size={12} />
-              Amount exceeds current balance ({formatZAR(selected?.balance ?? 0)})
+              Exceeds current balance — debit blocked
             </p>
           )}
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" onClick={() => setAdjustModal(false)}>
               Cancel
             </Button>
-            <Button onClick={handleAdjust}>
-              {adjustType === "credit" ? (
-                <PlusCircle size={13} />
-              ) : (
-                <MinusCircle size={13} />
-              )}
+            <Button onClick={handleAdjust} disabled={!!actionLoading || adjOverdraft}>
+              {actionLoading?.endsWith("_adjust")
+                ? <RefreshCw size={13} className="animate-spin" />
+                : adjustType === "credit"
+                ? <PlusCircle size={13} />
+                : <MinusCircle size={13} />}
               {adjustType === "credit" ? "Credit" : "Debit"} Wallet
             </Button>
           </div>
@@ -533,38 +629,53 @@ export default function WalletOpsPage() {
             <p className="text-center text-textMuted text-sm py-8">No transactions found</p>
           ) : (
             <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
-              {walletTxns.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between bg-bg3 rounded-lg px-3 py-2.5 gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge label={t.type} tone={txTone(t.type)} />
-                      <span className="text-[10px] font-mono text-textDim truncate">{t.reference}</span>
+              {walletTxns.map((t) => {
+                const isDebit = t.sender_id === selected?.user_id;
+                const isCredit =
+                  t.receiver_id === selected?.user_id ||
+                  (!t.sender_id && !t.receiver_id && ["topup", "adjustment"].includes(t.type));
+                return (
+                  <div
+                    key={t.id}
+                    className="flex items-center justify-between bg-bg3 rounded-lg px-3 py-2.5 gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge label={t.type} tone={txTone(t.type)} />
+                        <span className="text-[10px] font-mono text-textDim truncate">{t.reference}</span>
+                      </div>
+                      {t.note && (
+                        <p className="text-[10px] text-textMuted mt-0.5 truncate">{t.note}</p>
+                      )}
+                      <p className="text-[10px] text-textDim mt-0.5">{formatDate(t.created_at)}</p>
                     </div>
-                    {t.note && (
-                      <p className="text-[10px] text-textMuted mt-0.5 truncate">{t.note}</p>
-                    )}
-                    <p className="text-[10px] text-textDim mt-0.5">{formatDate(t.created_at)}</p>
+                    <div className="text-right shrink-0">
+                      <p className={`font-bold text-sm flex items-center justify-end gap-0.5 ${
+                        t.status !== "completed"
+                          ? "text-textMuted"
+                          : isDebit
+                          ? "text-red"
+                          : "text-green"
+                      }`}>
+                        {t.status === "completed" && (
+                          isDebit
+                            ? <ArrowUpRight size={12} />
+                            : isCredit
+                            ? <ArrowDownLeft size={12} />
+                            : null
+                        )}
+                        {isDebit ? "−" : isCredit ? "+" : ""}{formatZAR(t.amount)}
+                      </p>
+                      <Badge
+                        label={t.status}
+                        tone={
+                          t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"
+                        }
+                      />
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p
-                      className={`font-bold text-sm ${
-                        t.status === "completed" ? "text-green" : "text-textMuted"
-                      }`}
-                    >
-                      {formatZAR(t.amount)}
-                    </p>
-                    <Badge
-                      label={t.status}
-                      tone={
-                        t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"
-                      }
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           <div className="flex justify-end pt-1 border-t border-border">
@@ -576,18 +687,28 @@ export default function WalletOpsPage() {
       </Modal>
 
       {/* Bulk Unfreeze Confirmation Modal */}
-      <Modal open={bulkUnfreezeConfirm} onClose={() => setBulkUnfreezeConfirm(false)} title="Bulk Unfreeze Wallets">
+      <Modal
+        open={bulkUnfreezeConfirm}
+        onClose={() => setBulkUnfreezeConfirm(false)}
+        title="Bulk Unfreeze Wallets"
+      >
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-3 bg-yellow/5 border border-yellow/20 rounded-xl">
             <AlertCircle size={15} className="text-yellow flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-yellow text-sm font-semibold">Unfreeze {allWallets.filter(w => w.is_frozen).length} frozen wallets?</p>
-              <p className="text-textMuted text-xs mt-1">PIN confirmation required. All frozen users will immediately regain full transaction access.</p>
+              <p className="text-yellow text-sm font-semibold">
+                Unfreeze {allWallets.filter(w => w.is_frozen).length} frozen wallets?
+              </p>
+              <p className="text-textMuted text-xs mt-1">
+                PIN confirmation required. All frozen users will immediately regain full transaction access.
+              </p>
             </div>
           </div>
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" onClick={() => setBulkUnfreezeConfirm(false)}>Cancel</Button>
-            <Button onClick={doBulkUnfreeze}><Unlock size={12} /> Unfreeze All</Button>
+            <Button onClick={doBulkUnfreeze}>
+              <Unlock size={12} /> Unfreeze All
+            </Button>
           </div>
         </div>
       </Modal>

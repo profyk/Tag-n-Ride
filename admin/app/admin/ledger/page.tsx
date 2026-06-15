@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet,
-  ArrowUpRight, ArrowDownLeft, RefreshCw, CheckCircle,
+  ArrowUpRight, ArrowDownLeft, RefreshCw,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -36,13 +36,6 @@ export default function LedgerPage() {
   const [loading, setLoading] = useState(true);
   const [txnLoading, setTxnLoading] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
-  const [refundModal, setRefundModal] = useState(false);
-  const [refundSearch, setRefundSearch] = useState("");
-  const [refundUserName, setRefundUserName] = useState("");
-  const [refundSearching, setRefundSearching] = useState(false);
-  const [refundAmount, setRefundAmount] = useState("");
-  const [refundReason, setRefundReason] = useState("");
-  const [refunding, setRefunding] = useState(false);
 
   useEffect(() => {
     if (!hasPermission("view_ledger")) { router.push("/admin/dashboard"); return; }
@@ -74,51 +67,8 @@ export default function LedgerPage() {
     finally { setTxnLoading(false); }
   };
 
-  const handleRefundSearch = async (value: string) => {
-    setRefundSearch(value);
-    setRefundUserName("");
-    if (value.length < 3) return;
-    setRefundSearching(true);
-    try {
-      const res = await fetch(
-        `${BASE}/api/admin/support/user/${encodeURIComponent(value)}`,
-        { headers: authHeaders() }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user?.full_name) setRefundUserName(data.user.full_name);
-      }
-    } catch {}
-    finally { setRefundSearching(false); }
-  };
-
-  const handleRefund = async () => {
-    if (!refundSearch || !refundAmount || !refundReason) return;
-    setRefunding(true);
-    try {
-      const res = await fetch(`${BASE}/api/admin/ledger/refund`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          search: refundSearch,
-          amount: parseFloat(refundAmount),
-          reason: refundReason,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Refund failed");
-      toast.success(`Refund of ${formatZAR(parseFloat(refundAmount))} processed for ${refundUserName || refundSearch}${data?.reference ? ` · Ref: ${data.reference}` : ""}`);
-      setRefundModal(false);
-      setRefundSearch(""); setRefundUserName("");
-      setRefundAmount(""); setRefundReason("");
-      loadAll();
-    } catch (e: any) { toast.error(e.message); }
-    finally { setRefunding(false); }
-  };
-
   if (loading) return <AdminShell title="Ledger"><Spinner /></AdminShell>;
 
-  const canRefund = hasPermission("process_refunds");
   const netIncome = summary?.this_month
     ? summary.this_month.platform_revenue + summary.this_month.processing_fees - summary.this_month.gateway_fees_paid
     : 0;
@@ -192,14 +142,12 @@ export default function LedgerPage() {
           </div>
         </div>
 
-        {canRefund && (
-          <div className="flex justify-end">
-            <button onClick={() => setRefundModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-yellow/10 border border-yellow/20 rounded-lg text-yellow text-sm font-bold hover:bg-yellow/20 transition-all">
-              <RefreshCw size={14} /> Process Refund
-            </button>
-          </div>
-        )}
+        <div className="flex justify-end">
+          <a href="/admin/refunds" target="_blank"
+            className="flex items-center gap-2 px-4 py-2 bg-yellow/10 border border-yellow/20 rounded-lg text-yellow text-sm font-bold hover:bg-yellow/20 transition-all">
+            <RefreshCw size={14} /> Refund Center
+          </a>
+        </div>
 
         {(transactions.length > 0 || txnLoading) && (
           <Card>
@@ -259,82 +207,6 @@ export default function LedgerPage() {
         )}
       </div>
 
-      {refundModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-bg2 border border-border rounded-2xl p-6 w-full max-w-md">
-            <h2 className="text-text font-bold text-lg mb-4">Process Refund</h2>
-            <div className="space-y-4">
-
-              <div>
-                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">
-                  Phone Number or Name
-                </label>
-                <input
-                  value={refundSearch}
-                  onChange={e => handleRefundSearch(e.target.value)}
-                  placeholder="+27821234567 or John Doe"
-                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan"
-                />
-                {refundSearching && (
-                  <p className="text-textDim text-xs mt-1">Searching...</p>
-                )}
-                {refundUserName && !refundSearching && (
-                  <div className="mt-1.5 px-3 py-2 bg-green/10 border border-green/20 rounded-lg flex items-center gap-2">
-                    <CheckCircle size={12} className="text-green" />
-                    <span className="text-green text-xs font-bold">Found: {refundUserName}</span>
-                  </div>
-                )}
-                {refundSearch.length >= 3 && !refundUserName && !refundSearching && (
-                  <p className="text-red text-xs mt-1">User not found — check phone or name</p>
-                )}
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">
-                  Amount (ZAR)
-                </label>
-                <input
-                  value={refundAmount}
-                  onChange={e => setRefundAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                  placeholder="0.00"
-                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1 block">
-                  Reason
-                </label>
-                <textarea
-                  value={refundReason}
-                  onChange={e => setRefundReason(e.target.value)}
-                  placeholder="Reason for refund..."
-                  rows={3}
-                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-cyan resize-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setRefundModal(false);
-                  setRefundSearch(""); setRefundUserName("");
-                  setRefundAmount(""); setRefundReason("");
-                }}
-                className="flex-1 py-2.5 bg-bg3 border border-border rounded-lg text-textMuted text-sm font-bold hover:text-text transition-colors">
-                Cancel
-              </button>
-              <button
-                onClick={handleRefund}
-                disabled={refunding || !refundSearch || !refundUserName || !refundAmount || !refundReason}
-                className="flex-1 py-2.5 bg-yellow/20 border border-yellow/30 rounded-lg text-yellow text-sm font-bold disabled:opacity-50 hover:bg-yellow/30 transition-colors">
-                {refunding ? "Processing..." : "Process Refund"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </AdminShell>
   );
 }

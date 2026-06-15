@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Badge, Button, Spinner, Table, Tr, Td } from "@/components/ui";
-import { api, Driver, Transaction } from "@/lib/api";
+import { api, Driver, Transaction, TaxiAssociation, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ArrowLeft, CheckCircle, Star, Printer, Download } from "lucide-react";
+import { ArrowLeft, CheckCircle, Star, Printer, Download, Building2, X } from "lucide-react";
 import toast from "react-hot-toast";
 import QRCode from "qrcode";
 
@@ -67,20 +67,40 @@ export default function DriverDetailPage() {
   const [loading, setLoading] = useState(true);
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
 
+  const [associations, setAssociations] = useState<TaxiAssociation[]>([]);
+  const [assocId, setAssocId] = useState<string>("");
+  const [savingAssoc, setSavingAssoc] = useState(false);
+  const canManage = hasPermission("manage_drivers");
+
   useEffect(() => {
     if (!id) return;
     Promise.all([
       api.driver(id).then((r) => r.data).catch(() => null),
       api.transactions({ search: id }),
-    ]).then(async ([d, t]) => {
+      api.taxiAssociations().catch(() => ({ data: [] })),
+    ]).then(async ([d, t, assocs]) => {
       setDriver(d || null);
       setTxns(t.data.filter((tx) => tx.sender_id === id || tx.receiver_id === id));
+      setAssociations((assocs as any).data || []);
+      if (d?.taxi_association_id) setAssocId(d.taxi_association_id);
       if (d?.qr_code) {
         const url = await generateQRWithLogo(d.qr_code);
         setQrDataUrl(url);
       }
     }).finally(() => setLoading(false));
   }, [id]);
+
+  const saveAssociation = async () => {
+    if (!driver) return;
+    setSavingAssoc(true);
+    try {
+      await api.updateDriverAssociation(driver.user_id, assocId || null);
+      const assocName = associations.find(a => a.id === assocId)?.name;
+      toast.success(assocId ? `Linked to ${assocName}` : "Association removed");
+      setDriver({ ...driver, taxi_association_id: assocId || null });
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSavingAssoc(false); }
+  };
 
   const handleVerify = async () => {
     if (!driver) return;
@@ -356,6 +376,44 @@ export default function DriverDetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Taxi Association */}
+        <Card>
+          <div className="flex items-center gap-2 mb-4">
+            <Building2 size={16} className="text-cyan" />
+            <h3 className="text-text font-bold">Taxi Association</h3>
+          </div>
+          {driver.taxi_association_id && !assocId ? (
+            <p className="text-textMuted text-sm mb-3">
+              Currently linked to: <span className="text-cyan font-semibold">
+                {associations.find(a => a.id === driver.taxi_association_id)?.name || driver.taxi_association_id}
+              </span>
+            </p>
+          ) : null}
+          <div className="flex items-center gap-3">
+            <select
+              value={assocId}
+              onChange={e => setAssocId(e.target.value)}
+              disabled={!canManage}
+              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-cyan/40 disabled:opacity-50">
+              <option value="">— No association —</option>
+              {associations.map(a => (
+                <option key={a.id} value={a.id}>{a.name}{a.city ? ` (${a.city})` : ""}</option>
+              ))}
+            </select>
+            {canManage && (
+              <Button onClick={saveAssociation} disabled={savingAssoc} className="flex-shrink-0">
+                {savingAssoc ? <Spinner /> : <CheckCircle size={13} />}
+                {assocId ? "Link" : "Unlink"}
+              </Button>
+            )}
+          </div>
+          {associations.length === 0 && (
+            <p className="text-textDim text-xs mt-2">
+              No associations created yet. <a href="/admin/taxi-associations" className="text-cyan hover:underline">Create one here.</a>
+            </p>
+          )}
+        </Card>
 
         {/* Transaction history */}
         <Card>

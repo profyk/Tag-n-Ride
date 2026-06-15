@@ -471,6 +471,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(commission_auto_cashup_loop())
         asyncio.create_task(subscription_billing_loop())
         asyncio.create_task(maintenance_fee_billing_loop())
+        asyncio.create_task(association_auto_pay_loop())
     except Exception as e:
         print("DB connection failed:", e)
         pool = None
@@ -4833,6 +4834,62 @@ async def create_new_tables():
                 """)
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_dmrr_user ON dead_man_reset_requests(user_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_dmrr_status ON dead_man_reset_requests(status)")
+
+                # ── Taxi Associations ──────────────────────────────
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS taxi_associations (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        name TEXT NOT NULL,
+                        registration_number TEXT,
+                        contact_name TEXT,
+                        contact_phone TEXT,
+                        contact_email TEXT,
+                        province TEXT,
+                        city TEXT,
+                        bank_name TEXT,
+                        account_number TEXT,
+                        account_holder TEXT,
+                        branch_code TEXT,
+                        agreement_type TEXT NOT NULL DEFAULT 'per_driver',
+                        agreement_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        notes TEXT,
+                        created_by TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS association_payouts (
+                        id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        association_id TEXT NOT NULL REFERENCES taxi_associations(id) ON DELETE CASCADE,
+                        period_month INTEGER NOT NULL,
+                        period_year INTEGER NOT NULL,
+                        driver_count INTEGER NOT NULL DEFAULT 0,
+                        platform_fees NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        subscription_fees NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        statement_fees NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        total_revenue NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        payout_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                        bank_name TEXT,
+                        account_number TEXT,
+                        account_holder TEXT,
+                        reference TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        paid_at TIMESTAMPTZ,
+                        paid_by TEXT,
+                        paid_by_name TEXT,
+                        notes TEXT,
+                        created_by TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS taxi_association_id TEXT REFERENCES taxi_associations(id) ON DELETE SET NULL")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_assoc ON users(taxi_association_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_assoc_payouts_assoc ON association_payouts(association_id)")
+                await conn.execute("ALTER TABLE taxi_associations ADD COLUMN IF NOT EXISTS auto_pay_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+                await conn.execute("ALTER TABLE taxi_associations ADD COLUMN IF NOT EXISTS auto_pay_day INTEGER DEFAULT 25")
+                await conn.execute("ALTER TABLE taxi_associations ADD COLUMN IF NOT EXISTS auto_pay_amount NUMERIC(12,2) DEFAULT NULL")
 
         except Exception as e:
             print("New tables error:", e)
@@ -12188,6 +12245,78 @@ async def _run_maintenance_fee_billing() -> dict:
     log.info("[MAINTENANCE FEE] charged=%d skipped=%d total=%.2f", charged, skipped, total_collected)
     return {"ok": True, "charged": charged, "skipped": skipped, "total_collected": round(total_collected, 2)}
 
+async def association_auto_pay_loop():
+    """Daily loop: process auto-payments for taxi associations due today."""
+    await asyncio.sleep(90)  # startup delay
+    from datetime import date as _date
+    last_run_date = None
+    while True:
+        try:
+            if pool:
+                today = _date.today()
+                if last_run_date != today:
+                    async with pool.acquire() as conn:
+                        due = await conn.fetch("""
+                            SELECT * FROM taxi_associations
+                            WHERE auto_pay_enabled=TRUE AND is_active=TRUE AND auto_pay_day=$1
+                        """, today.day)
+                    for assoc in due:
+                        assoc_id = assoc["id"]
+                        try:
+                            async with pool.acquire() as conn:
+                                driver_ids = [r["id"] for r in await conn.fetch(
+                                    "SELECT id FROM users WHERE taxi_association_id=$1 AND role='driver'", assoc_id
+                                )]
+                                existing = await conn.fetchval("""
+                                    SELECT id FROM association_payouts
+                                    WHERE association_id=$1 AND period_month=$2 AND period_year=$3 AND status='paid'
+                                """, assoc_id, today.month, today.year)
+                                if existing:
+                                    continue
+                                pf = float(await conn.fetchval("""
+                                    SELECT COALESCE(SUM(platform_fee),0) FROM transactions
+                                    WHERE receiver_id=ANY($1::text[]) AND type='payment' AND status='completed'
+                                        AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+                                """, driver_ids, today.month, today.year) or 0)
+                                sf = float(await conn.fetchval("""
+                                    SELECT COALESCE(SUM(amount),0) FROM transactions
+                                    WHERE sender_id=ANY($1::text[]) AND type IN ('subscription_fee','subscription') AND status='completed'
+                                        AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+                                """, driver_ids, today.month, today.year) or 0) if driver_ids else 0.0
+                                stf = float(await conn.fetchval("""
+                                    SELECT COALESCE(SUM(amount),0) FROM transactions
+                                    WHERE sender_id=ANY($1::text[]) AND type='statement_fee' AND status='completed'
+                                        AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+                                """, driver_ids, today.month, today.year) or 0) if driver_ids else 0.0
+                                tnr_rev = pf + sf + stf
+                                if assoc["auto_pay_amount"] is not None:
+                                    amount = float(assoc["auto_pay_amount"])
+                                elif assoc["agreement_type"] == "percentage":
+                                    amount = tnr_rev * (float(assoc["agreement_amount"]) / 100)
+                                elif assoc["agreement_type"] == "per_driver":
+                                    amount = float(assoc["agreement_amount"]) * len(driver_ids)
+                                else:
+                                    amount = float(assoc["agreement_amount"])
+                                ref = gen_ref()
+                                await conn.execute("""
+                                    INSERT INTO association_payouts (
+                                        id, association_id, period_month, period_year, driver_count,
+                                        platform_fees, subscription_fees, statement_fees, total_revenue,
+                                        payout_amount, bank_name, account_number, account_holder,
+                                        reference, status, paid_at, paid_by, paid_by_name, notes, created_by
+                                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'paid',NOW(),$15,$16,$17,$18)
+                                """, str(uuid.uuid4()), assoc_id, today.month, today.year, len(driver_ids),
+                                    pf, sf, stf, tnr_rev, amount,
+                                    assoc["bank_name"], assoc["account_number"], assoc["account_holder"],
+                                    ref, "system", "Auto-Pay", "Monthly auto-payment", "system")
+                            log.info("[ASSOC AUTO-PAY] Paid %s — %s — ref %s", assoc["name"], amount, ref)
+                        except Exception as ex:
+                            log.error("[ASSOC AUTO-PAY] Failed for %s: %s", assoc["name"], ex)
+                    last_run_date = today
+        except Exception as e:
+            log.error("[ASSOC AUTO-PAY LOOP] %s", e)
+        await asyncio.sleep(3600)
+
 async def maintenance_fee_billing_loop():
     await asyncio.sleep(60)
     last_run_date = None
@@ -15195,6 +15324,634 @@ async def ticket_stats(admin: dict = Depends(require_admin)):
     return {"open": int(open_ct), "in_progress": int(in_progress), "waiting_user": int(waiting),
             "resolved_today": int(resolved_today), "urgent_open": int(urgent), "overdue": int(overdue)}
 
+
+# ════════════════════════════════════════════════════════════════
+# Revenue P&L
+# ════════════════════════════════════════════════════════════════
+
+@api.get("/admin/revenue/pnl")
+async def revenue_pnl(range: str = "30d", admin: dict = Depends(require_admin)):
+    from datetime import datetime as _dt, timedelta as _td
+    days = int(range.replace("d", "")) if range.endswith("d") else 30
+    from_date = _dt.utcnow() - _td(days=days)
+    async with pool.acquire() as conn:
+        # ── Income ───────────────────────────────────────────────
+        platform_fees = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(platform_fee), 0) FROM transactions
+            WHERE type='payment' AND status='completed' AND created_at >= $1
+        """, from_date) or 0)
+        subscription_rev = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount), 0) FROM transactions
+            WHERE type IN ('subscription_fee','subscription') AND status='completed' AND created_at >= $1
+        """, from_date) or 0)
+        statement_rev = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount), 0) FROM transactions
+            WHERE type='statement_fee' AND status='completed' AND created_at >= $1
+        """, from_date) or 0)
+        sos_rev = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount), 0) FROM transactions
+            WHERE type='sos_fee' AND status='completed' AND created_at >= $1
+        """, from_date) or 0)
+        maintenance_rev = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount), 0) FROM transactions
+            WHERE type='maintenance_fee' AND status='completed' AND created_at >= $1
+        """, from_date) or 0)
+        topup_fees = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount), 0) FROM transactions
+            WHERE type='topup_fee' AND status='completed' AND created_at >= $1
+        """, from_date) or 0)
+        withdrawal_fees = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(payout_fee), 0) FROM cashup_records
+            WHERE created_at >= $1
+        """, from_date) or 0)
+
+        gross_revenue = platform_fees + subscription_rev + statement_rev + sos_rev + maintenance_rev + topup_fees + withdrawal_fees
+
+        # ── Expenses ─────────────────────────────────────────────
+        assoc_paid = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(payout_amount), 0) FROM association_payouts
+            WHERE status='paid' AND paid_at >= $1
+        """, from_date) or 0)
+        salary_paid = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(net_amount), 0) FROM salary_payments
+            WHERE status='paid' AND paid_at >= $1
+        """, from_date) or 0)
+
+        # ── All-time totals ──────────────────────────────────────
+        assoc_paid_total = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(payout_amount), 0) FROM association_payouts WHERE status='paid'"
+        ) or 0)
+        salary_paid_total = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(net_amount), 0) FROM salary_payments WHERE status='paid'"
+        ) or 0)
+
+        # ── Pending obligations ──────────────────────────────────
+        pending_assoc = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(payout_amount), 0) FROM association_payouts WHERE status='pending'"
+        ) or 0)
+        pending_assoc_count = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM association_payouts WHERE status='pending'"
+        ) or 0)
+        pending_salary = float(await conn.fetchval(
+            "SELECT COALESCE(SUM(net_amount), 0) FROM salary_payments WHERE status IN ('approved','pending')"
+        ) or 0)
+        pending_salary_count = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM salary_payments WHERE status IN ('approved','pending')"
+        ) or 0)
+
+        # ── Per-association payout breakdown ─────────────────────
+        assoc_rows = await conn.fetch("""
+            SELECT ta.name, COALESCE(SUM(ap.payout_amount), 0) AS total_paid, COUNT(ap.id) AS payout_count
+            FROM taxi_associations ta
+            LEFT JOIN association_payouts ap ON ap.association_id = ta.id AND ap.status='paid' AND ap.paid_at >= $1
+            GROUP BY ta.id, ta.name
+            ORDER BY total_paid DESC
+        """, from_date)
+
+        total_expenses = assoc_paid + salary_paid
+        net_profit = gross_revenue - total_expenses
+        profit_margin = (net_profit / gross_revenue * 100) if gross_revenue > 0 else 0
+
+        return {
+            "period_days": days,
+            "gross_revenue": gross_revenue,
+            "income": {
+                "platform_fees": platform_fees,
+                "subscriptions": subscription_rev,
+                "statement_fees": statement_rev,
+                "sos_fees": sos_rev,
+                "maintenance_fees": maintenance_rev,
+                "topup_fees": topup_fees,
+                "withdrawal_fees": withdrawal_fees,
+            },
+            "expenses": {
+                "association_payouts": assoc_paid,
+                "salary_paid": salary_paid,
+                "total": total_expenses,
+            },
+            "net_profit": net_profit,
+            "profit_margin": profit_margin,
+            "all_time": {
+                "association_payouts": assoc_paid_total,
+                "salary_paid": salary_paid_total,
+            },
+            "pending": {
+                "association_payouts": pending_assoc,
+                "association_count": pending_assoc_count,
+                "salary": pending_salary,
+                "salary_count": pending_salary_count,
+                "total": pending_assoc + pending_salary,
+            },
+            "association_breakdown": [dict(r) for r in assoc_rows],
+        }
+
+# ════════════════════════════════════════════════════════════════
+# Taxi Associations
+# ════════════════════════════════════════════════════════════════
+
+class TaxiAssociationCreate(BaseModel):
+    name: str
+    registration_number: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_holder: Optional[str] = None
+    branch_code: Optional[str] = None
+    agreement_type: str = "per_driver"
+    agreement_amount: float = 0.0
+    auto_pay_enabled: bool = False
+    auto_pay_day: int = 25
+    auto_pay_amount: Optional[float] = None
+    notes: Optional[str] = None
+
+class TaxiAssociationUpdate(BaseModel):
+    name: Optional[str] = None
+    registration_number: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_holder: Optional[str] = None
+    branch_code: Optional[str] = None
+    agreement_type: Optional[str] = None
+    agreement_amount: Optional[float] = None
+    auto_pay_enabled: Optional[bool] = None
+    auto_pay_day: Optional[int] = None
+    auto_pay_amount: Optional[float] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+class AssociationPayNowIn(BaseModel):
+    period_month: Optional[int] = None
+    period_year: Optional[int] = None
+    amount: Optional[float] = None
+    notes: Optional[str] = None
+
+class AssociationPayoutCreate(BaseModel):
+    period_month: int
+    period_year: int
+    payout_amount: float
+    notes: Optional[str] = None
+
+class DriverAssociationUpdate(BaseModel):
+    association_id: Optional[str] = None
+
+@api.get("/admin/taxi-associations")
+async def list_taxi_associations(admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT ta.*,
+                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'driver' AND u.is_active = TRUE) AS driver_count
+            FROM taxi_associations ta
+            LEFT JOIN users u ON u.taxi_association_id = ta.id
+            GROUP BY ta.id
+            ORDER BY ta.name
+        """)
+        return [dict(r) for r in rows]
+
+@api.post("/admin/taxi-associations")
+async def create_taxi_association(body: TaxiAssociationCreate, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        id_ = str(uuid.uuid4())
+        await conn.execute("""
+            INSERT INTO taxi_associations (id, name, registration_number, contact_name, contact_phone,
+                contact_email, province, city, bank_name, account_number, account_holder, branch_code,
+                agreement_type, agreement_amount, auto_pay_enabled, auto_pay_day, auto_pay_amount,
+                notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        """, id_, body.name, body.registration_number, body.contact_name, body.contact_phone,
+            body.contact_email, body.province, body.city, body.bank_name, body.account_number,
+            body.account_holder, body.branch_code, body.agreement_type, body.agreement_amount,
+            body.auto_pay_enabled, body.auto_pay_day, body.auto_pay_amount,
+            body.notes, admin["id"])
+        await audit(conn, admin["id"], "taxi_association_created", id_, "taxi_association",
+                    {"name": body.name}, None)
+        return {"ok": True, "id": id_}
+
+@api.get("/admin/taxi-associations/{assoc_id}")
+async def get_taxi_association(assoc_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT ta.*,
+                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'driver' AND u.is_active = TRUE) AS driver_count
+            FROM taxi_associations ta
+            LEFT JOIN users u ON u.taxi_association_id = ta.id
+            WHERE ta.id = $1
+            GROUP BY ta.id
+        """, assoc_id)
+        if not row:
+            raise HTTPException(404, "Association not found")
+        return dict(row)
+
+@api.patch("/admin/taxi-associations/{assoc_id}")
+async def update_taxi_association(assoc_id: str, body: TaxiAssociationUpdate, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT id FROM taxi_associations WHERE id=$1", assoc_id)
+        if not existing:
+            raise HTTPException(404, "Association not found")
+        updates = {k: v for k, v in body.dict().items() if v is not None}
+        if not updates:
+            return {"ok": True}
+        set_clauses = ", ".join(f"{k}=${i+2}" for i, k in enumerate(updates.keys()))
+        await conn.execute(
+            f"UPDATE taxi_associations SET {set_clauses}, updated_at=NOW() WHERE id=$1",
+            assoc_id, *list(updates.values())
+        )
+        await audit(conn, admin["id"], "taxi_association_updated", assoc_id, "taxi_association", updates, None)
+        return {"ok": True}
+
+@api.delete("/admin/taxi-associations/{assoc_id}")
+async def delete_taxi_association(assoc_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT id, name FROM taxi_associations WHERE id=$1", assoc_id)
+        if not existing:
+            raise HTTPException(404, "Association not found")
+        await conn.execute("UPDATE users SET taxi_association_id=NULL WHERE taxi_association_id=$1", assoc_id)
+        await conn.execute("DELETE FROM taxi_associations WHERE id=$1", assoc_id)
+        await audit(conn, admin["id"], "taxi_association_deleted", assoc_id, "taxi_association",
+                    {"name": existing["name"]}, None)
+        return {"ok": True}
+
+@api.get("/admin/taxi-associations/{assoc_id}/drivers")
+async def get_association_drivers(assoc_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.id, u.full_name, u.phone_number, u.is_active, u.created_at,
+                COALESCE(SUM(t.amount) FILTER (WHERE t.type='payment' AND t.status='completed'), 0) AS total_ride_revenue,
+                COALESCE(SUM(t.platform_fee) FILTER (WHERE t.type='payment' AND t.status='completed'), 0) AS total_platform_fees,
+                COUNT(t.id) FILTER (WHERE t.type='payment' AND t.status='completed') AS ride_count
+            FROM users u
+            LEFT JOIN transactions t ON t.receiver_id = u.id
+            WHERE u.taxi_association_id = $1 AND u.role = 'driver'
+            GROUP BY u.id, u.full_name, u.phone_number, u.is_active, u.created_at
+            ORDER BY u.full_name
+        """, assoc_id)
+        return [dict(r) for r in rows]
+
+@api.get("/admin/taxi-associations/{assoc_id}/revenue")
+async def get_association_revenue(
+    assoc_id: str,
+    months: int = 12,
+    period_month: Optional[int] = None,
+    period_year: Optional[int] = None,
+    admin: dict = Depends(require_admin)
+):
+    async with pool.acquire() as conn:
+        driver_ids = [r["id"] for r in await conn.fetch(
+            "SELECT id FROM users WHERE taxi_association_id=$1 AND role='driver'", assoc_id
+        )]
+        if not driver_ids:
+            return {"monthly": [], "totals": {"platform_fees": 0, "subscription_fees": 0, "statement_fees": 0, "tnr_revenue": 0, "ride_revenue": 0, "total_rides": 0, "driver_count": 0}}
+
+        # Single-period mode: return detailed breakdown for one specific month/year
+        if period_month and period_year:
+            pf = await conn.fetchrow("""
+                SELECT COALESCE(SUM(platform_fee), 0) AS platform_fees,
+                       COALESCE(SUM(amount), 0) AS ride_revenue,
+                       COUNT(*) AS ride_count
+                FROM transactions
+                WHERE receiver_id = ANY($1::text[]) AND type='payment' AND status='completed'
+                    AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+            """, driver_ids, period_month, period_year)
+            sf = await conn.fetchval("""
+                SELECT COALESCE(SUM(amount), 0) FROM transactions
+                WHERE sender_id = ANY($1::text[]) AND type IN ('subscription_fee','subscription') AND status='completed'
+                    AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+            """, driver_ids, period_month, period_year)
+            stf = await conn.fetchval("""
+                SELECT COALESCE(SUM(amount), 0) FROM transactions
+                WHERE sender_id = ANY($1::text[]) AND type='statement_fee' AND status='completed'
+                    AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+            """, driver_ids, period_month, period_year)
+            platform_fees = float(pf["platform_fees"])
+            subscription_fees = float(sf or 0)
+            statement_fees = float(stf or 0)
+            tnr_revenue = platform_fees + subscription_fees + statement_fees
+            return {
+                "monthly": [],
+                "period": {"month": period_month, "year": period_year},
+                "totals": {
+                    "platform_fees": platform_fees,
+                    "subscription_fees": subscription_fees,
+                    "statement_fees": statement_fees,
+                    "tnr_revenue": tnr_revenue,
+                    "ride_revenue": float(pf["ride_revenue"]),
+                    "total_rides": int(pf["ride_count"]),
+                    "driver_count": len(driver_ids),
+                }
+            }
+
+        # Range mode: return last N months of monthly data
+        monthly = await conn.fetch("""
+            SELECT
+                DATE_TRUNC('month', t.created_at) AS month,
+                COALESCE(SUM(t.platform_fee), 0) AS platform_fees,
+                COALESCE(SUM(t.amount), 0) AS ride_revenue,
+                COUNT(*) AS ride_count
+            FROM transactions t
+            WHERE t.receiver_id = ANY($1::text[])
+                AND t.type = 'payment' AND t.status = 'completed'
+                AND t.created_at >= NOW() - ($2 || ' months')::interval
+            GROUP BY DATE_TRUNC('month', t.created_at)
+            ORDER BY month DESC
+        """, driver_ids, str(months))
+
+        sub_fees = await conn.fetch("""
+            SELECT
+                DATE_TRUNC('month', t.created_at) AS month,
+                COALESCE(SUM(t.amount), 0) AS sub_fees
+            FROM transactions t
+            WHERE t.sender_id = ANY($1::text[])
+                AND t.type IN ('subscription_fee', 'subscription') AND t.status = 'completed'
+                AND t.created_at >= NOW() - ($2 || ' months')::interval
+            GROUP BY DATE_TRUNC('month', t.created_at)
+        """, driver_ids, str(months))
+
+        stmt_fees = await conn.fetch("""
+            SELECT
+                DATE_TRUNC('month', t.created_at) AS month,
+                COALESCE(SUM(t.amount), 0) AS stmt_fees
+            FROM transactions t
+            WHERE t.sender_id = ANY($1::text[])
+                AND t.type = 'statement_fee' AND t.status = 'completed'
+                AND t.created_at >= NOW() - ($2 || ' months')::interval
+            GROUP BY DATE_TRUNC('month', t.created_at)
+        """, driver_ids, str(months))
+
+        sub_map = {r["month"]: float(r["sub_fees"]) for r in sub_fees}
+        stmt_map = {r["month"]: float(r["stmt_fees"]) for r in stmt_fees}
+
+        result = []
+        for r in monthly:
+            m = r["month"]
+            pf_val = float(r["platform_fees"])
+            sub_val = sub_map.get(m, 0.0)
+            stf_val = stmt_map.get(m, 0.0)
+            result.append({
+                "month": m.isoformat(),
+                "platform_fees": pf_val,
+                "ride_revenue": float(r["ride_revenue"]),
+                "ride_count": int(r["ride_count"]),
+                "subscription_fees": sub_val,
+                "statement_fees": stf_val,
+                "tnr_revenue": pf_val + sub_val + stf_val,
+            })
+
+        totals_row = await conn.fetchrow("""
+            SELECT COALESCE(SUM(platform_fee), 0) AS total_platform_fees,
+                   COALESCE(SUM(amount), 0) AS total_ride_revenue,
+                   COUNT(*) AS total_rides
+            FROM transactions
+            WHERE receiver_id = ANY($1::text[]) AND type = 'payment' AND status = 'completed'
+        """, driver_ids)
+
+        return {
+            "monthly": result,
+            "totals": {
+                "platform_fees": float(totals_row["total_platform_fees"]),
+                "ride_revenue": float(totals_row["total_ride_revenue"]),
+                "total_rides": int(totals_row["total_rides"]),
+                "driver_count": len(driver_ids),
+            }
+        }
+
+@api.get("/admin/taxi-associations/{assoc_id}/payouts")
+async def get_association_payouts(assoc_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT * FROM association_payouts
+            WHERE association_id = $1
+            ORDER BY period_year DESC, period_month DESC
+        """, assoc_id)
+        return [dict(r) for r in rows]
+
+@api.post("/admin/taxi-associations/{assoc_id}/payouts")
+async def create_association_payout(assoc_id: str, body: AssociationPayoutCreate, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        assoc = await conn.fetchrow("SELECT * FROM taxi_associations WHERE id=$1", assoc_id)
+        if not assoc:
+            raise HTTPException(404, "Association not found")
+        driver_ids = [r["id"] for r in await conn.fetch(
+            "SELECT id FROM users WHERE taxi_association_id=$1 AND role='driver'", assoc_id
+        )]
+        platform_fees = 0.0
+        subscription_fees = 0.0
+        statement_fees = 0.0
+        if driver_ids:
+            pf = await conn.fetchval("""
+                SELECT COALESCE(SUM(platform_fee), 0) FROM transactions
+                WHERE receiver_id = ANY($1::text[]) AND type='payment' AND status='completed'
+                    AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+            """, driver_ids, body.period_month, body.period_year)
+            platform_fees = float(pf or 0)
+            sf = await conn.fetchval("""
+                SELECT COALESCE(SUM(amount), 0) FROM transactions
+                WHERE sender_id = ANY($1::text[]) AND type IN ('subscription_fee','subscription') AND status='completed'
+                    AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+            """, driver_ids, body.period_month, body.period_year)
+            subscription_fees = float(sf or 0)
+            stf = await conn.fetchval("""
+                SELECT COALESCE(SUM(amount), 0) FROM transactions
+                WHERE sender_id = ANY($1::text[]) AND type='statement_fee' AND status='completed'
+                    AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+            """, driver_ids, body.period_month, body.period_year)
+            statement_fees = float(stf or 0)
+        total_revenue = platform_fees + subscription_fees + statement_fees
+        id_ = str(uuid.uuid4())
+        ref = gen_ref()
+        await conn.execute("""
+            INSERT INTO association_payouts (
+                id, association_id, period_month, period_year, driver_count,
+                platform_fees, subscription_fees, statement_fees, total_revenue,
+                payout_amount, bank_name, account_number, account_holder,
+                reference, status, notes, created_by
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',$15,$16)
+        """, id_, assoc_id, body.period_month, body.period_year, len(driver_ids),
+            platform_fees, subscription_fees, statement_fees, total_revenue,
+            body.payout_amount, assoc["bank_name"], assoc["account_number"], assoc["account_holder"],
+            ref, body.notes, admin["id"])
+        await audit(conn, admin["id"], "association_payout_created", assoc_id, "taxi_association",
+                    {"amount": body.payout_amount, "period": f"{body.period_year}-{body.period_month:02d}", "reference": ref}, None)
+        return {"ok": True, "id": id_, "reference": ref}
+
+@api.post("/admin/taxi-associations/{assoc_id}/pay-now")
+async def pay_association_now(assoc_id: str, body: AssociationPayNowIn, admin: dict = Depends(require_admin)):
+    """Create a payout record and immediately mark it paid."""
+    from datetime import datetime as _dt
+    now = _dt.utcnow()
+    period_month = body.period_month or now.month
+    period_year = body.period_year or now.year
+    async with pool.acquire() as conn:
+        assoc = await conn.fetchrow("SELECT * FROM taxi_associations WHERE id=$1", assoc_id)
+        if not assoc:
+            raise HTTPException(404, "Association not found")
+        if not assoc["bank_name"] or not assoc["account_number"]:
+            raise HTTPException(400, "Banking details missing — add bank name and account number first")
+
+        driver_ids = [r["id"] for r in await conn.fetch(
+            "SELECT id FROM users WHERE taxi_association_id=$1 AND role='driver'", assoc_id
+        )]
+
+        # Compute revenue for the period
+        platform_fees = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(platform_fee),0) FROM transactions
+            WHERE receiver_id=ANY($1::text[]) AND type='payment' AND status='completed'
+                AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+        """, driver_ids, period_month, period_year) or 0)
+        subscription_fees = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount),0) FROM transactions
+            WHERE sender_id=ANY($1::text[]) AND type IN ('subscription_fee','subscription') AND status='completed'
+                AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+        """, driver_ids, period_month, period_year) or 0) if driver_ids else 0.0
+        statement_fees = float(await conn.fetchval("""
+            SELECT COALESCE(SUM(amount),0) FROM transactions
+            WHERE sender_id=ANY($1::text[]) AND type='statement_fee' AND status='completed'
+                AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+        """, driver_ids, period_month, period_year) or 0) if driver_ids else 0.0
+        tnr_revenue = platform_fees + subscription_fees + statement_fees
+
+        # Calculate payout amount if not provided
+        if body.amount is not None:
+            payout_amount = body.amount
+        elif assoc["auto_pay_amount"] is not None:
+            payout_amount = float(assoc["auto_pay_amount"])
+        elif assoc["agreement_type"] == "percentage":
+            payout_amount = tnr_revenue * (float(assoc["agreement_amount"]) / 100)
+        elif assoc["agreement_type"] == "per_driver":
+            payout_amount = float(assoc["agreement_amount"]) * len(driver_ids)
+        else:
+            payout_amount = float(assoc["agreement_amount"])
+
+        id_ = str(uuid.uuid4())
+        ref = gen_ref()
+        await conn.execute("""
+            INSERT INTO association_payouts (
+                id, association_id, period_month, period_year, driver_count,
+                platform_fees, subscription_fees, statement_fees, total_revenue,
+                payout_amount, bank_name, account_number, account_holder,
+                reference, status, paid_at, paid_by, paid_by_name, notes, created_by
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'paid',NOW(),$15,$16,$17,$18)
+        """, id_, assoc_id, period_month, period_year, len(driver_ids),
+            platform_fees, subscription_fees, statement_fees, tnr_revenue,
+            payout_amount, assoc["bank_name"], assoc["account_number"], assoc["account_holder"],
+            ref, admin["id"], admin.get("full_name", "Admin"), body.notes, admin["id"])
+
+        await audit(conn, admin["id"], "association_pay_now", assoc_id, "taxi_association", {
+            "amount": payout_amount, "period": f"{period_year}-{period_month:02d}",
+            "reference": ref, "tnr_revenue": tnr_revenue,
+        }, None)
+        return {"ok": True, "id": id_, "reference": ref, "amount": payout_amount, "tnr_revenue": tnr_revenue}
+
+@api.post("/admin/taxi-associations/process-auto-payments")
+async def process_auto_association_payments(admin: dict = Depends(require_admin)):
+    """Manually trigger auto-payments for all associations due today."""
+    from datetime import datetime as _dt
+    today = _dt.utcnow()
+    results = []
+    async with pool.acquire() as conn:
+        due = await conn.fetch("""
+            SELECT * FROM taxi_associations
+            WHERE auto_pay_enabled=TRUE AND is_active=TRUE AND auto_pay_day=$1
+        """, today.day)
+        for assoc in due:
+            assoc_id = assoc["id"]
+            try:
+                driver_ids = [r["id"] for r in await conn.fetch(
+                    "SELECT id FROM users WHERE taxi_association_id=$1 AND role='driver'", assoc_id
+                )]
+                platform_fees = float(await conn.fetchval("""
+                    SELECT COALESCE(SUM(platform_fee),0) FROM transactions
+                    WHERE receiver_id=ANY($1::text[]) AND type='payment' AND status='completed'
+                        AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+                """, driver_ids, today.month, today.year) or 0)
+                subscription_fees = float(await conn.fetchval("""
+                    SELECT COALESCE(SUM(amount),0) FROM transactions
+                    WHERE sender_id=ANY($1::text[]) AND type IN ('subscription_fee','subscription') AND status='completed'
+                        AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+                """, driver_ids, today.month, today.year) or 0) if driver_ids else 0.0
+                statement_fees = float(await conn.fetchval("""
+                    SELECT COALESCE(SUM(amount),0) FROM transactions
+                    WHERE sender_id=ANY($1::text[]) AND type='statement_fee' AND status='completed'
+                        AND EXTRACT(MONTH FROM created_at)=$2 AND EXTRACT(YEAR FROM created_at)=$3
+                """, driver_ids, today.month, today.year) or 0) if driver_ids else 0.0
+                tnr_revenue = platform_fees + subscription_fees + statement_fees
+
+                if assoc["auto_pay_amount"] is not None:
+                    payout_amount = float(assoc["auto_pay_amount"])
+                elif assoc["agreement_type"] == "percentage":
+                    payout_amount = tnr_revenue * (float(assoc["agreement_amount"]) / 100)
+                elif assoc["agreement_type"] == "per_driver":
+                    payout_amount = float(assoc["agreement_amount"]) * len(driver_ids)
+                else:
+                    payout_amount = float(assoc["agreement_amount"])
+
+                # Skip if already paid this month
+                existing = await conn.fetchval("""
+                    SELECT id FROM association_payouts
+                    WHERE association_id=$1 AND period_month=$2 AND period_year=$3 AND status='paid'
+                """, assoc_id, today.month, today.year)
+                if existing:
+                    results.append({"id": assoc_id, "name": assoc["name"], "skipped": True, "reason": "Already paid this month"})
+                    continue
+
+                id_ = str(uuid.uuid4())
+                ref = gen_ref()
+                await conn.execute("""
+                    INSERT INTO association_payouts (
+                        id, association_id, period_month, period_year, driver_count,
+                        platform_fees, subscription_fees, statement_fees, total_revenue,
+                        payout_amount, bank_name, account_number, account_holder,
+                        reference, status, paid_at, paid_by, paid_by_name, notes, created_by
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'paid',NOW(),$15,$16,$17,$18)
+                """, id_, assoc_id, today.month, today.year, len(driver_ids),
+                    platform_fees, subscription_fees, statement_fees, tnr_revenue,
+                    payout_amount, assoc["bank_name"], assoc["account_number"], assoc["account_holder"],
+                    ref, "system", "Auto-Pay", "Monthly auto-payment", "system")
+                await audit(conn, admin["id"], "association_auto_paid", assoc_id, "taxi_association", {
+                    "amount": payout_amount, "reference": ref, "tnr_revenue": tnr_revenue,
+                }, None)
+                results.append({"id": assoc_id, "name": assoc["name"], "paid": True, "amount": payout_amount, "reference": ref})
+            except Exception as ex:
+                results.append({"id": assoc_id, "name": assoc["name"], "error": str(ex)})
+    return {"ok": True, "processed": len(results), "results": results}
+
+@api.patch("/admin/taxi-associations/{assoc_id}/payouts/{payout_id}/mark-paid")
+async def mark_association_payout_paid(assoc_id: str, payout_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM association_payouts WHERE id=$1 AND association_id=$2", payout_id, assoc_id
+        )
+        if not row:
+            raise HTTPException(404, "Payout not found")
+        await conn.execute("""
+            UPDATE association_payouts SET status='paid', paid_at=NOW(), paid_by=$1, paid_by_name=$2
+            WHERE id=$3
+        """, admin["id"], admin.get("full_name", "Admin"), payout_id)
+        await audit(conn, admin["id"], "association_payout_paid", assoc_id, "taxi_association",
+                    {"payout_id": payout_id}, None)
+        return {"ok": True}
+
+@api.patch("/admin/users/{user_id}/taxi-association")
+async def update_driver_taxi_association(user_id: str, body: DriverAssociationUpdate, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id FROM users WHERE id=$1", user_id)
+        if not user:
+            raise HTTPException(404, "User not found")
+        if body.association_id:
+            assoc = await conn.fetchrow("SELECT id FROM taxi_associations WHERE id=$1", body.association_id)
+            if not assoc:
+                raise HTTPException(404, "Association not found")
+        await conn.execute("UPDATE users SET taxi_association_id=$1 WHERE id=$2", body.association_id, user_id)
+        await audit(conn, admin["id"], "driver_association_updated", user_id, "user",
+                    {"association_id": body.association_id}, None)
+        return {"ok": True}
 
 # ════════════════════════════════════════════════════════════════
 # Must be last line
