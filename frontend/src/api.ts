@@ -92,6 +92,17 @@ export const api = {
       body: JSON.stringify({ vehicle_plate }),
     }),
 
+  getTaxiAssociations: () =>
+    request<{ associations: { id: string; name: string; city?: string; province?: string }[]; my_association_id: string | null }>(
+      "/api/driver/taxi-associations"
+    ),
+
+  updateMyAssociation: (association_id: string | null) =>
+    request<{ ok: boolean }>("/api/driver/association", {
+      method: "PATCH",
+      body: JSON.stringify({ association_id }),
+    }),
+
   // ── Wallet ──
   wallet: () => request<Wallet>("/api/wallet"),
 

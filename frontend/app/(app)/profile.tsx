@@ -76,11 +76,20 @@ const APP_VERSION = "1.0.0";export default function Profile() {
   const [passengerTrip, setPassengerTrip] = useState<any | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
 
+  const [associations, setAssociations] = useState<{ id: string; name: string; city?: string; province?: string }[]>([]);
+  const [assocId, setAssocId] = useState<string | null>(null);
+  const [assocModal, setAssocModal] = useState(false);
+  const [savingAssoc, setSavingAssoc] = useState(false);
+
   useEffect(() => {
     if (state.status === "authed") {
       if (state.user.role === "driver") {
         setPlate(state.user.vehicle_plate || "");
         loadPayoutAccounts();
+        api.getTaxiAssociations().then(r => {
+          setAssociations(r.associations);
+          setAssocId(r.my_association_id);
+        }).catch(() => {});
       }
       if (state.user.role === "driver" || state.user.role === "owner") {
         loadKycStatus();
@@ -152,6 +161,20 @@ const APP_VERSION = "1.0.0";export default function Profile() {
     } finally {
       setSharingLocation(false);
     }
+  };
+
+  const saveAssociation = async (selectedId: string | null) => {
+    setSavingAssoc(true);
+    try {
+      await api.updateMyAssociation(selectedId);
+      setAssocId(selectedId);
+      setAssocModal(false);
+      Alert.alert("Saved", selectedId
+        ? `You are now linked to ${associations.find(a => a.id === selectedId)?.name}`
+        : "Association removed");
+    } catch (e: any) {
+      Alert.alert("Could not save", e?.message || "");
+    } finally { setSavingAssoc(false); }
   };
 
   const savePlate = async () => {
@@ -419,6 +442,33 @@ const APP_VERSION = "1.0.0";export default function Profile() {
               </View>
             )}
           </View>
+        )}
+
+        {/* Taxi Association */}
+        {isDriver && (
+          <>
+            <Text style={s.section}>TAXI ASSOCIATION</Text>
+            <TouchableOpacity
+              style={[s.payoutRow, {
+                borderColor: assocId ? colors.cyan + "60" : colors.border,
+                borderWidth: assocId ? 1.5 : 1,
+              }]}
+              onPress={() => setAssocModal(true)}
+              activeOpacity={0.7}
+              testID="assoc-btn">
+              <View style={[s.payoutIcon, { backgroundColor: assocId ? colors.cyanDim : colors.bg2 }]}>
+                <Ionicons name="business-outline" size={18} color={assocId ? colors.cyan : colors.textMuted} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.payoutLabel}>My Taxi Association</Text>
+                {assocId
+                  ? <Text style={s.payoutSub}>{associations.find(a => a.id === assocId)?.name || "Linked"}</Text>
+                  : <Text style={s.payoutEmpty}>Not set — tap to select</Text>}
+              </View>
+              <Ionicons name={assocId ? "checkmark-circle" : "add-circle-outline"} size={20}
+                color={assocId ? colors.cyan : colors.textMuted} />
+            </TouchableOpacity>
+          </>
         )}
 
         {/* Payout accounts */}
@@ -855,6 +905,54 @@ const APP_VERSION = "1.0.0";export default function Profile() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* Taxi association picker */}
+      <Modal visible={assocModal} transparent animationType="slide" onRequestClose={() => setAssocModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { maxHeight: "75%" }]}>
+            <View style={s.modalHandle} />
+            <View style={[s.modalIconWrap, { backgroundColor: colors.cyanDim }]}>
+              <Ionicons name="business-outline" size={26} color={colors.cyan} />
+            </View>
+            <Text style={s.modalTitle}>Taxi Association</Text>
+            <Text style={s.modalSub}>Select the association you drive under. Your admin will use this for monthly payments.</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={[s.bankOption, !assocId && s.bankOptionActive]}
+                onPress={() => saveAssociation(null)}
+                disabled={savingAssoc}>
+                <Text style={[s.bankOptionText, !assocId && { color: colors.cyan }]}>— None / Independent —</Text>
+                {!assocId && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+              </TouchableOpacity>
+              {associations.map(assoc => (
+                <TouchableOpacity
+                  key={assoc.id}
+                  style={[s.bankOption, assocId === assoc.id && s.bankOptionActive]}
+                  onPress={() => saveAssociation(assoc.id)}
+                  disabled={savingAssoc}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.bankOptionText, assocId === assoc.id && { color: colors.cyan }]}>{assoc.name}</Text>
+                    {(assoc.city || assoc.province) && (
+                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>{[assoc.city, assoc.province].filter(Boolean).join(", ")}</Text>
+                    )}
+                  </View>
+                  {assocId === assoc.id && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+                  {savingAssoc && assocId !== assoc.id && null}
+                </TouchableOpacity>
+              ))}
+              {associations.length === 0 && (
+                <Text style={{ color: colors.textMuted, textAlign: "center", padding: 20, fontSize: 13 }}>
+                  No associations available yet
+                </Text>
+              )}
+            </ScrollView>
+            {savingAssoc && <ActivityIndicator color={colors.cyan} style={{ marginTop: 12 }} />}
+            <TouchableOpacity onPress={() => setAssocModal(false)} style={{ alignItems: "center", paddingVertical: 14 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Bank picker */}

@@ -1170,6 +1170,40 @@ async def update_driver_profile(body: DriverProfileIn, user: dict = Depends(get_
             await conn.execute("UPDATE users SET id_number=$1 WHERE id=$2", body.id_number.strip(), user["id"])
     return {"ok": True}
 
+@api.get("/driver/taxi-associations")
+async def driver_list_taxi_associations(user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, city, province FROM taxi_associations ORDER BY name"
+        )
+        my = await conn.fetchrow(
+            "SELECT taxi_association_id FROM users WHERE id=$1", user["id"]
+        )
+    return {
+        "associations": [dict(r) for r in rows],
+        "my_association_id": my["taxi_association_id"] if my else None,
+    }
+
+@api.patch("/driver/association")
+async def driver_update_association(
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    if user["role"] != "driver":
+        raise HTTPException(status_code=403, detail="Driver only")
+    assoc_id = body.get("association_id") or None
+    async with pool.acquire() as conn:
+        if assoc_id:
+            exists = await conn.fetchval(
+                "SELECT id FROM taxi_associations WHERE id=$1", assoc_id
+            )
+            if not exists:
+                raise HTTPException(status_code=404, detail="Association not found")
+        await conn.execute(
+            "UPDATE users SET taxi_association_id=$1 WHERE id=$2", assoc_id, user["id"]
+        )
+    return {"ok": True}
+
 # ── Wallet ───────────────────────────────────────────────────
 @api.get("/wallet")
 async def get_wallet(user: dict = Depends(get_current_user)):
