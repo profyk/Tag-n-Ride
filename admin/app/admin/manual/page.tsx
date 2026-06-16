@@ -1,1440 +1,1611 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import {
-  Search, ChevronDown, ChevronRight,
-  LayoutDashboard, Bell, ArrowLeftRight, FileText,
-  Users, Car, Truck, Users2, Fingerprint, UserCheck,
-  Repeat2, Percent, PieChart, BarChart3, FileWarning, MinusCircle, Building2,
-  Landmark, Scale, Wallet, TrendingUp, BookOpen, RefreshCw, RotateCcw,
-  AlertOctagon, Banknote, Calculator, Tag, Settings, DollarSign, Download,
-  Activity, Shield, AlertTriangle, FolderLock,
-  ClipboardList, ShieldAlert, Gauge, Zap, ShieldCheck,
-  Megaphone, MessageCircle, Mail, Target, Star,
-  HelpCircle, Terminal, Database, Rocket, Brain,
-  MapPin, Globe, Cpu, Monitor,
+  Search, BookOpen, ChevronDown, ChevronRight, ChevronUp,
+  AlertTriangle, Info, Lightbulb, CheckCircle, XCircle,
+  Smartphone, Car, Users, Users2, Truck, Shield, ShieldCheck,
+  Wallet, CreditCard, QrCode, ArrowLeftRight, TrendingUp,
+  BarChart3, Settings, Bell, FileText, Fingerprint, Building2,
+  Banknote, Calculator, Scale, RefreshCw, RotateCcw, Download,
+  MapPin, Activity, Terminal, Database, Zap, Star,
+  Phone, Lock, Eye, UserCheck, Percent, MinusCircle,
+  MessageCircle, Mail, Tag, Target, Globe, Cpu, Brain,
+  Landmark, BookMarked, Hash, List, AlertOctagon, PieChart,
+  Repeat2, FileWarning, FolderLock, ClipboardList, ShieldAlert,
+  Gauge, Megaphone, HelpCircle, DollarSign, Rocket, Monitor,
+  PrinterIcon, ArrowRight, Circle, Dot,
 } from "lucide-react";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DATA MODEL
+// ─────────────────────────────────────────────────────────────────────────────
 
-type ManualEntry = {
+type CalloutType = "info" | "tip" | "warning" | "important" | "success";
+
+type Block =
+  | { type: "para"; text: string }
+  | { type: "steps"; items: string[] }
+  | { type: "bullets"; items: string[] }
+  | { type: "callout"; kind: CalloutType; title?: string; text: string }
+  | { type: "table"; headers: string[]; rows: string[][] }
+  | { type: "divider" };
+
+type Section = {
   id: string;
   title: string;
-  icon: any;
+  icon?: any;
   path?: string;
-  what: string;
-  who?: string;
-  features: { label: string; detail: string }[];
+  blocks: Block[];
 };
 
-type ManualSection = {
+type Chapter = {
   id: string;
-  label: string;
+  number: string;
+  title: string;
+  subtitle: string;
   icon: any;
   color: string;
-  entries: ManualEntry[];
+  sections: Section[];
 };
 
-// ── Manual Content ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// MANUAL CONTENT
+// ─────────────────────────────────────────────────────────────────────────────
 
-const SECTIONS: ManualSection[] = [
-  // ══════════════════════════════════════════════════════════════
+const CHAPTERS: Chapter[] = [
+
+  // ════════════════════════════════════════════════════════════
   {
-    id: "overview",
-    label: "System Overview",
-    icon: LayoutDashboard,
+    id: "intro",
+    number: "01",
+    title: "Introduction to Tag n Ride",
+    subtitle: "What the platform is, who it serves, and why it exists",
+    icon: BookOpen,
     color: "text-cyan",
-    entries: [
+    sections: [
       {
         id: "what-is-tnr",
         title: "What is Tag n Ride?",
-        icon: LayoutDashboard,
-        what: "Tag n Ride is a cashless taxi payment platform for South Africa. Passengers load money into a digital wallet, then scan or tap a driver's QR code to pay for their trip instantly. No cash changes hands — the platform handles the entire transaction flow, with real-time settlement to drivers and vehicle owners.",
-        features: [
-          { label: "How a trip works", detail: "1. Passenger tops up their wallet via card or EFT. 2. They board a taxi and scan the driver's QR code using the TNR app. 3. They enter the trip fare amount and confirm with their PIN. 4. The driver receives funds in their wallet immediately. 5. Earnings can be cashed out (CashUp) to the driver's bank account." },
-          { label: "User roles in the app", detail: "Passenger — can top up and pay. Driver — receives payments, manages their QR card, belongs to a fleet owner and optionally a taxi association. Owner (Fleet Owner) — owns one or more vehicles/taxis, receives a share of driver earnings. Admin — manages the entire platform through this admin panel." },
-          { label: "Revenue model", detail: "TNR earns platform fees on each transaction (a percentage of the payment amount), monthly subscription fees from drivers, and statement download fees. All these streams are tracked in the Revenue & P&L page." },
+        blocks: [
+          { type: "para", text: "Tag n Ride (TNR) is South Africa's cashless taxi payment platform. It eliminates the need for physical cash in minibus taxis by providing a fast, secure, and transparent digital payment system that works entirely through a mobile application." },
+          { type: "para", text: "The core concept is simple: passengers load money into a digital wallet. When they board a taxi, they scan the driver's unique QR code using the TNR app, enter the fare amount, confirm with their PIN, and the payment is instantly transferred to the driver's wallet. No coins. No notes. No change disputes. No theft risk." },
+          { type: "callout", kind: "info", title: "The TNR Vision", text: "Tag n Ride was built to make South African public transport safer, faster, and more dignified for both drivers and passengers. Cash is a major source of crime targeting taxi drivers. TNR removes that risk entirely." },
+          { type: "steps", items: [
+            "Passenger registers on the TNR app and tops up their wallet using a card or EFT",
+            "Passenger boards a taxi and scans the driver's QR code",
+            "Passenger enters the trip fare amount and confirms with their 4-digit PIN",
+            "Driver receives the payment instantly in their TNR wallet",
+            "Driver can withdraw (CashUp) their earnings to their bank account at any time",
+          ]},
+        ],
+      },
+      {
+        id: "platform-roles",
+        title: "Who Uses Tag n Ride?",
+        blocks: [
+          { type: "para", text: "The TNR platform serves four distinct types of users, each with their own app experience and permissions:" },
+          { type: "table", headers: ["Role", "Who They Are", "What They Do"], rows: [
+            ["Passenger", "Anyone who rides in a taxi", "Top up wallet, scan QR code, pay for trips, view history, share live location"],
+            ["Driver", "Minibus taxi drivers", "Receive payments via QR code, view earnings, CashUp to bank, manage profile, use SafeRide"],
+            ["Fleet Owner", "Taxi vehicle owners", "Receive commission split from driver earnings, view fleet performance, manage driver roster"],
+            ["Admin", "TNR staff", "Manage the entire platform through the admin panel — users, finances, compliance, safety"],
+          ]},
+          { type: "callout", kind: "tip", title: "Driver-Mode Owners", text: "A Fleet Owner can also drive their own taxi. In this case they can switch to 'Driver Mode' in the app to receive payments directly, while still managing their other drivers from the Owner section." },
+        ],
+      },
+      {
+        id: "revenue-model",
+        title: "How Tag n Ride Makes Money",
+        blocks: [
+          { type: "para", text: "TNR earns revenue through three streams. Understanding this is important for everyone managing the finance pages in the admin panel." },
+          { type: "table", headers: ["Revenue Stream", "What It Is", "Who Pays"], rows: [
+            ["Platform Fee", "A small percentage deducted from each passenger payment", "Deducted automatically from every transaction"],
+            ["Subscription Fee", "Monthly fee charged to active drivers to use the platform", "Billed automatically from the driver's wallet"],
+            ["Statement Fee", "Fee charged when a driver downloads their monthly earnings statement", "Deducted when the driver requests a statement"],
+          ]},
+          { type: "callout", kind: "important", title: "TNR Revenue vs. Gross Volume", text: "Gross Volume is the total rand value of all payments flowing through the platform (what passengers pay). TNR Revenue is only the platform fees and subscriptions — the portion TNR keeps. These are very different numbers." },
+        ],
+      },
+      {
+        id: "tech-overview",
+        title: "Technical Overview",
+        blocks: [
+          { type: "para", text: "Tag n Ride is built on modern, reliable technology designed for scale and performance across South Africa's mobile network." },
+          { type: "bullets", items: [
+            "Mobile App — React Native (Expo) — runs natively on both Android and iOS from a single codebase",
+            "Admin Panel — Next.js 14 (React) — the web dashboard you are reading this manual in",
+            "Backend API — FastAPI (Python) — the server that processes all transactions and business logic",
+            "Database — PostgreSQL — stores all user data, transactions, and platform records",
+            "Payments — Paystack integration — handles card top-ups and bank payouts for South African banks",
+            "Infrastructure — Railway.app cloud hosting — automatic scaling, 99.9% uptime",
+          ]},
+          { type: "callout", kind: "tip", title: "The API", text: "The backend runs at https://tag-n-ride-production.up.railway.app. All app screens and admin pages communicate with this server via secure HTTPS requests. The admin panel authenticates using a JWT token stored in your browser." },
+        ],
+      },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "passenger",
+    number: "02",
+    title: "The Passenger Experience",
+    subtitle: "Complete walkthrough of every passenger screen and feature",
+    icon: Users2,
+    color: "text-purple",
+    sections: [
+      {
+        id: "passenger-registration",
+        title: "Registration & Login",
+        blocks: [
+          { type: "para", text: "A new passenger downloads the Tag n Ride app from the Google Play Store or Apple App Store. The registration process takes under two minutes." },
+          { type: "steps", items: [
+            "Open the app — the Welcome screen appears with two options: 'I'm a Passenger' and 'I'm a Driver/Owner'",
+            "Tap 'I'm a Passenger'",
+            "Enter your First Name, Surname, and South African cellphone number (e.g. 082 123 4567)",
+            "Create a 4-digit PIN — this is used to confirm every payment and secure your account",
+            "Tap 'Create Account' — your account is created instantly",
+            "You are now on the Home screen with an empty wallet",
+          ]},
+          { type: "callout", kind: "important", title: "Remember Your PIN", text: "Your 4-digit PIN is the key to your wallet. Never share it with anyone — not even Tag n Ride staff. If you forget it, contact support to have a reset sent to your registered phone number." },
+          { type: "para", text: "Returning passengers log in with their phone number and PIN. There is no email or password required — just your phone number and the PIN you created." },
+        ],
+      },
+      {
+        id: "passenger-topup",
+        title: "Topping Up Your Wallet",
+        blocks: [
+          { type: "para", text: "The TNR wallet works like a prepaid account. You add money to it before you travel, then spend from it each trip. There is no minimum top-up amount and no expiry on your balance." },
+          { type: "steps", items: [
+            "On the Home screen, tap the 'Top Up' button (or the + icon on your balance card)",
+            "Enter the amount you want to add — minimum R10, maximum R5,000 per transaction",
+            "Select your payment method: Card (instant) or EFT (takes 1–2 business days)",
+            "For card payments: enter your card details on the secure Paystack payment page",
+            "For EFT: use the provided banking details and use your name as the reference",
+            "Your wallet is credited immediately (card) or within 1–2 business days (EFT)",
+          ]},
+          { type: "callout", kind: "tip", title: "Top Up in Advance", text: "We recommend keeping at least R50 in your wallet. Top up the night before rather than at the taxi rank — you do not want to be stuck without balance when your taxi arrives." },
+          { type: "callout", kind: "info", title: "FICA Wallet Limits", text: "Until you complete identity verification (KYC), your wallet has spending and balance limits set by FICA regulations. Complete KYC in Settings to unlock higher limits." },
+        ],
+      },
+      {
+        id: "passenger-payment",
+        title: "Paying for a Trip",
+        blocks: [
+          { type: "para", text: "Paying a driver with Tag n Ride takes less than 15 seconds. There are two ways to do it: scan the driver's QR code, or enter the driver's TNR code manually." },
+          { type: "steps", items: [
+            "Board the taxi and locate the driver's Tag n Ride QR card (displayed on the dashboard or sun visor)",
+            "Open the TNR app and tap 'Pay' or point the camera at the QR code",
+            "The app automatically reads the QR code and shows the driver's name — verify this is correct",
+            "Type in the fare amount agreed with the driver (e.g. R12.50)",
+            "Review the payment summary: Driver Name, Amount, and your remaining balance after",
+            "Enter your 4-digit PIN to confirm the payment",
+            "The payment processes instantly — you see a green confirmation screen",
+            "The driver's phone buzzes with a payment notification",
+          ]},
+          { type: "callout", kind: "warning", title: "Always Verify the Driver Name", text: "Before confirming payment, check that the name shown matches the driver in the taxi. Never pay if the name is unfamiliar — someone may have placed a fake QR code." },
+          { type: "callout", kind: "tip", title: "No QR Code? Use the Driver's Code", text: "If the QR card is damaged or missing, tap 'Pay' then 'Enter Code Manually'. Ask the driver for their TNR code (a short alphanumeric code on their card) and type it in." },
+        ],
+      },
+      {
+        id: "passenger-history",
+        title: "Viewing Transaction History",
+        blocks: [
+          { type: "para", text: "Every payment and top-up is recorded permanently. You can view your full history at any time." },
+          { type: "steps", items: [
+            "Tap the 'History' tab or 'Transactions' from the home screen",
+            "All payments are listed in chronological order — newest first",
+            "Each entry shows: Date, Driver Name, Amount Paid, and a Status badge",
+            "Tap any entry to see full details including transaction reference number",
+          ]},
+          { type: "para", text: "If you need a formal statement of your spending — for example for an expense claim or tax purposes — tap 'Statement' in your profile. You can download a PDF for any month." },
+        ],
+      },
+      {
+        id: "passenger-safety",
+        title: "Passenger Safety Features",
+        blocks: [
+          { type: "para", text: "Tag n Ride has built-in safety features for passengers travelling in taxis." },
+          { type: "bullets", items: [
+            "Share Live Location — when you are in a SafeRide trip, a 'Share Live Location' button appears in your profile. Tap it to generate a real-time tracking link you can send to family or friends via WhatsApp. They can watch your journey live without having the TNR app.",
+            "SafeRide Profile — go to Profile → SafeRide Profile to set up your emergency contacts and personal safety information. This information is available to the TNR safety team if an SOS is triggered.",
+            "SOS Alert — if you are in danger, access the SOS feature in the app. It alerts the TNR safety team with your live location.",
+          ]},
+          { type: "callout", kind: "important", title: "Dead Man Code (Passenger)", text: "You can set a Dead Man Code in your profile — a secret fake PIN. If someone forces you to 'cancel' an SOS, enter this code instead of your real PIN. It looks like you cancelled but actually keeps the SOS active invisibly and alerts the TNR safety team. Never share this code with anyone." },
+        ],
+      },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "driver",
+    number: "03",
+    title: "The Driver Experience",
+    subtitle: "Everything a driver needs to know — registration to CashUp",
+    icon: Car,
+    color: "text-cyan",
+    sections: [
+      {
+        id: "driver-registration",
+        title: "Driver Registration",
+        blocks: [
+          { type: "para", text: "Driver registration is a two-part process: creating the account and completing identity verification (KYC). The driver can receive payments after creating the account, but CashOut (withdrawing to bank) requires completed KYC." },
+          { type: "steps", items: [
+            "Download the Tag n Ride app and tap 'I'm a Driver/Owner'",
+            "Select 'Driver'",
+            "Enter your Full Name, Surname, South African cellphone number",
+            "Enter your Vehicle Registration Plate (e.g. ND 123 456)",
+            "Create your 4-digit PIN — this secures all your transactions",
+            "Tap 'Create Account'",
+            "Your unique QR code is generated immediately",
+            "To receive withdrawals, complete KYC (see KYC section below)",
+          ]},
+          { type: "callout", kind: "important", title: "Vehicle Plate", text: "Your vehicle plate is printed on your QR card and displayed to passengers. If you change vehicles, update your plate in Profile → Vehicle Plate immediately." },
+        ],
+      },
+      {
+        id: "driver-qr",
+        title: "Your QR Code — The Most Important Thing",
+        blocks: [
+          { type: "para", text: "Your QR code is your payment identity. Every passenger who scans it pays directly to your wallet. Treat it like cash — display it prominently and protect it." },
+          { type: "bullets", items: [
+            "Printed card — have the admin print your QR card from your driver profile page in the admin panel. The card shows your name, vehicle plate, TNR code, and a scannable QR code with the TNR logo.",
+            "In-app QR — tap the 'My QR' tab in the app to show your QR code on-screen. Passengers can scan the screen directly.",
+            "Placement — display your printed card on the dashboard, sun visor, or back of the seat in front of passengers.",
+            "Multiple copies — print backup cards in case one gets damaged. The admin can reprint at any time.",
+          ]},
+          { type: "callout", kind: "warning", title: "Protect Your QR Code", text: "Never let someone photograph your QR code who is not a genuine passenger about to pay. Anyone who has your QR code can send payments to your account, but they cannot withdraw your money without your PIN." },
+          { type: "callout", kind: "tip", title: "TNR Code", text: "Your TNR code (a short alphanumeric string like TNR-ABCD1234) is printed on your card. Give this to passengers who cannot scan QR codes so they can type it in manually." },
+        ],
+      },
+      {
+        id: "driver-receiving",
+        title: "Receiving a Payment",
+        blocks: [
+          { type: "para", text: "When a passenger pays you, you receive an instant notification and your wallet balance increases immediately. No internet connection is required to display your QR code — it is a static image." },
+          { type: "steps", items: [
+            "Passenger opens their TNR app and scans your QR card",
+            "They enter the fare amount and confirm with their PIN",
+            "Your phone vibrates and shows a payment notification: 'R12.50 received from [Passenger Name]'",
+            "Your wallet balance is updated instantly",
+            "You can see the payment in your Home screen under Recent Transactions",
+          ]},
+          { type: "callout", kind: "info", title: "What if my phone is off?", text: "The payment still processes on TNR's servers. When you next open the app with internet connection, your balance will reflect all payments received. You do not miss payments if your phone is off or has no data." },
+        ],
+      },
+      {
+        id: "driver-cashup",
+        title: "CashUp — Withdrawing Your Earnings",
+        blocks: [
+          { type: "para", text: "CashUp is the process of withdrawing your TNR wallet balance to your personal or owner bank account. You need to set up at least one payout account in your profile before you can CashUp." },
+          { type: "steps", items: [
+            "In Profile → Payout Accounts, add your bank details: bank name, account number, and account name",
+            "You can set two accounts: 'My Account' (your personal bank) and 'Owner Account' (if your owner receives their cut separately)",
+            "When ready to withdraw, tap 'CashUp' on the Home screen",
+            "Enter the amount you want to withdraw",
+            "Select which account to withdraw to",
+            "Confirm with your PIN",
+            "Your withdrawal request is submitted for processing",
+            "Funds appear in your bank account within 1–2 business days",
+          ]},
+          { type: "callout", kind: "important", title: "KYC Required for CashUp", text: "You must complete identity verification (KYC) before you can CashUp. This is a South African legal requirement (FICA). Submit your ID document and selfie through Profile → KYC Verification." },
+          { type: "callout", kind: "info", title: "Commission Split", text: "When your owner has a commission split configured, a portion of each payment goes directly to the owner's wallet automatically. Your wallet balance always shows your net amount after the split." },
+        ],
+      },
+      {
+        id: "driver-kyc",
+        title: "KYC — Identity Verification",
+        blocks: [
+          { type: "para", text: "KYC (Know Your Customer) is the legal identity verification process required by South African law before anyone can withdraw money from a financial platform. It takes 5 minutes and is reviewed within 24 hours." },
+          { type: "steps", items: [
+            "Go to Profile → KYC Verification",
+            "Take a clear photo of your South African ID book or Smart ID card — front and back",
+            "Take a clear selfie holding your ID next to your face",
+            "Submit — you will see status 'Under Review'",
+            "The admin team reviews your documents within 24 hours",
+            "You receive a notification when approved or if you need to resubmit",
+          ]},
+          { type: "callout", kind: "tip", title: "Good Photo Tips", text: "Take photos in good lighting. Ensure all text on your ID is clearly readable. If your submission is rejected, you will be told exactly what was wrong and can resubmit." },
+        ],
+      },
+      {
+        id: "driver-association",
+        title: "Taxi Association",
+        blocks: [
+          { type: "para", text: "If you drive under a registered taxi association, you can declare this in your profile. This links you to the association for monthly payout tracking and reporting." },
+          { type: "steps", items: [
+            "Go to Profile → scroll to 'TAXI ASSOCIATION'",
+            "Tap the 'My Taxi Association' card",
+            "A bottom sheet opens listing all registered associations",
+            "Tap your association to select it — it saves immediately",
+            "Your association name now shows on the card",
+            "To change it, tap again and select a different one",
+            "To remove the link, select 'None / Independent'",
+          ]},
+          { type: "callout", kind: "info", title: "Why Does This Matter?", text: "The admin uses your association link to calculate monthly payments. If your association has an agreement with TNR (e.g., TNR pays them R50 per driver per month, or 5% of revenue from your rides), that calculation only works if you are properly linked." },
+        ],
+      },
+      {
+        id: "driver-saferide-use",
+        title: "SafeRide for Drivers",
+        blocks: [
+          { type: "para", text: "SafeRide allows drivers to declare an active trip so that their route and location is tracked. If something goes wrong, the TNR safety team can see exactly where they are." },
+          { type: "steps", items: [
+            "Tap Profile → Trip Centre (or the Trip Centre tab)",
+            "Tap 'Start SafeRide Trip'",
+            "Select the passenger count and route if prompted",
+            "Your location is now being tracked live",
+            "If you need help, press the SOS button — the TNR Command Centre is alerted instantly",
+            "At the end of the trip, tap 'End Trip'",
+          ]},
+          { type: "callout", kind: "important", title: "Dead Man Code for Drivers", text: "Set up your Dead Man Code in Profile → Emergency Safety. If you are hijacked and someone forces you to cancel an SOS, enter this code instead of your real PIN. The SOS continues silently and the team is alerted. This could save your life." },
+        ],
+      },
+      {
+        id: "driver-profile-full",
+        title: "Driver Profile — Every Setting Explained",
+        blocks: [
+          { type: "para", text: "The Profile screen is your control centre. Here is every section explained:" },
+          { type: "table", headers: ["Section", "What It Does"], rows: [
+            ["IDENTITY VERIFICATION", "KYC status. Tap to submit or check the status of your ID verification"],
+            ["VEHICLE PLATE", "Your current vehicle plate. Tap the pencil icon to edit. Update whenever you change vehicles"],
+            ["TAXI ASSOCIATION", "The association you drive under. Tap to select from the list or remove the link"],
+            ["PAYOUT ACCOUNTS", "My Account: your personal bank for CashUp. Owner Account: your owner's bank if they receive payment directly"],
+            ["FLEET — Switch Owner", "Request a transfer to a new fleet owner. Admin must approve before it takes effect"],
+            ["APPEARANCE", "Toggle between dark mode, light mode, and system default"],
+            ["ACCOUNT — SafeRide Profile", "Set emergency contacts and medical information. Used if an SOS is triggered"],
+            ["ACCOUNT — Trip Centre", "Start and manage SafeRide trips"],
+            ["ACCOUNT — Inbox", "View notifications and official documents sent by TNR"],
+            ["ACCOUNT — Transaction History", "All your payments received"],
+            ["ACCOUNT — Payslip & Statement", "Download your monthly earnings statement"],
+            ["ACCOUNT — Change PIN", "Change your 4-digit security PIN. Requires current PIN"],
+            ["EMERGENCY SAFETY — Dead Man Code", "Set your secret emergency code. Critical safety feature — see SafeRide chapter"],
+            ["SUPPORT — WhatsApp Support", "Opens WhatsApp chat with TNR support directly from the app"],
+            ["Sign Out", "Logs you out. You will need your phone number and PIN to log back in"],
+          ]},
+        ],
+      },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "owner",
+    number: "04",
+    title: "The Fleet Owner Experience",
+    subtitle: "Managing your vehicles, drivers, and earnings as an owner",
+    icon: Truck,
+    color: "text-cyan",
+    sections: [
+      {
+        id: "owner-registration",
+        title: "Owner Registration & Login",
+        blocks: [
+          { type: "para", text: "Fleet Owners register differently from drivers and passengers — they use an email address and password instead of a phone number and PIN. This is because owners often manage their fleet from a computer." },
+          { type: "steps", items: [
+            "On the Welcome screen, tap 'I'm a Driver/Owner' then select 'Fleet Owner'",
+            "Enter your Business Name, Full Name, Email Address, and create a Password",
+            "Optionally enter your South African cellphone number",
+            "Tap 'Create Account'",
+            "Log in using your email and password",
+          ]},
+          { type: "callout", kind: "info", title: "Owner vs. Driver Login", text: "Owners log in with email + password. Drivers log in with phone number + PIN. If you own taxis but also drive, register as an Owner and use the 'Driver Mode' toggle to switch between both modes." },
+        ],
+      },
+      {
+        id: "owner-dashboard",
+        title: "Owner Dashboard",
+        blocks: [
+          { type: "para", text: "The owner home screen shows a real-time overview of their entire fleet." },
+          { type: "bullets", items: [
+            "Total Earnings — cumulative commission earned across all drivers",
+            "Active Drivers — number of drivers currently registered under your ownership",
+            "Today's Revenue — today's total payments across your fleet",
+            "Driver Roster — list of all your linked drivers with their current status",
+          ]},
+        ],
+      },
+      {
+        id: "owner-drivers",
+        title: "Managing Drivers",
+        blocks: [
+          { type: "para", text: "Drivers are assigned to an owner by the admin using the Transfer or Commission Split tools in the admin panel. As an owner, you can view your driver roster and their earnings." },
+          { type: "bullets", items: [
+            "Driver list — tap any driver to see their total earnings, rating, vehicle plate, and recent transactions",
+            "Commission split — the percentage split between you and each driver is set by the admin. Contact your TNR admin to adjust splits",
+            "Adding a driver — new drivers must register and then request a transfer to your fleet through the app. The admin approves the transfer",
+            "Removing a driver — contact the admin to transfer a driver out of your fleet",
+          ]},
+        ],
+      },
+      {
+        id: "owner-cashup",
+        title: "Owner CashUp",
+        blocks: [
+          { type: "para", text: "Commission earnings accumulate in your owner wallet. Withdraw them the same way as a driver — tap CashUp, enter the amount, and confirm." },
+          { type: "callout", kind: "important", title: "KYC for Owners", text: "Owners must also complete KYC (identity verification) before they can withdraw. Go to Profile → KYC Verification." },
+          { type: "callout", kind: "tip", title: "Driver Mode", text: "If you also drive your own taxi, tap 'Switch to Driver Mode' in the owner dashboard. In driver mode, you receive payments via your own QR code. Your driver earnings and owner commission go into separate wallets." },
+        ],
+      },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "admin-intro",
+    number: "05",
+    title: "Admin Panel Overview",
+    subtitle: "How to navigate the admin panel and who can access what",
+    icon: Monitor,
+    color: "text-cyan",
+    sections: [
+      {
+        id: "admin-access",
+        title: "Accessing the Admin Panel",
+        blocks: [
+          { type: "para", text: "The Tag n Ride Admin Panel is a web application accessible at the admin URL. It is separate from the mobile app and is used exclusively by TNR staff to manage the platform." },
+          { type: "steps", items: [
+            "Open a web browser (Chrome or Firefox recommended) and navigate to the admin URL",
+            "Enter your admin email address and password",
+            "Click 'Sign In'",
+            "The sidebar loads with the pages available to your role",
+            "Your role badge appears below your name in the top-left of the sidebar",
+          ]},
+          { type: "callout", kind: "important", title: "Security", text: "Never share your admin credentials. Always sign out when leaving your workstation (bottom of the sidebar). Sessions expire after inactivity for security." },
+        ],
+      },
+      {
+        id: "admin-navigation",
+        title: "Navigating the Admin Panel",
+        blocks: [
+          { type: "para", text: "The sidebar on the left is your main navigation. It is divided into groups that can be expanded and collapsed." },
+          { type: "bullets", items: [
+            "Quick Access — Dashboard, Alerts, Transactions, Audit Log — always visible at the top",
+            "Collapsible groups — People, Fleet, Finance, Analytics, SafeRide, Compliance, Communications, Support, System — click the group label to expand or collapse",
+            "Active page indicator — the current page is highlighted in cyan with a small dot on the right",
+            "Search bar — type any page name in the sidebar search box to jump directly to it",
+            "Theme toggle — at the bottom of the sidebar, switch between Dark, Light, and System theme",
+            "Sign out — at the very bottom of the sidebar",
+          ]},
         ],
       },
       {
         id: "admin-roles",
-        title: "Admin Roles & Permissions",
-        icon: Shield,
-        what: "Every admin account has a role that controls which pages and actions they can access. Roles are assigned by the Superadmin.",
-        features: [
-          { label: "Superadmin", detail: "Full access to everything. Can create/edit admin accounts, access System Console, Database tools, and all financial operations. There should be very few superadmin accounts." },
-          { label: "CEO", detail: "Full access minus destructive system tools. Sees all financial data, HR, payroll, and analytics." },
-          { label: "CFO", detail: "Full financial access — revenue, ledger, payroll, treasury, reconciliation, settlements. Also sees HR and documents." },
-          { label: "CTO", detail: "Full system/technical access — console, database, health, monitoring, API keys." },
-          { label: "Admin", detail: "General operations — drivers, passengers, KYC, support, disputes, transactions. No financial config." },
-          { label: "Finance", detail: "Financial pages only — revenue, settlements, wallets, refunds, chargebacks, statements." },
-          { label: "Support", detail: "Support-focused — lookup users, reset PINs, view tickets, view transactions." },
+        title: "Admin Roles and Access Levels",
+        blocks: [
+          { type: "para", text: "Every admin account has a role. Your role determines which pages and actions you can access. Pages you do not have permission for simply do not appear in your sidebar." },
+          { type: "table", headers: ["Role", "Access Level", "Typical Responsibilities"], rows: [
+            ["Superadmin", "Full access to everything", "Platform owner, technical lead. Creates/manages admin accounts"],
+            ["CEO", "Full operational access", "Sees all financial data, HR, and analytics. No system console"],
+            ["CFO", "Full financial access", "Revenue, payroll, treasury, ledger, reconciliation, statements"],
+            ["CTO", "Full technical access", "Console, database, system health, API keys, feature flags"],
+            ["Admin", "General operations", "Users, drivers, KYC, support, disputes, transactions"],
+            ["Finance", "Financial pages only", "Revenue, settlements, wallets, refunds, chargebacks"],
+            ["Support", "Support & user lookup", "Reset PINs, view tickets, answer user queries"],
+          ]},
+          { type: "callout", kind: "tip", title: "Permission Denied?", text: "If you try to access a page you do not have permission for, you will see a 'Permission Denied' message. Contact your Superadmin to have your role updated." },
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "quick-access",
-    label: "Quick Access",
-    icon: LayoutDashboard,
-    color: "text-cyan",
-    entries: [
-      {
-        id: "dashboard",
-        title: "Dashboard",
-        icon: LayoutDashboard,
-        path: "/admin/dashboard",
-        what: "The first page you see after logging in. Shows a real-time snapshot of platform health — active users, today's transactions, revenue metrics, and recent alerts.",
-        features: [
-          { label: "Key metrics strip", detail: "Shows today's total payments processed, new registrations, active drivers, and current system wallet balance." },
-          { label: "Live transaction feed", detail: "The most recent payments across the platform update in real time." },
-          { label: "Alert banner", detail: "If there are critical alerts (failed transactions, KYC backlog, system errors), they appear at the top. Click to go to the Alerts page." },
-          { label: "Quick links", detail: "Shortcut buttons to the most common actions — approve KYC, view flagged transactions, open support tickets." },
-        ],
-      },
-      {
-        id: "alerts",
-        title: "Alerts",
-        icon: Bell,
-        path: "/admin/alerts",
-        what: "Centralised hub for all system-generated alerts. Alerts are raised automatically when something needs admin attention — failed payments, suspicious activity, expired documents, KYC submissions, etc.",
-        features: [
-          { label: "Alert types", detail: "Payment failures, high-velocity transactions, expired driver documents, KYC awaiting review, driver PIN reset requests, dead man code reset requests, low system wallet balance." },
-          { label: "Mark as resolved", detail: "Click an alert to see full details and mark it resolved once you have acted on it." },
-          { label: "Filter by type", detail: "Use the filter tabs to view only specific alert categories." },
-        ],
-      },
-      {
-        id: "transactions",
-        title: "Transactions",
-        icon: ArrowLeftRight,
-        path: "/admin/transactions",
-        what: "Full ledger of every transaction that has ever passed through the platform — payments, top-ups, refunds, subscription fees, platform fees, CashUps, statement fees.",
-        features: [
-          { label: "Search", detail: "Search by reference number, user name, phone number, or QR code." },
-          { label: "Filter by type", detail: "Filter to show only payments, topups, refunds, subscriptions, cashouts, etc." },
-          { label: "Filter by status", detail: "Completed, pending, failed, reversed." },
-          { label: "Date range", detail: "Pick a custom date range to export or review specific periods." },
-          { label: "Transaction detail", detail: "Click any row to expand the full transaction — sender, receiver, amounts, fees, net payout, reference, timestamp, IP address." },
-          { label: "Flag / Dispute", detail: "You can flag a transaction for review or open a dispute directly from the detail view." },
-        ],
-      },
-      {
-        id: "audit",
-        title: "Audit Log",
-        icon: FileText,
-        path: "/admin/audit",
-        what: "Every action taken by every admin is recorded here. Immutable audit trail for compliance, forensics, and accountability.",
-        features: [
-          { label: "What is logged", detail: "Every admin login, PIN reset, KYC approval/rejection, refund, fee change, user ban, payout approval — every significant action is logged with timestamp, admin name, IP address, and before/after values." },
-          { label: "Filter by admin", detail: "See only the actions taken by a specific admin account." },
-          { label: "Filter by action type", detail: "Narrow down to specific event types (e.g., only KYC decisions)." },
-          { label: "Export", detail: "Download audit log as CSV for external compliance reporting." },
-        ],
-      },
-    ],
-  },
-
-  // ══════════════════════════════════════════════════════════════
-  {
-    id: "people",
-    label: "People",
+    id: "admin-people",
+    number: "06",
+    title: "People Management",
+    subtitle: "Managing users, drivers, owners, passengers and KYC",
     icon: Users,
     color: "text-cyan",
-    entries: [
+    sections: [
       {
-        id: "users",
-        title: "Users",
-        icon: Users,
-        path: "/admin/users",
-        what: "Master list of every account on the platform — drivers, passengers, and owners. Use this page for general user lookups when you do not know the exact role.",
-        features: [
-          { label: "Search", detail: "Search by name, phone number, or ID number." },
-          { label: "Filter by role", detail: "Show only drivers, only passengers, or only owners." },
-          { label: "View profile", detail: "Click a user to open their full profile — wallet balance, KYC status, transaction history, linked accounts." },
-          { label: "Suspend / Unsuspend", detail: "Temporarily block a user from transacting. They can still log in but cannot make or receive payments until unsuspended." },
-          { label: "Reset PIN", detail: "Generates a temporary PIN sent to the user via WhatsApp/SMS. Requires reset_pin permission." },
+        id: "admin-users",
+        title: "Users Page — /admin/users",
+        blocks: [
+          { type: "para", text: "The Users page is the master list of every account on the platform, regardless of role. It is the starting point when you receive a support call and know the user's phone number but not their role." },
+          { type: "bullets", items: [
+            "Search bar — search by full name, phone number, or ID number. Results appear instantly",
+            "Role filter — tabs to show All, Drivers, Passengers, or Owners only",
+            "Status filter — filter by Active, Suspended, or Banned",
+            "User card — shows name, phone, role badge, KYC status badge, wallet balance, and registration date",
+            "Click any user — opens their full profile with all actions available",
+          ]},
+          { type: "table", headers: ["Action", "What It Does", "Who Can Use"], rows: [
+            ["Reset PIN", "Sends a temporary PIN to the user's phone number. They can log in and change it immediately", "Support+"],
+            ["Suspend", "Blocks the account from all transactions. The user can still log in and see their balance", "Admin+"],
+            ["Unsuspend", "Re-enables a suspended account", "Admin+"],
+            ["Ban", "Permanently blocks the account. Requires superadmin approval to reverse", "Superadmin"],
+            ["Add Wallet Credit", "Adds a custom amount to the wallet with an internal note (e.g. goodwill credit)", "Finance+"],
+          ]},
         ],
       },
       {
-        id: "drivers",
-        title: "Drivers",
-        icon: Car,
-        path: "/admin/drivers",
-        what: "List of all registered driver accounts. Drivers are the primary earners on the platform — they receive payments from passengers via their QR code.",
-        features: [
-          { label: "Driver list", detail: "Shows name, phone, vehicle plate, verification status, KYC status, total earnings, and current wallet balance." },
-          { label: "Search", detail: "Search by name, phone, plate number, or TNR code." },
-          { label: "Driver detail page", detail: "Click any driver to open their profile page (see Driver Detail below)." },
-          { label: "Verify driver", detail: "Mark a driver as verified once their documents and KYC have been approved." },
-          { label: "Export", detail: "Download the full driver list as CSV." },
+        id: "admin-drivers",
+        title: "Drivers Page — /admin/drivers",
+        blocks: [
+          { type: "para", text: "The Drivers page shows all registered driver accounts with their key details. Use this for driver-specific operations." },
+          { type: "bullets", items: [
+            "Driver list — name, phone number, vehicle plate, verification status (Verified / Pending), KYC status, total lifetime earnings, current wallet balance",
+            "Search — by name, phone, plate, or TNR code",
+            "Verify Driver button — marks a driver as platform-verified once their documents and KYC are approved",
+            "Export button — downloads the full driver list as a CSV file",
+            "Click any driver — opens the Driver Detail page",
+          ]},
         ],
       },
       {
         id: "driver-detail",
-        title: "Driver Detail Page",
-        icon: Car,
-        path: "/admin/drivers/[id]",
-        what: "Full profile for a single driver. This is the most feature-rich page in the admin — it gives you complete visibility and control over one driver account.",
-        features: [
-          { label: "Profile card", detail: "Name, phone, vehicle plate, KYC badge, verification badge, total earnings, star rating, TNR QR code." },
-          { label: "QR Code card", detail: "Shows the driver's unique QR code (with TNR logo watermark). You can Print it (opens a print-ready card with full branding) or Download PNG for physical printing." },
-          { label: "Verify Driver button", detail: "Appears if the driver is not yet verified. Click to mark them verified (they can then receive payments)." },
-          { label: "Taxi Association", detail: "A dropdown to link this driver to a registered taxi association. Select the association and click Link. This is used for the association monthly payout calculations. Click Unlink (or select 'No association') to remove the link." },
-          { label: "Transaction History", detail: "A table of every transaction where this driver was the sender or receiver — with reference, type, amount, net payout, counterparty, status, and date." },
-          { label: "Statements sub-page", detail: "Click 'Statements' to download or view this driver's monthly earnings statements." },
+        title: "Driver Detail Page — /admin/drivers/[id]",
+        blocks: [
+          { type: "para", text: "The Driver Detail page is the most comprehensive page in the admin panel. It gives you complete visibility and control over a single driver account." },
+          { type: "table", headers: ["Section", "What It Shows / Does"], rows: [
+            ["Profile Card (top left)", "Name, phone, vehicle plate badge, KYC status badge, verification badge, total earnings, average star rating, rating count, TNR QR code"],
+            ["Verify Driver button", "Appears if the driver is unverified. Click to mark them as verified — they can now receive payments and appear as 'Verified' to passengers"],
+            ["QR Code Card (top right)", "Shows the driver's QR code with TNR logo watermark on a white card styled exactly as the physical card"],
+            ["Print QR button", "Opens a print-ready page with the full branded QR card. Use browser print (Ctrl+P) to print physically"],
+            ["Download PNG button", "Downloads the QR code as a high-resolution PNG image for sharing or reprinting"],
+            ["Taxi Association card", "Dropdown to link or unlink this driver to a taxi association. Select from the list and click 'Link'. Click 'Unlink' to remove"],
+            ["Transaction History table", "Every transaction where this driver was sender or receiver — reference, type, amount, net payout, counterparty, status, date"],
+          ]},
+          { type: "callout", kind: "tip", title: "Reprinting QR Cards", text: "If a driver loses or damages their QR card, go to their detail page, click 'Print QR', and print the card. The QR code never changes — it is permanently linked to the driver's account." },
         ],
       },
       {
-        id: "owners",
-        title: "Fleet Owners",
-        icon: Truck,
-        path: "/admin/owners",
-        what: "Fleet owners own the taxis and employ drivers. Each driver is linked to one owner. The owner receives a commission split from driver earnings based on the configured rate.",
-        features: [
-          { label: "Owner list", detail: "Name, business name, email, phone, number of linked drivers, total earnings received." },
-          { label: "Owner detail page", detail: "Full profile — linked drivers list, earnings history, bank account details, commission split configuration." },
-          { label: "Commission rate", detail: "Set the percentage of each payment that goes to the owner vs. the driver (configured per driver via Commission Splits)." },
+        id: "admin-kyc",
+        title: "KYC Review — /admin/kyc",
+        blocks: [
+          { type: "para", text: "KYC (Know Your Customer) is South Africa's legal requirement that financial services verify the identity of their customers. Every driver and owner must be KYC verified before they can CashUp." },
+          { type: "steps", items: [
+            "Go to KYC Review — you see a queue of pending submissions",
+            "Click any submission to open the review view",
+            "See the submitted selfie, ID photo, and the user's declared ID number",
+            "Verify that the face in the selfie matches the face on the ID",
+            "Verify that the ID number is readable and matches what the user entered",
+            "If everything is correct: click APPROVE — the user is immediately able to CashUp",
+            "If there is a problem: click REJECT, select the reason, and the user is notified to resubmit",
+          ]},
+          { type: "callout", kind: "warning", title: "Common Rejection Reasons", text: "Blurry ID photo (cannot read the ID number), Selfie does not clearly show the face, Face in selfie does not match the face on the ID, Expired ID document, ID belongs to someone else (potential fraud — escalate immediately)." },
+          { type: "callout", kind: "important", title: "Fraud Awareness", text: "If you suspect a KYC submission is fraudulent — for example, the selfie appears to be a photo of a photo, or the ID looks digitally altered — do NOT simply reject. Reject and immediately escalate to the Risk & Fraud team. Document the submission reference." },
         ],
       },
       {
-        id: "passengers",
-        title: "Passengers",
-        icon: Users2,
-        path: "/admin/passengers",
-        what: "List of all passenger accounts. Passengers top up their wallets and pay drivers.",
-        features: [
-          { label: "Passenger list", detail: "Name, phone, wallet balance, total amount spent, registration date." },
-          { label: "View profile", detail: "Click to see transaction history, wallet balance, KYC status, and any active disputes." },
-          { label: "Refund payment", detail: "If a passenger overpaid or was charged incorrectly, you can initiate a refund from their transaction history." },
-        ],
-      },
-      {
-        id: "kyc",
-        title: "KYC Review",
-        icon: Fingerprint,
-        path: "/admin/kyc",
-        what: "KYC (Know Your Customer) is the identity verification process. Drivers and owners must submit a selfie and ID document before they can transact. This page is the queue for reviewing submissions.",
-        features: [
-          { label: "Pending queue", detail: "Shows all KYC submissions awaiting review — thumbnail of selfie, ID document image, name, and submission date." },
-          { label: "Approve", detail: "Click Approve to mark the user as KYC verified. They are then eligible to receive payments and CashOut." },
-          { label: "Reject", detail: "Click Reject and provide a reason. The user is notified and can resubmit." },
-          { label: "View documents", detail: "Full-size preview of the selfie and ID document before making a decision." },
-          { label: "Filter by status", detail: "View pending, approved, or rejected submissions separately." },
-        ],
-      },
-      {
-        id: "onboarding",
-        title: "Onboarding",
-        icon: UserCheck,
-        path: "/admin/onboarding",
-        what: "Tracks new driver registrations through the onboarding pipeline — registered but not yet verified, KYC submitted, documents uploaded, first payment received.",
-        features: [
-          { label: "Onboarding funnel", detail: "Visual funnel showing how many new drivers are at each stage: Registered → KYC Submitted → KYC Approved → Verified → First Payment." },
-          { label: "Driver list by stage", detail: "Filter to see exactly which drivers are stuck at each step and follow up." },
-          { label: "Send reminder", detail: "Trigger a WhatsApp/notification reminder to a driver who has not completed a step." },
+        id: "admin-onboarding",
+        title: "Onboarding — /admin/onboarding",
+        blocks: [
+          { type: "para", text: "The Onboarding page tracks new drivers through every step of getting active on the platform. Use it to proactively help drivers who are stuck in the process." },
+          { type: "table", headers: ["Stage", "Meaning", "Action"], rows: [
+            ["Registered", "Created an account but not yet submitted KYC", "Send reminder to submit KYC"],
+            ["KYC Submitted", "Submitted ID and selfie — awaiting review", "Review their KYC submission (go to KYC Review)"],
+            ["KYC Approved", "Identity verified — now needs admin to verify their driver profile", "Verify their driver profile"],
+            ["Verified", "Fully onboarded — can receive payments", "No action needed"],
+            ["First Payment Received", "Has completed at least one transaction", "Driver is fully active"],
+          ]},
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "fleet",
-    label: "Fleet",
+    id: "admin-fleet",
+    number: "07",
+    title: "Fleet Management",
+    subtitle: "Driver transfers, commissions, documents, deductions, and taxi associations",
     icon: Truck,
     color: "text-cyan",
-    entries: [
+    sections: [
       {
-        id: "transfers",
-        title: "Driver Transfers",
-        icon: Repeat2,
-        path: "/admin/transfers",
-        what: "When a driver moves from one vehicle owner to another, a transfer request is created. This page manages those requests.",
-        features: [
-          { label: "Pending transfers", detail: "Shows all transfer requests — driver name, current owner, new owner, request date." },
-          { label: "Approve transfer", detail: "Approving re-links the driver to the new owner. Future earnings split will use the new owner's commission rate." },
-          { label: "Reject transfer", detail: "Reject with a reason. The driver stays with their current owner." },
-          { label: "Transfer history", detail: "Full history of past transfers for auditing and dispute resolution." },
+        id: "fleet-transfers",
+        title: "Driver Transfers — /admin/transfers",
+        blocks: [
+          { type: "para", text: "A Driver Transfer happens when a driver moves from one fleet owner to another — for example, when a driver changes which taxi they drive, or their employer changes." },
+          { type: "steps", items: [
+            "The driver initiates a transfer request from their app (Profile → Fleet → Switch Owner)",
+            "The request appears in this queue with the driver name, current owner, and requested new owner",
+            "Review the request — confirm with the driver directly if needed",
+            "Click Approve to complete the transfer — the driver is immediately linked to the new owner",
+            "Click Reject (with a reason) if the transfer should not proceed",
+          ]},
+          { type: "callout", kind: "important", title: "Commission Impact", text: "Approving a transfer changes which commission split applies to this driver. Make sure the commission split for the new owner relationship is configured in Commission Splits before approving." },
         ],
       },
       {
-        id: "commissions",
-        title: "Commission Splits",
-        icon: Percent,
-        path: "/admin/commissions",
-        what: "Configures how each driver's earnings are split between the driver and their vehicle owner. You can set a custom rate per driver or apply a global default.",
-        features: [
-          { label: "Split list", detail: "Shows every driver-owner pair with the current split percentage (e.g., 70% driver / 30% owner)." },
-          { label: "Edit split", detail: "Change the driver's percentage. Updates take effect on the next payment." },
-          { label: "Global default", detail: "Set a platform-wide default split applied to all new driver-owner relationships." },
-          { label: "Effective date", detail: "Optionally set a future date for a split change to take effect." },
-        ],
-      },
-      {
-        id: "performance",
-        title: "Performance",
-        icon: PieChart,
-        path: "/admin/performance",
-        what: "Analytics on driver performance — earnings, trip counts, ratings, payment volume over time. Useful for identifying top performers and underperforming drivers.",
-        features: [
-          { label: "Leaderboard", detail: "Ranked list of drivers by earnings, trip count, or rating for the selected period." },
-          { label: "Individual trends", detail: "Click any driver to see their weekly/monthly earnings chart." },
-          { label: "Rating distribution", detail: "Breakdown of star ratings across all drivers." },
-          { label: "Date range", detail: "Filter all metrics to a custom period (last 7 days, 30 days, 90 days)." },
-        ],
-      },
-      {
-        id: "fleet-reports",
-        title: "Fleet Reports",
-        icon: BarChart3,
-        path: "/admin/fleet",
-        what: "Aggregated reporting for fleet owners — how many trips their vehicles made, total earnings, commission earned, driver count.",
-        features: [
-          { label: "Per-owner summary", detail: "Each fleet owner's total rides, gross payments, commission earned, and active driver count for the period." },
-          { label: "Driver breakdown", detail: "Expand any owner to see each of their drivers' individual contributions." },
-          { label: "Export", detail: "Download fleet report as CSV for owners who request statements." },
+        id: "fleet-commissions",
+        title: "Commission Splits — /admin/commissions",
+        blocks: [
+          { type: "para", text: "The commission split determines how a passenger payment is divided between the driver and their fleet owner. For example, a 70/30 split means the driver keeps 70% and the owner receives 30% of every payment." },
+          { type: "bullets", items: [
+            "The split is applied automatically to every payment in real time — no manual calculation",
+            "Each driver-owner pair can have a different split",
+            "A platform-wide default applies to new pairs that have no custom split configured",
+            "To change a split: find the driver-owner pair, click Edit, enter the new driver percentage, and save",
+            "Changes take effect immediately on the next payment",
+          ]},
+          { type: "callout", kind: "tip", title: "Example", text: "If a passenger pays R20 and the split is 75% driver / 25% owner: the driver's wallet gets R15 (minus the TNR platform fee) and the owner's wallet gets R5." },
         ],
       },
       {
         id: "fleet-documents",
-        title: "Document Expiry",
-        icon: FileWarning,
-        path: "/admin/fleet/documents",
-        what: "Tracks the expiry dates of required driver and vehicle documents — operating licences, roadworthy certificates, public liability insurance, etc.",
-        features: [
-          { label: "Expiry calendar", detail: "Documents expiring in the next 30/60/90 days highlighted in red/yellow." },
-          { label: "Filter by document type", detail: "View all drivers with a specific document type expiring soon." },
-          { label: "Send reminder", detail: "Trigger a notification to the driver to renew their document before it expires." },
-          { label: "Upload new document", detail: "Admin can upload a renewed document on behalf of a driver after it is submitted physically." },
+        title: "Document Expiry — /admin/fleet/documents",
+        blocks: [
+          { type: "para", text: "South African law requires taxi operators to maintain valid documents: operating licences, roadworthy certificates, and public liability insurance. This page tracks expiry dates and alerts you before they lapse." },
+          { type: "bullets", items: [
+            "Documents expiring in the next 30 days are highlighted red",
+            "Documents expiring in 31–90 days are highlighted yellow",
+            "Click any row to see the full document details and expiry date",
+            "Click 'Send Reminder' to notify the driver or owner via WhatsApp/notification",
+            "Click 'Upload Renewed Document' once the driver submits the renewed document",
+          ]},
+          { type: "callout", kind: "warning", title: "Compliance Risk", text: "An expired operating licence means the vehicle is not legally permitted to operate. If a driver continues operating with an expired licence, TNR could face regulatory liability. Take document expiry seriously." },
         ],
       },
       {
-        id: "deductions",
-        title: "Driver Deductions",
-        icon: MinusCircle,
-        path: "/admin/fleet/deductions",
-        what: "Manage recurring or once-off deductions from driver earnings — e.g., vehicle rental fees, equipment fees, uniform costs.",
-        features: [
-          { label: "Add deduction", detail: "Specify the driver, amount, frequency (once-off / weekly / monthly), description, and start date." },
-          { label: "Active deductions list", detail: "Shows all currently active deductions with next deduction date and remaining installments." },
-          { label: "Deduction history", detail: "Full log of every deduction that has been applied, with the transaction reference." },
-          { label: "Cancel deduction", detail: "Stop a recurring deduction at any time." },
+        id: "fleet-deductions",
+        title: "Driver Deductions — /admin/fleet/deductions",
+        blocks: [
+          { type: "para", text: "Deductions are amounts automatically taken from a driver's earnings — for example, a weekly taxi rental fee, equipment cost recovery, or uniform purchase. They are applied before the driver's net earnings are settled." },
+          { type: "steps", items: [
+            "Click 'Add Deduction'",
+            "Select the driver",
+            "Enter the amount, description (what the deduction is for), and frequency (once-off, weekly, or monthly)",
+            "Set the start date",
+            "For installments, set the number of deductions — e.g., 4 weekly payments of R100 to recover a R400 uniform cost",
+            "Click Save — the deduction is scheduled",
+          ]},
+          { type: "callout", kind: "important", title: "Transparency", text: "Each deduction creates a transaction record visible to the driver in their Transaction History. Drivers can see what was deducted and why. Always enter a clear description." },
         ],
       },
       {
-        id: "taxi-associations",
-        title: "Taxi Associations",
-        icon: Building2,
-        path: "/admin/taxi-associations",
-        what: "Manages taxi associations — the formal bodies that group taxi drivers in South Africa. TNR pays associations a monthly fee based on the revenue generated by their member drivers.",
-        features: [
-          { label: "Association list", detail: "Left panel lists all registered associations with name, city, and number of linked drivers." },
-          { label: "Create association", detail: "Click '+ New Association' and fill in: name, registration number, city, province, contact person, banking details, agreement type and amount, auto-payment settings, and notes." },
-          { label: "Agreement types", detail: "Per Driver — a fixed rand amount multiplied by the number of active drivers. Fixed — a flat monthly fee regardless of driver count. Percentage — a percentage of TNR's total revenue earned from that association's drivers." },
-          { label: "Overview tab", detail: "Shows banking details, agreement terms (with calculated monthly obligation), auto-payment schedule, and contact person." },
-          { label: "Drivers tab", detail: "Lists all drivers linked to this association and their current status." },
-          { label: "Revenue tab", detail: "12-month table showing rides, revenue, platform fees, subscription fees, and statement fees earned from this association's drivers each month — plus the calculated amount owed." },
-          { label: "Payouts tab", detail: "History of all payments made to this association. Use Record Payout to log a manual bank payment. Use Pay Now to record an instant payment — it auto-fetches this month's revenue and pre-fills the amount based on the agreement." },
-          { label: "Auto-Payment", detail: "Enable auto-pay and choose a day of the month (1–28). The system will automatically record the payout on that day each month. You can also set an override amount for months where the calculated amount should be overridden." },
-          { label: "Edit association", detail: "Click the edit (pencil) icon on any association to update any detail." },
-          { label: "Delete association", detail: "Click the trash icon — requires confirmation. Linked drivers will have their association cleared." },
-          { label: "Run Auto-Payments button", detail: "Manually trigger the auto-payment processor to run now (normally runs on the scheduled day)." },
+        id: "fleet-associations",
+        title: "Taxi Associations — /admin/taxi-associations",
+        blocks: [
+          { type: "para", text: "Taxi associations are the formal bodies that organise and represent taxi drivers in South Africa. Many drivers operate under an association which TNR has a payment agreement with. This page manages those associations and their monthly payouts." },
+          { type: "callout", kind: "info", title: "How Association Payments Work", text: "TNR and an association agree on a monthly payment. This can be: (1) a fixed rand amount per driver per month, (2) a flat monthly fee regardless of driver count, or (3) a percentage of TNR's total revenue generated from that association's drivers. The system calculates the amount due and allows you to record or automate the payment." },
+        ],
+      },
+      {
+        id: "association-create",
+        title: "Creating a Taxi Association",
+        blocks: [
+          { type: "steps", items: [
+            "On the Taxi Associations page, click '+ New Association'",
+            "BASIC INFO: Enter the Association Name (e.g., 'eThekwini Taxi Association'), Registration Number, City, and Province",
+            "CONTACT: Enter the Contact Person Name, their Phone Number, and Email",
+            "BANKING: Enter the association's bank name, account number, account type (Cheque/Savings), and branch code",
+            "AGREEMENT: Select the agreement type (Per Driver / Fixed / Percentage) and enter the amount",
+            "AUTO-PAYMENT: Toggle on if you want payments to run automatically. Set the day of month (1–28)",
+            "NOTES: Any internal notes about this association",
+            "Click Save",
+          ]},
+          { type: "table", headers: ["Agreement Type", "How Amount is Calculated"], rows: [
+            ["Per Driver", "Amount × number of active drivers linked to this association that month. E.g., R50 × 20 drivers = R1,000"],
+            ["Fixed", "A flat amount every month regardless of driver count. E.g., R2,000/month"],
+            ["Percentage", "A percentage of TNR's earned revenue (platform fees + subscription fees + statement fees) from this association's drivers. E.g., 10% of R15,000 revenue = R1,500"],
+          ]},
+        ],
+      },
+      {
+        id: "association-tabs",
+        title: "Association Detail — Tabs Explained",
+        blocks: [
+          { type: "para", text: "Each association has four tabs on the right panel:" },
+          { type: "table", headers: ["Tab", "What You See"], rows: [
+            ["Overview", "Banking details card, Agreement terms with calculated monthly obligation, Auto-payment schedule showing next payment date, Contact person details"],
+            ["Drivers", "All drivers currently linked to this association with their status and earnings"],
+            ["Revenue", "12-month table: Month, Rides, Ride Revenue, Platform Fees, Subscription Fees, Statement Fees, TNR Revenue, and the Amount Owed based on the agreement"],
+            ["Payouts", "History of all payments made to this association with reference, amount, date, and status"],
+          ]},
+          { type: "callout", kind: "tip", title: "Pay Now Button", text: "On the Payouts tab, click 'Pay Now' to record an immediate payout. The system auto-fetches the current month's revenue, calculates the amount owed based on the agreement type, and pre-fills it. You just confirm and enter payment reference details." },
+          { type: "callout", kind: "tip", title: "Record Payout", text: "Use 'Record Payout' to log a manual bank payment you have already made. Enter the amount, payment date, and bank reference number. This keeps your records accurate even if you pay outside the system." },
+          { type: "callout", kind: "info", title: "Auto-Payment", text: "With auto-payment enabled, the system checks every day at midnight. On the configured day of the month, it automatically records a payout for the calculated amount. You can also manually trigger this with the 'Run Auto-Payments' button." },
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "finance",
-    label: "Finance",
-    icon: DollarSign,
+    id: "admin-finance",
+    number: "08",
+    title: "Finance & Revenue",
+    subtitle: "Revenue, P&L, ledger, withdrawals, refunds, fees, and financial configuration",
+    icon: TrendingUp,
     color: "text-green",
-    entries: [
+    sections: [
       {
-        id: "treasury",
-        title: "Treasury",
-        icon: Landmark,
-        path: "/admin/treasury",
-        what: "High-level view of TNR's financial position — total funds held in driver wallets, total funds in passenger wallets, total platform fees collected, and outstanding liabilities.",
-        features: [
-          { label: "Balance sheet summary", detail: "Passenger wallet pool, driver wallet pool, fee escrow, total liabilities vs. platform reserves." },
-          { label: "Daily movement", detail: "Net inflows vs. outflows for today, week, and month." },
-          { label: "CashUp pool", detail: "Total amount of CashOut/CashUp requests processed and pending." },
+        id: "finance-revenue",
+        title: "Revenue & P&L — /admin/revenue",
+        blocks: [
+          { type: "para", text: "The Revenue page is your financial command centre. It shows a complete Profit & Loss statement for any time period you select." },
+          { type: "bullets", items: [
+            "Range selector — choose Last 7 Days, Last 30 Days, Last 90 Days, or Last 12 Months",
+            "Hero strip — four large numbers across the top: Gross Revenue (what TNR earned), Total Expenses (payouts + salaries), Net Profit, and Gross Volume (total money passengers paid)",
+          ]},
+          { type: "table", headers: ["P&L Line", "What It Means"], rows: [
+            ["INCOME — Platform Fees", "All transaction fees earned from passenger payments in the period"],
+            ["INCOME — Subscription Fees", "All monthly driver subscription fees billed in the period"],
+            ["INCOME — Statement Fees", "All statement download fees collected in the period"],
+            ["Total Revenue", "Sum of all three income streams — this is TNR's gross revenue"],
+            ["EXPENSES — Association Payouts", "Total paid to taxi associations in the period (click to expand per-association)"],
+            ["EXPENSES — Employee Salaries", "Total approved and paid payroll in the period"],
+            ["Total Expenses", "Sum of all outgoing expenses"],
+            ["NET PROFIT", "Total Revenue minus Total Expenses. The profit margin % is shown"],
+          ]},
+          { type: "bullets", items: [
+            "Right panel — Today: today's revenue vs. yesterday with a trend arrow",
+            "Right panel — Pending Obligations: unpaid association invoices and unapproved salaries — money you owe but have not yet paid",
+            "Right panel — All-Time Paid Out: cumulative total of every payout since launch",
+            "Right panel — System Wallet: current balance in TNR's own wallet with a link to the System Wallet page",
+          ]},
         ],
       },
       {
-        id: "settlement",
-        title: "Settlement Center",
-        icon: Scale,
-        path: "/admin/settlement",
-        what: "Manages the settlement of funds — ensuring that money in TNR's system is properly accounted for and transferred to the correct parties.",
-        features: [
-          { label: "Pending settlements", detail: "Transactions awaiting final settlement to external banks." },
-          { label: "Settle batch", detail: "Process a batch of settlements in one action." },
-          { label: "Settlement history", detail: "All completed settlements with bank confirmation references." },
-          { label: "Failed settlements", detail: "Any settlement that failed (e.g., wrong bank details). Review and reprocess." },
+        id: "finance-withdrawals",
+        title: "Withdrawals & Payouts — /admin/withdrawals",
+        blocks: [
+          { type: "para", text: "When a driver or owner initiates a CashUp from the mobile app, the request appears in this queue for processing." },
+          { type: "steps", items: [
+            "Review the pending request — driver name, amount requested, bank account details, and request time",
+            "Verify the bank details are correct (these come from the driver's saved payout account)",
+            "Click Approve to initiate the bank transfer",
+            "The driver's wallet is debited immediately. Funds reach their bank in 1–2 business days",
+            "Click Reject (with a reason) if the request cannot be processed — funds stay in the wallet",
+          ]},
+          { type: "callout", kind: "important", title: "Verify Before Approving", text: "Always check that the bank account details look legitimate before approving a large withdrawal. Fraudsters sometimes compromise accounts and change bank details. If something looks unusual, call the driver directly to confirm." },
         ],
       },
       {
-        id: "withdrawals",
-        title: "Withdrawals & Payouts",
-        icon: Wallet,
-        path: "/admin/withdrawals",
-        what: "Manages CashUp requests — when a driver or owner wants to withdraw earnings from their TNR wallet to their bank account.",
-        features: [
-          { label: "Pending queue", detail: "All withdrawal requests awaiting approval — user name, amount, bank details, requested date." },
-          { label: "Approve", detail: "Mark as approved to initiate the bank transfer." },
-          { label: "Reject", detail: "Reject with a reason. Funds return to the user's wallet." },
-          { label: "History", detail: "All past withdrawals with status and bank reference." },
-          { label: "Manual payout", detail: "Initiate a withdrawal on behalf of a user (admin override)." },
+        id: "finance-refunds",
+        title: "Refunds — /admin/refunds",
+        blocks: [
+          { type: "para", text: "Refunds return money from a completed transaction back to the passenger's wallet. Common reasons: overcharged, driver gave change but shouldn't have, technical double-payment." },
+          { type: "steps", items: [
+            "In the refund queue, find the refund request — or click 'Manual Refund' to initiate one",
+            "Find the original transaction using the reference number or passenger name",
+            "Enter the refund amount (can be less than the original if only a partial refund)",
+            "Add an internal note explaining why the refund is being processed",
+            "Click Approve — the passenger's wallet is credited immediately",
+            "The driver's wallet is debited by the same amount",
+          ]},
+          { type: "callout", kind: "warning", title: "Driver Insufficient Balance", text: "If the driver does not have enough in their wallet to cover the refund (e.g., they have already cashed out), the refund may come from TNR's reserve. Escalate these cases to finance management." },
         ],
       },
       {
-        id: "system-wallet",
-        title: "System Wallet",
-        icon: Landmark,
-        path: "/admin/system-wallet",
-        what: "The TNR platform's own wallet — holds collected platform fees, subscription fees, and statement fees. This is TNR's operating revenue pool.",
-        features: [
-          { label: "Current balance", detail: "Total funds currently held in the system wallet." },
-          { label: "Inflow history", detail: "Every fee that was credited to the system wallet — platform fees, subscription fees, statement fees." },
-          { label: "Outflow history", detail: "Funds moved out of the system wallet — payroll, association payments, operational expenses." },
-          { label: "Transfer funds", detail: "Move funds from the system wallet to a specific account (requires superadmin approval)." },
+        id: "finance-fees",
+        title: "Fee & Payout Config — /admin/fee-config",
+        blocks: [
+          { type: "para", text: "This page controls every fee on the platform. Changes take effect immediately on all future transactions. All changes are logged in the audit trail." },
+          { type: "table", headers: ["Fee Setting", "What It Controls"], rows: [
+            ["Platform Fee %", "Percentage deducted from each passenger payment as TNR's transaction fee. E.g., 3% of R20 = R0.60"],
+            ["Monthly Subscription Fee", "Rand amount billed to each active driver's wallet monthly"],
+            ["Statement Download Fee", "Rand amount charged to a driver each time they download their earnings statement"],
+            ["CashUp Fee", "Fee (if any) charged when a driver withdraws to their bank. Can be R0"],
+          ]},
+          { type: "callout", kind: "warning", title: "Changing Fees", text: "Changing the platform fee percentage affects every future transaction immediately. Do not make fee changes without approval from the CEO or CFO. The change will be recorded in the audit log with your name, timestamp, and old/new values." },
         ],
       },
       {
-        id: "revenue",
-        title: "Revenue & P&L",
-        icon: TrendingUp,
-        path: "/admin/revenue",
-        what: "The Profit & Loss dashboard. Shows gross revenue earned by TNR, all expenses (association payouts, employee salaries), and net profit. Configurable by time range.",
-        features: [
-          { label: "Range selector", detail: "Choose Last 7 days, Last 30 days, Last 90 days, or Last 12 months." },
-          { label: "Hero strip", detail: "Four headline numbers: Gross Revenue, Total Expenses, Net Profit, Gross Volume (total money flowing through the platform)." },
-          { label: "P&L Income Statement", detail: "INCOME section shows each revenue stream: Platform Fees, Subscription Fees, Statement Fees, then Total Revenue. EXPENSES section shows Association Payouts and Employee Salaries, then Total Expenses. NET PROFIT is highlighted at the bottom with the profit margin percentage." },
-          { label: "Expand association breakdown", detail: "Click 'Association Payouts' row to expand and see how much was paid to each individual association in the period." },
-          { label: "Right panel — Today", detail: "Today's revenue vs. yesterday's with a change indicator." },
-          { label: "Right panel — Pending Obligations", detail: "Unpaid association payouts and unapproved salaries — amounts you still owe." },
-          { label: "Right panel — All-Time Paid Out", detail: "Cumulative total of all payouts made since launch." },
-          { label: "Right panel — System Wallet", detail: "Current system wallet balance with a link to the full System Wallet page." },
+        id: "finance-simulator",
+        title: "Fee Simulator — /admin/fee-simulator",
+        blocks: [
+          { type: "para", text: "Before changing fees, use the simulator to see the exact impact of a proposed change." },
+          { type: "steps", items: [
+            "Enter a sample transaction amount (e.g. R25)",
+            "Enter or adjust the fee percentages you are considering",
+            "The simulator shows: what the passenger pays, TNR platform fee, driver net amount, owner commission split, and final driver take-home",
+            "Use this to validate that a fee change is fair and commercially viable before applying it",
+          ]},
         ],
       },
       {
-        id: "ledger",
-        title: "Ledger",
-        icon: BookOpen,
-        path: "/admin/ledger",
-        what: "Double-entry accounting ledger. Every transaction is broken down into its debit and credit entries. Used by accountants and auditors for formal financial review.",
-        features: [
-          { label: "Ledger entries", detail: "Chronological list of all entries — account, debit amount, credit amount, balance, reference." },
-          { label: "Filter by account", detail: "Show only entries for a specific account (e.g., Platform Fees Payable, Driver Wallet Pool)." },
-          { label: "Export", detail: "Download as CSV or Excel for importing into accounting software." },
+        id: "finance-system-wallet",
+        title: "System Wallet — /admin/system-wallet",
+        blocks: [
+          { type: "para", text: "The System Wallet holds all TNR's collected revenue — platform fees, subscription fees, and statement fees accumulate here. It is TNR's operating account within the platform." },
+          { type: "bullets", items: [
+            "Current Balance — total funds currently held in the system wallet",
+            "Inflow History — every fee credited: which driver/passenger, what type of fee, how much, when",
+            "Outflow History — every debit: association payouts, salary payments, operational expenses",
+            "Transfer Funds — move funds from the system wallet to an external account (superadmin only, requires two-factor approval)",
+          ]},
+          { type: "callout", kind: "important", title: "System Wallet vs. User Wallets", text: "The system wallet holds TNR's own revenue. User wallets (driver and passenger wallets) hold money belonging to those users. Never confuse the two — they are completely separate pools." },
         ],
       },
       {
-        id: "reconciliation",
-        title: "Reconciliation",
-        icon: RefreshCw,
-        path: "/admin/reconciliation",
-        what: "Matches TNR's internal records against external bank statements to ensure no money is unaccounted for. Flags discrepancies.",
-        features: [
-          { label: "Upload bank statement", detail: "Upload a CSV bank statement to match against TNR records." },
-          { label: "Matched entries", detail: "Transactions that match between TNR and the bank are shown in green." },
-          { label: "Unmatched entries", detail: "Entries only in TNR or only in the bank — shown in red for investigation." },
-          { label: "Mark reconciled", detail: "Once investigated and confirmed, mark a period as reconciled." },
-        ],
-      },
-      {
-        id: "refunds",
-        title: "Refunds",
-        icon: RotateCcw,
-        path: "/admin/refunds",
-        what: "Process full or partial refunds when a passenger was charged incorrectly or a trip was not completed.",
-        features: [
-          { label: "Refund request queue", detail: "Pending refund requests submitted by passengers through the app." },
-          { label: "Approve refund", detail: "Funds are returned to the passenger's wallet from the driver's wallet (or from TNR's reserves if the driver has insufficient funds)." },
-          { label: "Partial refund", detail: "Adjust the refund amount if only a partial amount should be returned." },
-          { label: "Manual refund", detail: "Initiate a refund not submitted by the user — e.g., from a support call." },
-          { label: "Refund history", detail: "All past refunds with original transaction, refund amount, approving admin, and date." },
-        ],
-      },
-      {
-        id: "chargebacks",
-        title: "Chargebacks",
-        icon: AlertOctagon,
-        path: "/admin/chargebacks",
-        what: "Manages card chargebacks — when a passenger's bank reverses a top-up payment. TNR must recover the funds from the passenger's wallet.",
-        features: [
-          { label: "Chargeback notifications", detail: "Incoming chargeback notifications from the payment gateway." },
-          { label: "Freeze wallet", detail: "Immediately freeze the passenger's wallet to prevent spending recovered-chargeback funds." },
-          { label: "Evidence submission", detail: "Prepare and submit evidence to dispute a chargeback with the card network." },
-          { label: "Outcome tracking", detail: "Track whether TNR won or lost each chargeback case." },
-        ],
-      },
-      {
-        id: "wallet-ops",
-        title: "Wallet Operations",
-        icon: Banknote,
-        path: "/admin/wallet-ops",
-        what: "Admin-level wallet management — manually adjusting wallet balances, investigating wallet discrepancies, and overriding wallet states.",
-        features: [
-          { label: "Credit wallet", detail: "Add funds to a user's wallet (e.g., goodwill credit, failed top-up recovery)." },
-          { label: "Debit wallet", detail: "Remove funds from a wallet (e.g., reverse a fraudulent credit)." },
-          { label: "View wallet history", detail: "Full transaction history for any wallet with opening and closing balances." },
-          { label: "Freeze/unfreeze wallet", detail: "Prevent all transactions on a wallet pending investigation." },
-        ],
-      },
-      {
-        id: "accounting",
-        title: "Accounting",
-        icon: Calculator,
-        path: "/admin/accounting",
-        what: "Summarised accounting reports — income statement, balance sheet snapshot, VAT summary, and tax-ready reports.",
-        features: [
-          { label: "Income statement", detail: "Monthly revenue and expense breakdown formatted for accounting." },
-          { label: "VAT report", detail: "VAT collected on platform fees, ready for SARS submission." },
-          { label: "Export to Excel", detail: "Download accounting reports in formats compatible with Pastel, Sage, or Xero." },
-        ],
-      },
-      {
-        id: "statements",
-        title: "Statements",
-        icon: FileText,
-        path: "/admin/statements",
-        what: "Generate and download formal statements for drivers, owners, and the platform itself.",
-        features: [
-          { label: "Driver statement", detail: "Monthly earnings statement for a specific driver — all payments received, fees deducted, net payout." },
-          { label: "Owner statement", detail: "Monthly commission statement for a fleet owner." },
-          { label: "Bulk generation", detail: "Generate statements for all drivers in one click (usually end of month)." },
-          { label: "Email/WhatsApp delivery", detail: "Send generated statements directly to the driver's registered contact." },
-        ],
-      },
-      {
-        id: "subscriptions",
-        title: "Subscriptions",
-        icon: Tag,
-        path: "/admin/subscriptions",
-        what: "Manages driver subscription fees — the monthly fee drivers pay to use the TNR platform. Billing is automatic but this page lets you view, override, or waive fees.",
-        features: [
-          { label: "Subscription list", detail: "All active subscriptions — driver name, plan, monthly fee, next billing date, status." },
-          { label: "Subscription history", detail: "Every billing event for each driver with payment status." },
-          { label: "Waive fee", detail: "Skip a month's fee for a specific driver (e.g., they were on leave)." },
-          { label: "Change plan", detail: "Move a driver to a different subscription tier." },
-          { label: "Failed billing", detail: "Drivers whose subscription fee failed to process (insufficient wallet balance). Follow up here." },
-        ],
-      },
-      {
-        id: "fee-simulator",
-        title: "Fee Simulator",
-        icon: Calculator,
-        path: "/admin/fee-simulator",
-        what: "A calculator for testing what fees would be charged for a given transaction amount and driver type before committing to a fee config change.",
-        features: [
-          { label: "Enter amount", detail: "Type in a transaction amount and the simulator shows the exact fee breakdown — platform fee, net to driver, net to owner." },
-          { label: "Scenario testing", detail: "Compare different fee structures side by side to evaluate the impact of a proposed change." },
-        ],
-      },
-      {
-        id: "fee-config",
-        title: "Fee & Payout Config",
-        icon: Settings,
-        path: "/admin/fee-config",
-        what: "The master configuration for all fees on the platform. Changes here affect every future transaction.",
-        features: [
-          { label: "Platform fee %", detail: "The percentage TNR takes from each passenger payment." },
-          { label: "Subscription fee", detail: "Monthly fee charged to each driver." },
-          { label: "Statement fee", detail: "Fee charged when a driver downloads their statement." },
-          { label: "CashUp fee", detail: "Fee (if any) charged when a driver withdraws to their bank." },
-          { label: "Change history", detail: "All past fee changes with the admin who made each change and the date — for audit compliance." },
-        ],
-      },
-      {
-        id: "pricing",
-        title: "Pricing Rules",
-        icon: DollarSign,
-        path: "/admin/pricing",
-        what: "Defines dynamic pricing rules — e.g., surge pricing during peak hours, discounts for high-volume drivers.",
-        features: [
-          { label: "Rule list", detail: "All active pricing rules with conditions and effects." },
-          { label: "Add rule", detail: "Define a condition (time of day, location zone, driver tier) and the pricing modifier (% increase or decrease)." },
-          { label: "Priority order", detail: "When multiple rules match a transaction, priority determines which rule applies." },
-          { label: "Test rule", detail: "Simulate a transaction against the current rules to see the outcome before activating." },
-        ],
-      },
-      {
-        id: "export-center",
-        title: "Export Center",
-        icon: Download,
-        path: "/admin/export-center",
-        what: "One-stop shop for downloading data exports from the platform.",
-        features: [
-          { label: "Export types", detail: "Transactions, users, drivers, earnings, KYC records, audit logs, subscription data, association payouts." },
-          { label: "Date range", detail: "Choose any custom date range for the export." },
-          { label: "Format", detail: "CSV or Excel. Large exports are queued and a download link is emailed when ready." },
-        ],
-      },
-      {
-        id: "document-pricing",
-        title: "Document Pricing",
-        icon: Tag,
-        path: "/admin/document-pricing",
-        what: "Controls the fees charged for document-related services — e.g., the fee to download a formal earnings statement.",
-        features: [
-          { label: "Statement download fee", detail: "Set the rand amount charged to a driver each time they download their monthly earnings statement." },
-          { label: "Per-document type pricing", detail: "Different document types can have different fees." },
+        id: "finance-subscriptions",
+        title: "Subscriptions — /admin/subscriptions",
+        blocks: [
+          { type: "para", text: "The subscription billing loop runs automatically every night at midnight. It charges the monthly fee to each active driver's wallet. This page lets you monitor and manage subscription billing." },
+          { type: "bullets", items: [
+            "Active subscriptions — all drivers with their current subscription status and next billing date",
+            "Failed billing — drivers whose wallet had insufficient balance to pay the subscription fee. Follow up to collect or waive",
+            "Waive fee — skip a month for a specific driver (e.g., they were on extended leave)",
+            "Billing history — full record of every subscription charge with payment status",
+          ]},
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "analytics",
-    label: "Analytics",
-    icon: BarChart3,
-    color: "text-purple",
-    entries: [
-      {
-        id: "analytics-overview",
-        title: "Analytics Overview",
-        icon: BarChart3,
-        path: "/admin/analytics",
-        what: "High-level charts and KPIs for the platform — new registrations, daily active users, payment volume, geographic spread.",
-        features: [
-          { label: "Registrations chart", detail: "Daily/weekly new driver and passenger registrations over time." },
-          { label: "Payment volume chart", detail: "Total rand value transacted per day/week/month." },
-          { label: "Active users", detail: "Number of unique users who made at least one transaction in the selected period." },
-          { label: "Geographic heatmap", detail: "Where transactions are happening across South Africa." },
-        ],
-      },
-      {
-        id: "data-analytics",
-        title: "Data Analytics",
-        icon: Cpu,
-        path: "/admin/data-analytics",
-        what: "Deep-dive analytical tools — cohort analysis, retention curves, funnel analysis, and custom metric queries.",
-        features: [
-          { label: "Cohort analysis", detail: "Track how a group of users registered in the same week/month behave over time." },
-          { label: "Retention", detail: "What percentage of new users are still transacting 30/60/90 days later." },
-          { label: "Funnel", detail: "Registration → KYC → First Payment — see where users drop off." },
-        ],
-      },
-      {
-        id: "growth",
-        title: "Growth",
-        icon: Rocket,
-        path: "/admin/growth",
-        what: "Growth-specific metrics — month-over-month growth rate, new market penetration, referral conversion.",
-        features: [
-          { label: "MoM growth", detail: "Month-over-month growth in drivers, passengers, and payment volume." },
-          { label: "Referral stats", detail: "How many users came via referral codes vs. organic." },
-          { label: "Target tracking", detail: "Progress against set growth targets for the current month/quarter." },
-        ],
-      },
-      {
-        id: "routes",
-        title: "Routes & Trips",
-        icon: MapPin,
-        path: "/admin/routes",
-        what: "Analyses where trips are happening — popular routes, busiest times, most active zones.",
-        features: [
-          { label: "Route map", detail: "Visual map of the most common origin-destination pairs." },
-          { label: "Peak hours", detail: "Hourly breakdown of transaction volume to identify peak times." },
-          { label: "Zone analysis", detail: "Which taxi ranks or zones generate the most revenue." },
-        ],
-      },
-      {
-        id: "intelligence",
-        title: "Intelligence (Superadmin)",
-        icon: Brain,
-        path: "/admin/intelligence",
-        what: "AI-assisted intelligence tools — anomaly detection, predictive analytics, fraud pattern recognition. Visible to superadmin only.",
-        features: [
-          { label: "Anomaly alerts", detail: "ML model flags unusual transaction patterns or behaviour that differs significantly from a user's norm." },
-          { label: "Fraud scoring", detail: "Each transaction receives a risk score. High-scoring transactions are flagged for review." },
-          { label: "Predictive revenue", detail: "Forecast next month's revenue based on current trends." },
-        ],
-      },
-    ],
-  },
-
-  // ══════════════════════════════════════════════════════════════
-  {
-    id: "saferide",
-    label: "SafeRide",
+    id: "admin-saferide",
+    number: "09",
+    title: "SafeRide Safety System",
+    subtitle: "The complete guide to TNR's life-safety features",
     icon: Shield,
     color: "text-red-400",
-    entries: [
+    sections: [
       {
-        id: "saferide-overview",
-        title: "What is SafeRide?",
-        icon: Shield,
-        what: "SafeRide is TNR's passenger and driver safety system. It allows users to share their live trip location with contacts, trigger an SOS alert, and use a 'Dead Man Code' — a decoy PIN that silently triggers an emergency alert when entered under duress.",
-        features: [
-          { label: "How SafeRide works", detail: "When a driver starts a SafeRide trip, their location is tracked in real time. If they trigger an SOS, the admin Command Centre receives an alert with the live location. If a passenger enters the Dead Man Code instead of their real PIN to cancel an SOS, the system appears to cancel but continues tracking silently and alerts the TNR safety team." },
-          { label: "Dead Man Code", detail: "A secret 4–6 digit code set by the user (different from their real PIN). If they enter this code when prompted to 'cancel' an SOS — which a hijacker might force them to do — the SOS stays active invisibly and the team is alerted." },
+        id: "saferide-explained",
+        title: "SafeRide — Complete Explanation",
+        blocks: [
+          { type: "para", text: "SafeRide is Tag n Ride's integrated safety system. It exists because taxi drivers and passengers in South Africa face real safety risks — hijackings, robberies, and assaults. SafeRide cannot stop these incidents, but it dramatically reduces their impact by ensuring help is called, the user's location is known, and evidence is preserved." },
+          { type: "callout", kind: "important", title: "This is a Life-Safety System", text: "The SafeRide features — SOS alerts, Dead Man Code, Dead Man Resets — are not administrative tools. They are directly connected to people's physical safety. Handle them with urgency, confidentiality, and care." },
+          { type: "bullets", items: [
+            "SOS Alert — a manual emergency button. The user presses it when they are in danger. It immediately alerts the TNR Command Centre with their live GPS location",
+            "SafeRide Trip — a driver or passenger declares an active trip. Their location is tracked throughout. If the trip goes dark (phone off, route abandoned) the system flags it",
+            "Live Location Sharing — passengers can share a real-time tracking link with family or friends. No app required for the recipient",
+            "Dead Man Code — a secret decoy PIN. If a hijacker forces the user to 'cancel' an SOS, they enter the Dead Man Code instead. It looks cancelled but remains active. The TNR team is notified silently",
+            "Emergency Contacts — users set up contact details in their SafeRide Profile. These are contacted in an emergency",
+          ]},
         ],
       },
       {
         id: "saferide-command",
-        title: "SafeRide Command Centre",
-        icon: Shield,
-        path: "/admin/saferide",
-        what: "The primary dashboard for monitoring active safety situations. Real-time view of all active SOS alerts and SafeRide trips.",
-        features: [
-          { label: "Active SOS list", detail: "All currently active SOS alerts — user name, last known location, time triggered, type (passenger/driver)." },
-          { label: "Locate on map", detail: "Click an SOS to see the live location on a map." },
-          { label: "Resolve SOS", detail: "Mark an SOS as resolved once the situation is confirmed safe." },
-          { label: "Contact user", detail: "Call or WhatsApp the user directly from the Command Centre." },
-          { label: "Escalate", detail: "Escalate to law enforcement with the user's last known location pre-filled." },
+        title: "SafeRide Command Centre — /admin/saferide",
+        blocks: [
+          { type: "para", text: "The Command Centre is the live view of all active safety events. It should be monitored at all times during operating hours." },
+          { type: "steps", items: [
+            "When an SOS alert is triggered, it appears at the top of the Command Centre with a red alert banner",
+            "Click the alert to see the user's name, phone number, last GPS location, and time of alert",
+            "Click 'Locate on Map' to see their live position",
+            "Call the user immediately on their registered number",
+            "If you cannot reach them — or the situation seems genuine — escalate to law enforcement with the location",
+            "Once the situation is resolved, click 'Resolve SOS' and log the outcome",
+          ]},
+          { type: "callout", kind: "warning", title: "Do Not Dismiss Without Confirming", text: "Never resolve an SOS without first confirming the user is safe — either by speaking to them directly or by law enforcement confirmation. An unresolved SOS that was dismissed in error could cost a life." },
         ],
       },
       {
-        id: "live-monitor",
-        title: "Live Monitor",
-        icon: Activity,
-        path: "/admin/monitoring",
-        what: "Real-time feed of all platform activity — new payments, new registrations, SOS triggers, system events.",
-        features: [
-          { label: "Live event stream", detail: "A scrolling feed of events happening right now across the platform." },
-          { label: "Filter by event type", detail: "Show only transactions, only SOS events, only registrations." },
-          { label: "Sound alerts", detail: "Enable audio alerts for SOS triggers so the monitor operator doesn't need to watch the screen continuously." },
+        id: "deadman-code",
+        title: "Dead Man Code — Deep Explanation",
+        blocks: [
+          { type: "para", text: "The Dead Man Code is one of Tag n Ride's most important safety innovations. Understanding it fully is critical for every admin." },
+          { type: "para", text: "Scenario: A driver is hijacked. The hijacker demands they cancel the SOS alert on their phone, or they will be harmed. Normally, cancelling requires entering the real PIN. But if the driver has set a Dead Man Code, they can enter THAT code instead." },
+          { type: "bullets", items: [
+            "To the hijacker — the SOS appears to cancel normally. The phone screen looks like a normal cancellation",
+            "In reality — the SOS remains active on TNR's servers. The driver's location continues to be tracked live",
+            "TNR team — receives an immediate silent alert: 'Dead Man Code used. Treat as active emergency.' The team dispatches assistance",
+            "The hijacker does not know the alert is still running",
+          ]},
+          { type: "callout", kind: "important", title: "Dead Man Code Must Be Different From Real PIN", text: "The app enforces this — you cannot set a Dead Man Code that matches your regular PIN. They must be different. If they were the same, the system could not tell them apart." },
         ],
       },
       {
-        id: "live-trips",
-        title: "Live Trips",
-        icon: Activity,
-        path: "/admin/trips",
-        what: "View all SafeRide trips currently active — driver, passenger, route, duration.",
-        features: [
-          { label: "Active trip list", detail: "Each row shows driver name, passenger name (if linked), trip start time, and duration." },
-          { label: "Track trip", detail: "Click any trip to see the live location on a map." },
-          { label: "End trip", detail: "Admin can forcibly end a trip if it appears stuck or the driver has stopped responding." },
-        ],
-      },
-      {
-        id: "incidents",
-        title: "Incidents",
-        icon: AlertTriangle,
-        path: "/admin/saferide/incidents",
-        what: "Log and manage safety incidents — SOS events, reported crimes, accidents.",
-        features: [
-          { label: "Incident list", detail: "All incidents with severity, status, and date." },
-          { label: "Incident detail", detail: "Full timeline of an incident — when SOS triggered, location at each point, admin actions taken, resolution notes." },
-          { label: "Create incident", detail: "Log an incident reported via phone or WhatsApp that did not come through the app." },
-          { label: "Link to transaction", detail: "Attach the incident to the specific trip transaction it relates to." },
-          { label: "Resolution notes", detail: "Document the outcome — police case number, injury report, etc." },
-        ],
-      },
-      {
-        id: "dead-man-resets",
-        title: "Dead Man Resets",
-        icon: FolderLock,
-        path: "/admin/saferide/dead-man-resets",
-        what: "When a user has forgotten their Dead Man Code, they submit a reset request. Admins review and approve or reject it here.",
-        features: [
-          { label: "Pending requests", detail: "All outstanding reset requests — user name, reason given, submission date." },
-          { label: "Approve reset", detail: "Clear the user's dead man code so they can set a new one. This action is logged in the audit trail and reported to senior management." },
-          { label: "Reject reset", detail: "Reject with a reason — e.g., insufficient justification." },
-          { label: "Why this is sensitive", detail: "The dead man code is a safety feature. Approving a reset for someone who is actually under duress would compromise their safety. Every approval requires careful verification of identity." },
+        id: "deadman-resets",
+        title: "Dead Man Resets — /admin/saferide/dead-man-resets",
+        blocks: [
+          { type: "para", text: "Sometimes a user genuinely forgets their Dead Man Code. They can request a reset — which clears the code so they can set a new one. This page manages those requests." },
+          { type: "callout", kind: "warning", title: "Treat Reset Requests with Extreme Care", text: "Consider this: if a user is currently being held against their will, a hijacker might force them to request a reset so the Dead Man Code no longer works. Before approving ANY reset, you must verify the user's identity and confirm they are safe. Never approve based only on the written request." },
+          { type: "steps", items: [
+            "Read the user's reason carefully",
+            "Call the user on their registered phone number",
+            "Confirm their identity: ask their full name, ID number, and vehicle plate (for drivers)",
+            "Ask if they are safe and are requesting this reset of their own free will",
+            "If satisfied: click Approve — the user can now set a new Dead Man Code",
+            "If unsatisfied or unable to reach them: click Reject with a note. Follow up before reconsidering",
+            "Every approval is automatically reported to senior management via the audit log",
+          ]},
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "compliance",
-    label: "Compliance",
+    id: "admin-compliance",
+    number: "10",
+    title: "Compliance & Risk",
+    subtitle: "FICA, KYC, fraud detection, disputes, and regulatory requirements",
     icon: ShieldCheck,
     color: "text-yellow",
-    entries: [
+    sections: [
       {
-        id: "regulatory",
-        title: "Regulatory & FICA",
-        icon: ClipboardList,
-        path: "/admin/regulatory",
-        what: "FICA (Financial Intelligence Centre Act) compliance tools. South African law requires TNR to verify customer identities, keep records, and report suspicious activity.",
-        features: [
-          { label: "FICA status", detail: "Percentage of users who are FICA-compliant (KYC approved with ID number verified)." },
-          { label: "Non-compliant users", detail: "List of users who have exceeded the transaction threshold without completing FICA. Their wallets may be limited until compliant." },
-          { label: "STR filing", detail: "Suspicious Transaction Reports — file a report to the FIC when a transaction is flagged as potentially illegal." },
-          { label: "Record keeping", detail: "Confirms that all required records are being stored for the legally required period (5 years)." },
+        id: "fica-explained",
+        title: "FICA and Why It Matters",
+        blocks: [
+          { type: "para", text: "FICA — the Financial Intelligence Centre Act — is South African law that requires financial service providers to verify the identity of their customers and monitor for suspicious activity. Tag n Ride is a Financial Services Provider and must comply." },
+          { type: "bullets", items: [
+            "All customers must provide their full name, South African ID number, and address",
+            "Customers with transactions above a threshold must complete enhanced verification (KYC)",
+            "TNR must report suspicious transactions to the Financial Intelligence Centre (FIC)",
+            "Records must be kept for at least 5 years",
+            "Failure to comply can result in fines, loss of operating licence, and criminal prosecution of directors",
+          ]},
+          { type: "callout", kind: "important", title: "Non-Negotiable", text: "FICA compliance is not optional. Never approve a CashUp for a user who has not completed KYC if their withdrawal amount exceeds the legal threshold. When in doubt, escalate to the CFO or legal team." },
         ],
       },
       {
-        id: "compliance-risk",
-        title: "Compliance & Risk",
-        icon: AlertTriangle,
-        path: "/admin/compliance",
-        what: "Operational compliance monitoring — ensuring TNR's processes meet legal and regulatory requirements.",
-        features: [
-          { label: "Compliance checklist", detail: "A live checklist of required compliance tasks — KYC backlog, FICA reporting, audit log health." },
-          { label: "Risk register", detail: "Documented risks with their likelihood, impact, and mitigation status." },
-          { label: "Policy documents", detail: "Links to TNR's internal compliance policies." },
-        ],
-      },
-      {
-        id: "risk",
-        title: "Risk & Fraud",
-        icon: ShieldAlert,
-        path: "/admin/risk",
-        what: "Tools for detecting and managing fraud — flagged transactions, blocked accounts, fraud patterns.",
-        features: [
-          { label: "Flagged transactions", detail: "Transactions that tripped fraud detection rules — unusually large amounts, velocity spikes, known fraudulent patterns." },
-          { label: "Investigate", detail: "Click a flagged transaction to see the full context and decide to clear it or escalate." },
-          { label: "Block account", detail: "Immediately block all transactions from a user account." },
-          { label: "Fraud rules", detail: "The active set of rules that trigger fraud flags. View and adjust thresholds." },
+        id: "risk-fraud",
+        title: "Risk & Fraud Detection — /admin/risk",
+        blocks: [
+          { type: "para", text: "The platform has automated fraud detection that flags unusual transactions for human review. Common fraud patterns in mobile payment apps:" },
+          { type: "table", headers: ["Fraud Type", "Warning Signs", "Action"], rows: [
+            ["Account Takeover", "Login from new device, immediate large CashUp request, changed bank details", "Freeze account, call the user on their registered number to verify"],
+            ["Identity Fraud", "KYC selfie appears to be a photo of a photo, ID document looks digitally edited", "Reject KYC, escalate to risk team, flag the account"],
+            ["Money Laundering", "Rapid cycle of top-ups and cashouts with no real taxi trips in between", "File Suspicious Transaction Report, freeze account"],
+            ["Card Fraud", "Top-up from a card followed immediately by a CashUp — then chargeback", "Hold CashUp pending confirmation, watch for chargeback"],
+            ["QR Code Fraud", "Complaints from multiple passengers that payments went to wrong person", "Audit QR code assignments, suspend suspect account"],
+          ]},
         ],
       },
       {
         id: "disputes",
-        title: "Disputes",
-        icon: Scale,
-        path: "/admin/disputes",
-        what: "Manages payment disputes between passengers and drivers. A passenger can dispute a charge if they believe they were overcharged or if a trip was not completed.",
-        features: [
-          { label: "Dispute queue", detail: "All open disputes with submitter, disputed amount, status, and age." },
-          { label: "Review evidence", detail: "See the original transaction, the passenger's reason, and any evidence submitted." },
-          { label: "Rule in favour of passenger", detail: "Refund the disputed amount to the passenger." },
-          { label: "Rule in favour of driver", detail: "Dismiss the dispute. The driver keeps the payment." },
-          { label: "Request more info", detail: "Ask the passenger or driver for more information before ruling." },
-        ],
-      },
-      {
-        id: "limits",
-        title: "Tx Limits",
-        icon: Gauge,
-        path: "/admin/limits",
-        what: "Transaction limits define the maximum amounts users can send or receive. FICA requires these limits for non-compliant users.",
-        features: [
-          { label: "Per-transaction limit", detail: "Maximum amount for a single payment." },
-          { label: "Daily limit", detail: "Maximum total a user can send/receive in 24 hours." },
-          { label: "Monthly limit", detail: "Maximum total in a calendar month." },
-          { label: "KYC exemption", detail: "Once a user completes KYC, their limits are upgraded." },
-          { label: "Override", detail: "Apply a custom limit to a specific user account." },
+        title: "Disputes — /admin/disputes",
+        blocks: [
+          { type: "para", text: "A dispute is raised when a passenger believes they were charged incorrectly. Disputes must be resolved fairly, quickly, and with a clear audit trail." },
+          { type: "steps", items: [
+            "Review the dispute — read the passenger's stated reason",
+            "Look at the original transaction — amount, time, driver, and GPS location at time of payment",
+            "Contact both the passenger and driver if needed to get their accounts of what happened",
+            "Make a decision: Rule in Favour of Passenger (refund) or Rule in Favour of Driver (dismiss)",
+            "Add detailed notes explaining your decision — this is required for any future audit",
+            "The passenger and driver are both notified of the outcome",
+          ]},
+          { type: "callout", kind: "info", title: "Common Dispute Reasons", text: "Wrong amount entered by passenger, Driver demanded more than the displayed amount, Passenger paid the wrong QR code by mistake, Technical error resulting in double charge. Each case is different — investigate before ruling." },
         ],
       },
       {
         id: "velocity",
-        title: "Velocity Monitor",
-        icon: Zap,
-        path: "/admin/velocity",
-        what: "Monitors transaction velocity — how quickly users are transacting. Sudden spikes in frequency can indicate fraud or a compromised account.",
-        features: [
-          { label: "Velocity alerts", detail: "Users who have exceeded their normal transaction frequency in a short period." },
-          { label: "Velocity rules", detail: "Define what constitutes an alert — e.g., more than 10 transactions in 1 hour." },
-          { label: "Temporary hold", detail: "Automatically place a temporary hold on accounts that breach velocity limits until reviewed." },
-        ],
-      },
-      {
-        id: "gdpr",
-        title: "GDPR & Privacy",
-        icon: ShieldCheck,
-        path: "/admin/gdpr",
-        what: "Data privacy tools — managing user data access requests, deletion requests, and consent records.",
-        features: [
-          { label: "Data access requests", detail: "A user can request all data TNR holds on them. This page tracks those requests and the due date (30 days)." },
-          { label: "Deletion requests", detail: "When a user requests account deletion, their personal data must be anonymised. Track and process here." },
-          { label: "Consent records", detail: "Evidence that users accepted TNR's terms and privacy policy at registration." },
-          { label: "Data export", detail: "Generate and deliver a user's full data export as required by POPIA (SA equivalent of GDPR)." },
+        title: "Velocity Monitor & Tx Limits",
+        blocks: [
+          { type: "para", text: "Velocity monitoring flags users who are transacting at an unusual rate — too many transactions in a short time period. This can indicate fraud (rapid money movement) or a compromised account." },
+          { type: "table", headers: ["Concept", "Explanation"], rows: [
+            ["Velocity Rule", "A rule that says: if a user completes more than X transactions in Y minutes, flag them"],
+            ["Tx Limit", "Maximum rand amount per transaction, per day, or per month. FICA requires lower limits for non-KYC users"],
+            ["KYC Limit Uplift", "Once a user completes KYC, their limits are increased to the standard operating level"],
+            ["Account Hold", "A temporary block on all transactions while velocity breach is being reviewed"],
+          ]},
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "comms",
-    label: "Communications",
+    id: "admin-support",
+    number: "11",
+    title: "Support Operations",
+    subtitle: "Handling user queries, PIN resets, tickets, and escalations",
+    icon: HelpCircle,
+    color: "text-cyan",
+    sections: [
+      {
+        id: "support-lookup",
+        title: "Support Lookup — /admin/support",
+        blocks: [
+          { type: "para", text: "When a user calls or WhatsApps for help, the Support Lookup page is your primary tool. It is designed for speed — get to the user's information within 5 seconds of receiving the call." },
+          { type: "steps", items: [
+            "Type the user's name or phone number in the search box — results appear instantly",
+            "Click the user to open their profile",
+            "You now see: wallet balance, KYC status, recent transactions, account status, and linked accounts",
+            "Take the appropriate action based on the user's query (see table below)",
+          ]},
+          { type: "table", headers: ["Common Query", "Action to Take"], rows: [
+            ["'I forgot my PIN'", "Click 'Reset PIN' — a temporary PIN is sent to their registered phone number. They log in and change it immediately"],
+            ["'My payment didn't go through'", "Check their recent transactions — look for a failed/pending entry. Check their wallet balance. Check if the account is suspended"],
+            ["'The driver didn't receive my payment'", "Find the transaction, check its status. If Completed — it reached the driver. If Failed — initiate a refund"],
+            ["'My wallet balance is wrong'", "Review all recent transactions. Look for any unexpected debits. Escalate to finance if something is unexplained"],
+            ["'I think my account was hacked'", "Suspend the account immediately. Check for recent unusual logins and transactions. Call the user back on their registered number to verify identity before unsuspending"],
+            ["'I want to dispute a payment'", "Get the payment reference. Open a dispute in the Disputes page"],
+          ]},
+        ],
+      },
+      {
+        id: "support-tickets",
+        title: "Support Tickets — /admin/tickets",
+        blocks: [
+          { type: "para", text: "For issues that cannot be resolved in a single interaction — complex disputes, fraud investigations, technical bugs — create a support ticket to track the issue until it is resolved." },
+          { type: "bullets", items: [
+            "Title — short description of the issue",
+            "Priority — Low (informational), Medium (affects one user), High (affects multiple users), Critical (platform issue or safety concern)",
+            "Assign to — the agent or team responsible for resolution",
+            "User link — link the ticket to the affected user's account",
+            "Internal notes — document all investigation steps — visible only to admins, not the user",
+            "Status — Open, In Progress, Awaiting User Response, Resolved",
+            "SLA — Critical tickets must have first response within 15 minutes. High within 2 hours",
+          ]},
+          { type: "callout", kind: "important", title: "Never Close a Safety Ticket as Resolved Until You Are Certain", text: "If a ticket is related to a safety incident (SOS, Dead Man Code, hijacking report), do not mark it Resolved until you have confirmed the user is safe and the matter is fully documented." },
+        ],
+      },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "admin-analytics",
+    number: "12",
+    title: "Analytics & Reporting",
+    subtitle: "Understanding platform data, growth metrics, and generating reports",
+    icon: BarChart3,
+    color: "text-purple",
+    sections: [
+      {
+        id: "analytics-overview",
+        title: "Analytics Overview — /admin/analytics",
+        blocks: [
+          { type: "para", text: "The Analytics Overview gives you a bird's-eye view of the platform's health and growth. This is the page to open in Monday morning meetings when reviewing the previous week." },
+          { type: "bullets", items: [
+            "Registrations chart — new drivers and passengers registered per day over the selected period",
+            "Payment volume chart — rand value of payments per day/week/month",
+            "Active users — unique users who made at least one transaction",
+            "Geographic heatmap — where transactions are happening — useful for identifying growth opportunities in specific cities",
+            "Retention metric — what percentage of users who joined 30 days ago are still transacting today",
+          ]},
+        ],
+      },
+      {
+        id: "export-center",
+        title: "Export Center — /admin/export-center",
+        blocks: [
+          { type: "para", text: "The Export Center lets you download raw data for external analysis, reporting, or accounting software import." },
+          { type: "table", headers: ["Export Type", "What It Contains", "Common Use"], rows: [
+            ["Transactions", "Every transaction with all fields", "Accounting software, reconciliation"],
+            ["Driver Earnings", "Driver-by-driver earnings summary", "Payslip generation, owner reports"],
+            ["KYC Records", "All KYC submissions and statuses", "FICA compliance audit"],
+            ["User List", "All registered users with details", "Marketing campaigns, analysis"],
+            ["Association Payouts", "All association payout records", "Monthly financial reporting"],
+            ["Audit Log", "All admin actions", "Compliance and governance reporting"],
+          ]},
+          { type: "callout", kind: "info", title: "Large Exports", text: "Very large date range exports are queued and processed in the background. A download link is emailed to you when the export is ready — this can take a few minutes for millions of records." },
+        ],
+      },
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "admin-comms",
+    number: "13",
+    title: "Communications",
+    subtitle: "Notifications, WhatsApp, promotions, and user messaging",
     icon: Megaphone,
     color: "text-orange-400",
-    entries: [
+    sections: [
       {
         id: "announcements",
-        title: "Announcements",
-        icon: Megaphone,
-        path: "/admin/notifications",
-        what: "Send push notifications to all users or targeted groups — new features, service updates, emergency notices.",
-        features: [
-          { label: "Target audience", detail: "All users, drivers only, passengers only, or a specific city/province." },
-          { label: "Push notification", detail: "Sends a notification to users' phones that appears even when the app is closed." },
-          { label: "In-app message", detail: "Appears in the user's Inbox inside the app." },
-          { label: "Schedule", detail: "Schedule an announcement to go out at a specific date and time." },
-        ],
-      },
-      {
-        id: "whatsapp",
-        title: "WhatsApp",
-        icon: MessageCircle,
-        path: "/admin/whatsapp",
-        what: "Send WhatsApp messages to users via the TNR WhatsApp Business account.",
-        features: [
-          { label: "Broadcast", detail: "Send a WhatsApp message to a list of users." },
-          { label: "Template messages", detail: "WhatsApp requires pre-approved templates for outbound messages. Manage approved templates here." },
-          { label: "Message history", detail: "Log of all WhatsApp messages sent from the platform." },
-        ],
-      },
-      {
-        id: "send-notice",
-        title: "Send Notice",
-        icon: Mail,
-        path: "/admin/notices",
-        what: "Send a targeted in-app notice to a specific user — e.g., inform a driver their document is expiring.",
-        features: [
-          { label: "Target user", detail: "Search for and select the specific user to notify." },
-          { label: "Notice type", detail: "Document expiry, account warning, payment issue, general information." },
-          { label: "Custom message", detail: "Write a custom message body to appear in the user's Inbox." },
-          { label: "Delivery confirmation", detail: "See when the notice was delivered and read." },
+        title: "Announcements — /admin/notifications",
+        blocks: [
+          { type: "para", text: "Push notifications are sent directly to users' phones. They appear even when the app is closed. Use them for important platform news, maintenance windows, or feature launches." },
+          { type: "steps", items: [
+            "Click 'New Announcement'",
+            "Write a short title (max 50 characters — this is the notification headline)",
+            "Write the full message body",
+            "Select the target audience: All Users, Drivers Only, Passengers Only, or Owners Only",
+            "Optional: select a specific city or province",
+            "Schedule for now or for a future date and time",
+            "Click Send (or Schedule)",
+          ]},
+          { type: "callout", kind: "warning", title: "Push Notifications Cannot Be Recalled", text: "Once a push notification is sent, it cannot be unsent. If you send incorrect information, send a follow-up correction immediately." },
         ],
       },
       {
         id: "promotions",
-        title: "Promotions",
-        icon: Tag,
-        path: "/admin/promotions",
-        what: "Create and manage promotional campaigns — discounted fees, cashback offers, welcome bonuses.",
-        features: [
-          { label: "Create promotion", detail: "Set a promotion code, discount type (% or rand off), maximum uses, expiry date, and target user type." },
-          { label: "Active promotions", detail: "All currently running promotions with usage count vs. limit." },
-          { label: "Promotion analytics", detail: "How many users used a specific promotion and the total discount value given." },
-        ],
-      },
-      {
-        id: "marketing",
-        title: "Marketing",
-        icon: Target,
-        path: "/admin/marketing",
-        what: "Marketing campaign management — track the effectiveness of campaigns across channels.",
-        features: [
-          { label: "Campaign list", detail: "All marketing campaigns with channel, spend, registrations attributed, and revenue generated." },
-          { label: "UTM tracking", detail: "Track referral sources via UTM parameters in app store links or WhatsApp campaigns." },
-          { label: "ROI calculator", detail: "Campaign spend vs. revenue generated." },
-        ],
-      },
-      {
-        id: "referrals",
-        title: "Referrals",
-        icon: Users2,
-        path: "/admin/referrals",
-        what: "The referral programme lets existing users earn rewards for referring new users. This page manages that programme.",
-        features: [
-          { label: "Referral list", detail: "Who referred whom, when, and whether the reward has been paid." },
-          { label: "Reward config", detail: "Set the referral reward amount (e.g., R10 wallet credit for the referrer)." },
-          { label: "Pending rewards", detail: "Rewards that have been earned but not yet credited — approve or batch-approve." },
-        ],
-      },
-      {
-        id: "feedback",
-        title: "User Feedback",
-        icon: Star,
-        path: "/admin/feedback",
-        what: "App store reviews, in-app star ratings, and written feedback submitted by users.",
-        features: [
-          { label: "Rating summary", detail: "Average app rating and distribution of 1–5 star reviews." },
-          { label: "Written feedback", detail: "Full text of feedback submitted through the app." },
-          { label: "Filter by rating", detail: "Focus on low ratings to identify issues." },
-          { label: "Mark for action", detail: "Tag feedback items that require follow-up (e.g., a bug report in a review)." },
+        title: "Promotions — /admin/promotions",
+        blocks: [
+          { type: "para", text: "Promotions drive user acquisition and retention by offering discounts on fees or wallet credits." },
+          { type: "table", headers: ["Promotion Type", "Example"], rows: [
+            ["First top-up bonus", "New passenger gets R10 wallet credit on their first top-up"],
+            ["Referral reward", "Existing user gets R5 credit when a friend they referred makes their first payment"],
+            ["Fee discount", "Platform fee reduced from 3% to 1% for all transactions in December"],
+            ["Driver subscription waiver", "First month subscription free for new drivers registering in a campaign period"],
+          ]},
+          { type: "steps", items: [
+            "Click 'Create Promotion'",
+            "Enter a promo code (if code-activated), or set it as automatic (no code needed)",
+            "Set the discount: rand amount or percentage",
+            "Set maximum uses (leave blank for unlimited)",
+            "Set the expiry date",
+            "Set the target: new users only, specific role, all users",
+            "Click Activate",
+          ]},
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "support",
-    label: "Support",
-    icon: HelpCircle,
-    color: "text-cyan",
-    entries: [
-      {
-        id: "support-lookup",
-        title: "Support Lookup",
-        icon: HelpCircle,
-        path: "/admin/support",
-        what: "The primary tool for handling incoming support calls or WhatsApp messages. Quickly look up a user and take action on their behalf.",
-        features: [
-          { label: "Search by phone/name", detail: "Find the user's account within seconds." },
-          { label: "View wallet balance", detail: "See the user's current balance immediately." },
-          { label: "Reset PIN", detail: "Generate a temporary PIN for a user who has forgotten theirs. Sends via WhatsApp/SMS." },
-          { label: "View recent transactions", detail: "The last 10 transactions — useful to diagnose 'I paid but the driver didn't receive it' calls." },
-          { label: "Suspend account", detail: "Temporarily suspend if the call reveals account compromise." },
-          { label: "Add credit", detail: "Add a goodwill wallet credit with an internal note." },
-        ],
-      },
-      {
-        id: "whatsapp-support",
-        title: "WhatsApp Support",
-        icon: MessageCircle,
-        path: "/admin/whatsapp-support",
-        what: "A dedicated view for the support team handling incoming WhatsApp messages from users.",
-        features: [
-          { label: "Message queue", detail: "Incoming support messages in chronological order with user name (if identified)." },
-          { label: "Link to account", detail: "Link a WhatsApp message to a TNR user account by phone number." },
-          { label: "Quick replies", detail: "Saved response templates for common questions (PIN reset, CashUp timing, etc.)." },
-          { label: "Resolve / Escalate", detail: "Mark a conversation resolved or escalate to a senior agent." },
-        ],
-      },
-      {
-        id: "tickets",
-        title: "Support Tickets",
-        icon: ClipboardList,
-        path: "/admin/tickets",
-        what: "Formal ticket system for complex support issues that require investigation and tracking over time.",
-        features: [
-          { label: "Create ticket", detail: "Open a ticket for any issue reported by a user — auto-linked to their account." },
-          { label: "Priority levels", detail: "Low, Medium, High, Critical. Critical tickets escalate to a senior admin immediately." },
-          { label: "Assignment", detail: "Assign a ticket to a specific support agent." },
-          { label: "Internal notes", detail: "Support agents can leave internal notes visible only to admin — not to the user." },
-          { label: "SLA tracking", detail: "Time to first response and time to resolution are tracked against SLA targets." },
-          { label: "Resolve", detail: "Mark a ticket resolved and optionally send a closing message to the user." },
-        ],
-      },
-    ],
-  },
-
-  // ══════════════════════════════════════════════════════════════
-  {
-    id: "system",
-    label: "System",
-    icon: Settings,
-    color: "text-textMuted",
-    entries: [
-      {
-        id: "daily-ops",
-        title: "Daily Operations",
-        icon: Zap,
-        path: "/admin/daily-ops",
-        what: "A checklist and dashboard for the daily operational tasks that must be completed — settlement runs, statement generation, subscription billing checks.",
-        features: [
-          { label: "Daily task list", detail: "Auto-populated list of tasks for today — e.g., 'Run settlement', 'Process 3 pending CashUps', 'Review 2 new KYC submissions'." },
-          { label: "Mark complete", detail: "Check off each task as it is done. The log is saved for accountability." },
-          { label: "Automated task status", detail: "Shows whether automated background jobs (subscription billing loop, maintenance fee loop, auto-pay loop) ran successfully overnight." },
-        ],
-      },
-      {
-        id: "geography",
-        title: "Coverage Zones",
-        icon: Globe,
-        path: "/admin/geography",
-        what: "Define the geographic zones where TNR operates. Trips outside a coverage zone may be restricted or flagged.",
-        features: [
-          { label: "Zone map", detail: "Visual map of all coverage zones with boundaries." },
-          { label: "Add zone", detail: "Draw a polygon on the map to define a new coverage area." },
-          { label: "Zone rules", detail: "Optionally apply different fee structures or restrictions to different zones." },
-        ],
-      },
-      {
-        id: "health",
-        title: "System Health",
-        icon: Activity,
-        path: "/admin/health",
-        what: "Real-time technical health of the TNR backend — API response times, database performance, background job status, error rates.",
-        features: [
-          { label: "API latency", detail: "Current average response time for key API endpoints." },
-          { label: "Error rate", detail: "Percentage of API calls returning errors in the last 5 minutes." },
-          { label: "Background jobs", detail: "Status of all background billing loops and auto-payment jobs — last run time and next scheduled run." },
-          { label: "Database", detail: "Active connections, query times, pool usage." },
-          { label: "Uptime", detail: "Platform uptime for the last 7/30/90 days." },
-        ],
-      },
-    ],
-  },
-
-  // ══════════════════════════════════════════════════════════════
-  {
-    id: "hr",
-    label: "Human Resources",
+    id: "admin-hr",
+    number: "14",
+    title: "Human Resources & Payroll",
+    subtitle: "Managing TNR staff, salaries, and company documents",
     icon: Users2,
     color: "text-yellow",
-    entries: [
+    sections: [
       {
         id: "hr-staff",
-        title: "HR · Staff",
-        icon: Users2,
-        path: "/admin/hr",
-        what: "Manages TNR's internal employees — admin staff, support agents, operations personnel.",
-        features: [
-          { label: "Employee list", detail: "All staff with name, role, department, salary, start date, and status." },
-          { label: "Add employee", detail: "Create a new employee record with personal details, position, and salary." },
-          { label: "Edit employee", detail: "Update salary, role, department, or contact details." },
-          { label: "Deactivate", detail: "Mark an employee as inactive when they leave. This stops salary processing for them." },
-          { label: "Link to admin account", detail: "Optionally link an employee record to their admin panel login account." },
+        title: "HR · Staff — /admin/hr",
+        blocks: [
+          { type: "para", text: "The HR section manages Tag n Ride's internal employees — the people who run the company. This is separate from the drivers and owners who are platform users." },
+          { type: "bullets", items: [
+            "Employee list — all staff with name, position, department, salary, start date, and status",
+            "Add employee — complete name, surname, ID number, position title, department, salary, bank details, and start date",
+            "Edit employee — update any detail including salary changes (these take effect in the next payroll run)",
+            "Deactivate — mark an employee as inactive when they leave. Their payroll stops. Their records are preserved",
+          ]},
         ],
       },
       {
         id: "payroll",
-        title: "Payroll",
-        icon: Banknote,
-        path: "/admin/payroll",
-        what: "Monthly salary processing for TNR staff. Run payroll, approve salary payments, and maintain payslip records.",
-        features: [
-          { label: "Payroll run", detail: "Generates salary entries for all active employees for the selected month." },
-          { label: "Review & approve", detail: "Review the full payroll batch before approving. Each line shows gross salary, deductions, and net pay." },
-          { label: "Mark as paid", detail: "Once bank transfers are done, mark the payroll as paid. This updates the P&L expenses." },
-          { label: "Payslip generation", detail: "Generates a formal payslip PDF for each employee." },
-          { label: "Historical payroll", detail: "Browse past months' payroll runs." },
-        ],
-      },
-      {
-        id: "documents",
-        title: "HR Documents / Company Documents",
-        icon: FolderLock,
-        path: "/admin/documents",
-        what: "Secure document vault for company and HR documents — employment contracts, NDAs, compliance certificates, policies.",
-        features: [
-          { label: "Upload document", detail: "Upload any file with a category tag and description." },
-          { label: "Document list", detail: "All stored documents with upload date, category, and who uploaded them." },
-          { label: "Access control", detail: "Documents are visible only to users with the appropriate permission level." },
-          { label: "Download", detail: "Authorised users can download any stored document." },
-          { label: "Expiry tracking", detail: "Documents with expiry dates (e.g., business licence) are flagged before they expire." },
+        title: "Payroll — /admin/payroll",
+        blocks: [
+          { type: "para", text: "Payroll must be run every month. The system generates salary entries for all active employees — you review and approve before any payments are made." },
+          { type: "steps", items: [
+            "At the start of each month, go to Payroll",
+            "Click 'Run Payroll for [Month]'",
+            "The system generates a salary entry for each active employee based on their configured salary",
+            "Review each line: employee name, gross salary, any deductions, and net pay",
+            "If any amounts need adjustment — update the employee's record first, then re-run",
+            "Click 'Approve Payroll' to finalise the batch",
+            "Process bank transfers to each employee",
+            "Once transfers are done, click 'Mark as Paid' — this records the expense in the P&L",
+          ]},
+          { type: "callout", kind: "info", title: "Payroll and the P&L", text: "Payroll only appears as an expense in the Revenue P&L page once you click 'Mark as Paid'. Approved-but-unpaid payroll shows as a Pending Obligation in the revenue page's right panel." },
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "superadmin",
-    label: "Superadmin",
-    icon: ShieldCheck,
-    color: "text-purple",
-    entries: [
+    id: "admin-system",
+    number: "15",
+    title: "System Administration",
+    subtitle: "Superadmin tools, settings, console, database, and system health",
+    icon: Settings,
+    color: "text-textMuted",
+    sections: [
       {
-        id: "admin-accounts",
-        title: "Admin Accounts",
-        icon: Shield,
-        path: "/admin/admins",
-        what: "Create and manage admin panel user accounts. Only superadmins can access this page.",
-        features: [
-          { label: "Admin list", detail: "All admin accounts with name, email, role, and last login." },
-          { label: "Create admin", detail: "Add a new admin account — name, email, role, and initial password." },
-          { label: "Edit role", detail: "Change an admin's role. Changes take effect on their next login." },
-          { label: "Deactivate", detail: "Disable an admin account without deleting it (preserves the audit trail)." },
-          { label: "Reset admin password", detail: "Generate a new temporary password for a locked-out admin." },
+        id: "system-health",
+        title: "System Health — /admin/health",
+        blocks: [
+          { type: "para", text: "System Health gives you real-time visibility into the technical health of the TNR backend. Check this page first if users are reporting problems." },
+          { type: "table", headers: ["Indicator", "Healthy Value", "Action If Unhealthy"], rows: [
+            ["API Response Time", "< 500ms", "Check server load, database queries. Notify CTO"],
+            ["Error Rate", "< 0.5%", "Check error logs in System Console. Notify CTO immediately if > 2%"],
+            ["Background Jobs", "All green — last run < 24 hours ago", "Check console for job failure logs. Restart job if needed"],
+            ["Database Connections", "< 80% of pool used", "Investigate runaway queries. Notify CTO"],
+            ["Uptime", "99.9%+", "Investigate any downtime events in the incident log"],
+          ]},
         ],
       },
       {
-        id: "settings",
-        title: "Settings & Config",
-        icon: Settings,
-        path: "/admin/settings",
-        what: "Platform-wide settings — app name, contact details, feature flags, notification templates.",
-        features: [
-          { label: "Platform settings", detail: "App name, support phone number, support email, WhatsApp number, terms & policy URLs." },
-          { label: "Feature flags", detail: "Toggle individual features on/off platform-wide without a code deployment." },
-          { label: "Maintenance mode", detail: "Enable maintenance mode to block all transactions while updates are in progress." },
+        id: "admin-accounts",
+        title: "Admin Accounts — /admin/admins",
+        blocks: [
+          { type: "para", text: "Only Superadmins can create, edit, or deactivate admin accounts. This is intentional — admin account management must be strictly controlled." },
+          { type: "steps", items: [
+            "Go to Admin Accounts",
+            "Click 'Add Admin'",
+            "Enter the new admin's name, email address, and role",
+            "Set a temporary password — the admin must change it on first login",
+            "Click Create",
+            "The new admin can now log in and will see pages appropriate to their role",
+          ]},
+          { type: "callout", kind: "warning", title: "Principle of Least Privilege", text: "Give every admin the LOWEST role that allows them to do their job. Do not give Admin role to someone who only needs Support. Do not give Finance role to someone who only needs to view reports. This limits the damage from compromised credentials." },
+        ],
+      },
+      {
+        id: "settings-config",
+        title: "Settings & Config — /admin/settings",
+        blocks: [
+          { type: "para", text: "Platform-wide settings that control how the app behaves. Most settings here require Superadmin access." },
+          { type: "table", headers: ["Setting", "What It Controls"], rows: [
+            ["Support Phone Number", "The number displayed to users in the app for phone support"],
+            ["WhatsApp Number", "The number users reach when they tap 'WhatsApp Support'"],
+            ["Feature Flags", "Toggle individual features on or off without a code deployment. E.g., disable card top-ups while a payment gateway issue is being fixed"],
+            ["Maintenance Mode", "When enabled, a maintenance notice is shown to all app users and new transactions are blocked. Use only during planned maintenance windows"],
+            ["Terms & Policy URLs", "The URLs for the Terms of Service and Privacy Policy shown in the app during registration"],
+          ]},
         ],
       },
       {
         id: "console",
-        title: "System Console",
-        icon: Terminal,
-        path: "/admin/console",
-        what: "A terminal-like interface for running administrative commands on the backend server. Extremely powerful — use with caution.",
-        features: [
-          { label: "Run commands", detail: "Execute backend maintenance commands — e.g., re-run a failed billing cycle, clear a cache, trigger a specific background job." },
-          { label: "Command log", detail: "Every command run is logged with the admin who ran it and the output." },
-          { label: "Pre-set commands", detail: "Common safe commands are available as one-click buttons to reduce the risk of typos." },
-        ],
-      },
-      {
-        id: "database",
-        title: "Database",
-        icon: Database,
-        path: "/admin/database",
-        what: "Direct database inspection tools. Read-only by default — allows superadmins to query the database for data not exposed through the normal UI.",
-        features: [
-          { label: "Table browser", detail: "Browse database tables and view records." },
-          { label: "Run query", detail: "Execute a read-only SQL query. Write operations require a second superadmin to approve." },
-          { label: "Schema viewer", detail: "View the current database schema — tables, columns, and relationships." },
-        ],
-      },
-      {
-        id: "superadmin-tools",
-        title: "Superadmin Tools",
-        icon: ShieldCheck,
-        path: "/admin/superadmin",
-        what: "Miscellaneous superadmin tools — bulk operations, data migrations, system resets.",
-        features: [
-          { label: "Bulk actions", detail: "Apply an action to many users at once — e.g., apply a subscription fee to all new drivers registered last month." },
-          { label: "Data migration tools", detail: "Move or transform data when platform requirements change." },
-          { label: "Clear cache", detail: "Clear server-side caches if data is appearing stale." },
-        ],
-      },
-      {
-        id: "test-users",
-        title: "Test Users",
-        icon: Monitor,
-        path: "/admin/test-users",
-        what: "Manage test accounts used for QA and development testing. Test accounts can transact in the live environment with fake money.",
-        features: [
-          { label: "Test account list", detail: "All accounts flagged as test users." },
-          { label: "Add test account", detail: "Register a new test user without going through the real onboarding flow." },
-          { label: "Reset test wallet", detail: "Set a test wallet balance to a specific amount for testing a scenario." },
-          { label: "Clear test data", detail: "Delete all transactions made by test accounts to keep analytics clean." },
+        title: "System Console — /admin/console",
+        blocks: [
+          { type: "para", text: "The System Console lets you run backend commands directly. This is the most powerful — and most dangerous — tool in the admin panel." },
+          { type: "callout", kind: "warning", title: "Use with Extreme Caution", text: "Every command runs directly on the production server. A mistake can corrupt data, process duplicate payments, or take the system offline. Never run a command you do not fully understand. Always test in the Test Users environment first." },
+          { type: "bullets", items: [
+            "Pre-set commands — common safe operations (clear expired sessions, re-run a failed billing job, send pending notifications) available as one-click buttons",
+            "Custom commands — advanced: enter a command directly. Every custom command requires a second Superadmin to approve before it executes",
+            "Command log — every command, who ran it, the timestamp, and the output is permanently logged",
+          ]},
         ],
       },
     ],
   },
 
-  // ══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════
   {
-    id: "driver-app",
-    label: "Driver App Guide",
-    icon: Car,
+    id: "troubleshooting",
+    number: "16",
+    title: "Troubleshooting & FAQs",
+    subtitle: "The most common issues and exactly how to resolve them",
+    icon: HelpCircle,
     color: "text-cyan",
-    entries: [
+    sections: [
       {
-        id: "driver-app-overview",
-        title: "Driver App — How It Works",
-        icon: Car,
-        what: "The driver app is a React Native mobile application (iOS and Android) called Tag n Ride. Drivers install it, register, and use it to receive passenger payments.",
-        features: [
-          { label: "Registration", detail: "Driver downloads the app, selects 'Driver' role, enters their name, surname, phone number, vehicle plate, and creates a 4-digit PIN." },
-          { label: "Login", detail: "Phone number + 4-digit PIN." },
-          { label: "QR Code (My QR tab)", detail: "The driver's unique payment QR code. They display this to passengers who scan it to pay. The QR encodes the driver's unique TNR code." },
-          { label: "Wallet (Home tab)", detail: "Shows current wallet balance, recent transactions, and a CashUp (withdraw) button." },
-          { label: "Receiving a payment", detail: "Passenger scans the QR code, enters the amount, enters their PIN, and confirms. The driver sees the payment arrive in real time with a notification." },
-          { label: "CashUp (withdraw)", detail: "Driver taps CashUp, selects their payout account (bank details saved in Profile), enters the amount, and confirms with their PIN. Funds are transferred to their bank account." },
-          { label: "Profile tab", detail: "KYC verification, vehicle plate, taxi association selection, payout bank accounts, change PIN, SafeRide safety settings, support contact." },
+        id: "faq-users",
+        title: "User Issues",
+        blocks: [
+          { type: "table", headers: ["Issue", "Steps to Resolve"], rows: [
+            ["User cannot log in", "1. Look up the account. 2. Confirm the phone number is correct. 3. Reset their PIN. 4. If account is suspended, unsuspend if appropriate"],
+            ["Payment did not reach the driver", "1. Find the transaction by reference or amount+time. 2. Check status — if Pending, wait 60 seconds for processing. If Failed, refund the passenger. If Completed but driver wallet not updated, escalate to tech"],
+            ["User wallet balance is incorrect", "1. Review all transactions in the last 24 hours. 2. Look for unexpected deductions (subscription fee, statement fee). 3. If unexplained, freeze the wallet and escalate to finance"],
+            ["Driver cannot CashUp", "1. Check KYC status — must be Approved. 2. Check bank details are saved in their profile. 3. Check wallet balance meets minimum withdrawal. 4. Check account is not suspended"],
+            ["QR code not scanning", "1. Ask user to confirm they are scanning the correct QR code. 2. Clean the screen or card. 3. Try 'Enter Code Manually' using the TNR code. 4. If still failing, reprint the QR card from admin"],
+            ["User says they paid wrong driver", "1. Find the transaction. 2. Confirm the QR code that was scanned. 3. Initiate a refund from the wrong driver's wallet. 4. Advise user to always check the driver name on the confirmation screen before entering PIN"],
+          ]},
         ],
       },
       {
-        id: "driver-profile-app",
-        title: "Driver Profile Screen",
-        icon: Car,
-        what: "The profile screen in the driver app gives drivers full control over their account settings.",
-        features: [
-          { label: "KYC Verification", detail: "Tap to submit ID document and selfie for verification. Required before the driver can receive payments." },
-          { label: "Vehicle Plate", detail: "Tap the pencil icon to edit the vehicle registration plate. Tap Save to confirm." },
-          { label: "Taxi Association", detail: "Under TAXI ASSOCIATION — tap to select which taxi association the driver belongs to. A bottom sheet opens with a list of all registered associations. Tap one to select and save instantly. Tap 'None / Independent' to remove the link." },
-          { label: "Payout Accounts", detail: "Two bank accounts can be saved — My Account (personal bank) and Owner Account (the taxi owner's bank, for when the owner receives payment directly). Tap either row to add or update bank details." },
-          { label: "FLEET — Switch Owner", detail: "Tap to initiate a transfer to a new fleet owner. This creates a transfer request that the admin must approve." },
-          { label: "SafeRide Profile", detail: "Set up emergency contacts and safety information. A yellow dot appears on this row until completed." },
-          { label: "Dead Man Code", detail: "Set a secret emergency code. See SafeRide section of this manual for full explanation." },
-          { label: "Change PIN", detail: "Enter current PIN, new PIN, and confirm new PIN. PIN must be 4 digits." },
-          { label: "Sign Out", detail: "Logs out of the app. The driver must re-enter their phone and PIN to log back in." },
+        id: "faq-system",
+        title: "System Issues",
+        blocks: [
+          { type: "table", headers: ["Issue", "Steps to Resolve"], rows: [
+            ["Subscription billing loop didn't run", "Check System Health — background jobs panel. If the loop shows 'failed', go to System Console and restart the subscription billing loop"],
+            ["Auto-payments didn't run on the scheduled day", "Check System Health. If the auto-pay loop failed, go to Taxi Associations and click 'Run Auto-Payments' manually"],
+            ["Admin panel not loading", "1. Clear browser cache and reload. 2. Try a different browser. 3. Check System Health for backend errors. 4. Notify CTO if backend is down"],
+            ["Notifications not being sent", "Check the Communications → Announcements page for failed sends. Check the WhatsApp integration status in Settings"],
+            ["KYC page not loading documents", "Check file size — documents over 10MB may fail to upload. Ask user to compress photos and resubmit"],
+          ]},
         ],
       },
-    ],
-  },
-
-  // ══════════════════════════════════════════════════════════════
-  {
-    id: "passenger-app",
-    label: "Passenger App Guide",
-    icon: Users2,
-    color: "text-purple",
-    entries: [
       {
-        id: "passenger-app-overview",
-        title: "Passenger App — How It Works",
-        icon: Users2,
-        what: "Passengers use the same Tag n Ride app but with the 'Passenger' role. The experience is focused on topping up and paying drivers.",
-        features: [
-          { label: "Registration", detail: "Select 'Passenger', enter name, surname, phone number, and create a 4-digit PIN." },
-          { label: "Top Up wallet", detail: "Tap Top Up on the home screen. Enter an amount. Pay via card (Paystack) or EFT. Funds appear in the wallet within seconds (card) or within a business day (EFT)." },
-          { label: "Pay a driver", detail: "Scan the driver's QR code OR tap the Pay button and enter the driver's TNR code manually. Enter the trip fare amount. Confirm with your 4-digit PIN. Done — payment is instant." },
-          { label: "Transaction history", detail: "All payments and top-ups with date, amount, and driver name." },
-          { label: "Share Live Location (SafeRide)", detail: "If in an active SafeRide trip, a 'Share Live Location' button appears in the profile. Tap to generate a tracking link to send to a contact via any messenger." },
-          { label: "Statement", detail: "Download a PDF statement of all transactions for a selected month." },
+        id: "glossary",
+        title: "Glossary of Terms",
+        blocks: [
+          { type: "table", headers: ["Term", "Definition"], rows: [
+            ["CashUp", "The process of a driver or owner withdrawing their TNR wallet balance to their bank account"],
+            ["FICA", "Financial Intelligence Centre Act — South African law requiring customer identity verification"],
+            ["KYC", "Know Your Customer — the identity verification process (ID + selfie)"],
+            ["Platform Fee", "The percentage TNR earns from each passenger payment"],
+            ["Gross Volume", "Total rand value of all payments processed through the platform"],
+            ["TNR Revenue", "Only the fees and subscriptions TNR keeps — not the full payment amount"],
+            ["Commission Split", "The percentage division of each payment between driver and fleet owner"],
+            ["QR Code", "The unique payment identifier for each driver. Passengers scan it to pay"],
+            ["TNR Code", "The alphanumeric version of the QR code (e.g. TNR-ABCD1234). Used for manual entry"],
+            ["SOS", "Emergency alert triggered by a user in danger"],
+            ["Dead Man Code", "A secret decoy PIN. Entering it appears to cancel an SOS but keeps it secretly active"],
+            ["SafeRide", "TNR's safety system — trip tracking, SOS alerts, Dead Man Code"],
+            ["Subscription Fee", "Monthly fee charged to active drivers to use the TNR platform"],
+            ["Fleet Owner", "The person who owns the taxi vehicle. Receives a commission share from driver earnings"],
+            ["Association", "A registered taxi association. TNR may pay them monthly based on a revenue agreement"],
+            ["JWT Token", "The security token that authenticates admin panel sessions. Stored in your browser"],
+            ["Audit Log", "The permanent record of every action taken by every admin"],
+            ["Chargeback", "When a passenger's bank reverses a card top-up — TNR must recover the funds"],
+            ["Settlement", "The process of finalising and transferring funds to external banks"],
+            ["Velocity", "The rate at which a user transacts. High velocity can indicate fraud"],
+            ["Background Job / Loop", "An automated process that runs on a schedule — e.g., nightly subscription billing"],
+          ]},
         ],
       },
     ],
   },
 ];
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-function highlight(text: string, q: string) {
-  if (!q) return text;
-  const idx = text.toLowerCase().indexOf(q.toLowerCase());
-  if (idx === -1) return text;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="bg-yellow/30 text-text rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>
-      {text.slice(idx + q.length)}
-    </>
+const CALLOUT_STYLES: Record<CalloutType, { bg: string; border: string; icon: any; iconColor: string; titleColor: string }> = {
+  info:      { bg: "bg-blue-500/8",   border: "border-blue-400/30",   icon: Info,           iconColor: "text-blue-400",   titleColor: "text-blue-300" },
+  tip:       { bg: "bg-cyan/8",       border: "border-cyan/30",       icon: Lightbulb,      iconColor: "text-cyan",       titleColor: "text-cyan" },
+  warning:   { bg: "bg-yellow/8",     border: "border-yellow/30",     icon: AlertTriangle,  iconColor: "text-yellow",     titleColor: "text-yellow" },
+  important: { bg: "bg-red-500/8",    border: "border-red-400/30",    icon: AlertOctagon,   iconColor: "text-red-400",    titleColor: "text-red-300" },
+  success:   { bg: "bg-green/8",      border: "border-green/30",      icon: CheckCircle,    iconColor: "text-green",      titleColor: "text-green" },
+};
+
+function RenderBlock({ block, q }: { block: Block; q: string }) {
+  const hl = (text: string) => {
+    if (!q) return <>{text}</>;
+    const idx = text.toLowerCase().indexOf(q.toLowerCase());
+    if (idx === -1) return <>{text}</>;
+    return <>{text.slice(0, idx)}<mark className="bg-yellow/30 text-text rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>{text.slice(idx + q.length)}</>;
+  };
+
+  if (block.type === "divider") return <div className="border-t border-border my-6" />;
+
+  if (block.type === "para") return (
+    <p className="text-textMuted text-sm leading-relaxed mb-4">{hl(block.text)}</p>
   );
+
+  if (block.type === "steps") return (
+    <ol className="space-y-2 mb-4">
+      {block.items.map((item, i) => (
+        <li key={i} className="flex gap-3 items-start">
+          <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyan text-bg text-xs font-black flex items-center justify-center mt-0.5">{i + 1}</span>
+          <span className="text-textMuted text-sm leading-relaxed">{hl(item)}</span>
+        </li>
+      ))}
+    </ol>
+  );
+
+  if (block.type === "bullets") return (
+    <ul className="space-y-2 mb-4">
+      {block.items.map((item, i) => {
+        const parts = item.split(" — ");
+        return (
+          <li key={i} className="flex gap-2.5 items-start">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan mt-2 flex-shrink-0" />
+            <span className="text-textMuted text-sm leading-relaxed">
+              {parts.length > 1
+                ? <><span className="text-text font-semibold">{hl(parts[0])}</span>{" — "}{hl(parts.slice(1).join(" — "))}</>
+                : hl(item)}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  if (block.type === "callout") {
+    const st = CALLOUT_STYLES[block.kind];
+    const Icon = st.icon;
+    return (
+      <div className={`rounded-xl border p-4 mb-4 ${st.bg} ${st.border}`}>
+        <div className="flex gap-3 items-start">
+          <Icon size={18} className={`${st.iconColor} flex-shrink-0 mt-0.5`} />
+          <div>
+            {block.title && <p className={`font-bold text-sm mb-1 ${st.titleColor}`}>{block.title}</p>}
+            <p className="text-textMuted text-sm leading-relaxed">{hl(block.text)}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === "table") return (
+    <div className="overflow-x-auto mb-4 rounded-xl border border-border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-bg3">
+            {block.headers.map((h, i) => (
+              <th key={i} className="text-left px-4 py-3 text-textMuted font-bold text-xs uppercase tracking-wider">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, ri) => (
+            <tr key={ri} className="border-b border-border/50 last:border-0 hover:bg-bg3/40 transition-colors">
+              {row.map((cell, ci) => (
+                <td key={ci} className={`px-4 py-3 text-sm leading-relaxed align-top ${ci === 0 ? "text-text font-semibold" : "text-textMuted"}`}>
+                  {hl(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return null;
 }
 
-function EntryCard({ entry, q }: { entry: ManualEntry; q: string }) {
+function SectionCard({ section, q }: { section: Section; q: string }) {
   const [open, setOpen] = useState(false);
-  const Icon = entry.icon;
-  const matches = q
-    ? entry.title.toLowerCase().includes(q.toLowerCase()) ||
-      entry.what.toLowerCase().includes(q.toLowerCase()) ||
-      entry.features.some(f => f.label.toLowerCase().includes(q.toLowerCase()) || f.detail.toLowerCase().includes(q.toLowerCase()))
-    : true;
+  const Icon = section.icon;
+
+  const matches = !q || (
+    section.title.toLowerCase().includes(q.toLowerCase()) ||
+    section.blocks.some(b => {
+      if (b.type === "para") return b.text.toLowerCase().includes(q.toLowerCase());
+      if (b.type === "steps" || b.type === "bullets") return b.items.some(i => i.toLowerCase().includes(q.toLowerCase()));
+      if (b.type === "callout") return (b.text + (b.title || "")).toLowerCase().includes(q.toLowerCase());
+      if (b.type === "table") return b.rows.some(r => r.some(c => c.toLowerCase().includes(q.toLowerCase())));
+      return false;
+    })
+  );
+
+  useEffect(() => {
+    if (q && matches) setOpen(true);
+    if (!q) setOpen(false);
+  }, [q]);
+
   if (!matches) return null;
+
   return (
     <div className="border border-border rounded-xl overflow-hidden mb-3">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-start gap-3 p-4 text-left hover:bg-bg3 transition-colors">
-        <div className="w-9 h-9 rounded-lg bg-cyanDim flex items-center justify-center flex-shrink-0 mt-0.5">
-          <Icon size={16} className="text-cyan" />
-        </div>
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-bg3 transition-colors">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-text font-bold text-sm">{highlight(entry.title, q)}</h3>
-            {entry.path && (
-              <span className="font-mono text-[10px] text-textDim bg-bg3 px-2 py-0.5 rounded border border-border">
-                {entry.path}
-              </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h3 className="text-text font-bold text-sm">{section.title}</h3>
+            {section.path && (
+              <span className="font-mono text-[10px] text-textDim bg-bg3 px-2 py-0.5 rounded border border-border">{section.path}</span>
             )}
           </div>
-          <p className="text-textMuted text-xs mt-1 line-clamp-2">{entry.what}</p>
         </div>
-        <div className="flex-shrink-0 mt-1">
-          {open ? <ChevronDown size={15} className="text-textDim" /> : <ChevronRight size={15} className="text-textDim" />}
-        </div>
+        {open ? <ChevronUp size={15} className="text-textDim flex-shrink-0" /> : <ChevronDown size={15} className="text-textDim flex-shrink-0" />}
       </button>
       {open && (
-        <div className="border-t border-border bg-bg/40 p-4 space-y-4">
-          <p className="text-textMuted text-sm leading-relaxed">{entry.what}</p>
-          <div className="space-y-3">
-            {entry.features.map((f, i) => (
-              <div key={i} className="flex gap-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-cyan mt-2 flex-shrink-0" />
-                <div>
-                  <span className="text-text text-sm font-semibold">{highlight(f.label, q)}</span>
-                  <span className="text-textMuted text-sm"> — {highlight(f.detail, q)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="border-t border-border bg-bg/30 px-5 py-5">
+          {section.blocks.map((b, i) => <RenderBlock key={i} block={b} q={q} />)}
         </div>
       )}
     </div>
   );
 }
 
-function SectionBlock({ section, q, activeId }: { section: ManualSection; q: string; activeId: string }) {
-  const Icon = section.icon;
-  const hasMatch = q
-    ? section.entries.some(e =>
-        e.title.toLowerCase().includes(q.toLowerCase()) ||
-        e.what.toLowerCase().includes(q.toLowerCase()) ||
-        e.features.some(f => f.label.toLowerCase().includes(q.toLowerCase()) || f.detail.toLowerCase().includes(q.toLowerCase()))
-      )
-    : true;
+function ChapterBlock({ ch, q, active, setActive }: { ch: Chapter; q: string; active: string; setActive: (id: string) => void }) {
+  const Icon = ch.icon;
+
+  const hasMatch = !q || ch.sections.some(sec =>
+    sec.title.toLowerCase().includes(q.toLowerCase()) ||
+    sec.blocks.some(b => {
+      if (b.type === "para") return b.text.toLowerCase().includes(q.toLowerCase());
+      if (b.type === "steps" || b.type === "bullets") return b.items.some(i => i.toLowerCase().includes(q.toLowerCase()));
+      if (b.type === "callout") return (b.text + (b.title || "")).toLowerCase().includes(q.toLowerCase());
+      if (b.type === "table") return b.rows.some(r => r.some(c => c.toLowerCase().includes(q.toLowerCase())));
+      return false;
+    })
+  );
+
   if (!hasMatch) return null;
+
   return (
-    <div id={`section-${section.id}`} className="mb-10 scroll-mt-24">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-10 h-10 rounded-xl bg-bg2 border border-border flex items-center justify-center">
-          <Icon size={18} className={section.color} />
+    <div id={`ch-${ch.id}`} className="mb-12 scroll-mt-24">
+      <div className="flex items-start gap-4 mb-6 pb-5 border-b border-border">
+        <div className="w-12 h-12 rounded-xl bg-bg2 border border-border flex items-center justify-center flex-shrink-0">
+          <Icon size={20} className={ch.color} />
         </div>
-        <h2 className="text-text font-extrabold text-lg">{section.label}</h2>
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <span className="font-mono text-xs text-textDim font-bold">CHAPTER {ch.number}</span>
+          </div>
+          <h2 className="text-text font-extrabold text-xl leading-tight">{ch.title}</h2>
+          <p className="text-textMuted text-sm mt-1">{ch.subtitle}</p>
+        </div>
       </div>
-      {section.entries.map(e => (
-        <EntryCard key={e.id} entry={e} q={q} />
-      ))}
+      <div>
+        {ch.sections.map(sec => <SectionCard key={sec.id} section={sec} q={q} />)}
+      </div>
     </div>
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ManualPage() {
   const [q, setQ] = useState("");
-  const [activeId, setActiveId] = useState("overview");
-
-  const totalEntries = SECTIONS.reduce((s, sec) => s + sec.entries.length, 0);
+  const [active, setActive] = useState("intro");
+  const totalSections = CHAPTERS.reduce((s, c) => s + c.sections.length, 0);
 
   return (
     <AdminShell title="System Manual">
       <div className="max-w-6xl">
 
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-cyanDim border border-cyan/30 flex items-center justify-center flex-shrink-0">
-              <BookOpen size={22} className="text-cyan" />
+        {/* ── Cover ───────────────────────────────── */}
+        <div className="mb-10 bg-gradient-to-br from-cyan/5 via-bg2 to-purple/5 border border-border rounded-2xl p-8">
+          <div className="flex items-start gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-cyanDim border border-cyan/30 flex items-center justify-center flex-shrink-0">
+              <BookOpen size={28} className="text-cyan" />
             </div>
-            <div>
-              <h1 className="text-text font-extrabold text-2xl">Tag n Ride — System Manual</h1>
-              <p className="text-textMuted text-sm mt-1">
-                Complete reference guide for every page, button, and feature of the TNR platform.
-                {" "}<span className="text-cyan font-semibold">{SECTIONS.length} sections · {totalEntries} pages documented</span>
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-[10px] font-extrabold text-cyan uppercase tracking-widest px-2.5 py-1 bg-cyanDim border border-cyan/20 rounded-full">Official Reference Guide</span>
+              </div>
+              <h1 className="text-text font-extrabold text-3xl mb-2">Tag n Ride — System Manual</h1>
+              <p className="text-textMuted text-base mb-4 max-w-2xl">
+                The complete, authoritative reference for every feature, page, button, and process in the Tag n Ride platform — from the passenger paying for a trip to the superadmin managing the database.
               </p>
+              <div className="flex flex-wrap gap-4 text-xs text-textMuted">
+                <span className="flex items-center gap-1.5"><BookMarked size={12} className="text-cyan" />{CHAPTERS.length} Chapters</span>
+                <span className="flex items-center gap-1.5"><List size={12} className="text-cyan" />{totalSections} Sections</span>
+                <span className="flex items-center gap-1.5"><Users size={12} className="text-cyan" />Covers all 4 user roles</span>
+                <span className="flex items-center gap-1.5"><Shield size={12} className="text-cyan" />Includes SafeRide safety guide</span>
+              </div>
             </div>
           </div>
 
-          {/* Search */}
-          <div className="relative max-w-xl">
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-textDim" />
-            <input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="Search the manual… (e.g. 'refund', 'KYC', 'association', 'PIN reset')"
-              className="w-full bg-bg2 border border-border rounded-xl pl-10 pr-4 py-3 text-sm text-text placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors"
-            />
-            {q && (
-              <button
-                onClick={() => setQ("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-textDim hover:text-text">
-                ✕
-              </button>
-            )}
+          {/* Quick chapter links */}
+          <div className="mt-6 pt-6 border-t border-border grid grid-cols-2 md:grid-cols-4 gap-2">
+            {CHAPTERS.slice(0, 8).map(ch => {
+              const Icon = ch.icon;
+              return (
+                <a key={ch.id} href={`#ch-${ch.id}`}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg border border-border hover:border-cyan/40 hover:bg-cyanDim transition-colors text-xs text-textMuted hover:text-cyan font-semibold">
+                  <Icon size={12} />
+                  <span className="truncate">{ch.title}</span>
+                </a>
+              );
+            })}
           </div>
         </div>
 
-        <div className="flex gap-8">
+        {/* ── Search ──────────────────────────────── */}
+        <div className="relative mb-8 max-w-2xl">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-textDim" />
+          <input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Search the entire manual… try 'refund', 'KYC', 'Dead Man Code', 'CashUp', 'association'…"
+            className="w-full bg-bg2 border border-border rounded-xl pl-11 pr-10 py-3.5 text-sm text-text placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors"
+          />
+          {q && (
+            <button onClick={() => setQ("")} className="absolute right-4 top-1/2 -translate-y-1/2 text-textDim hover:text-text text-xs">✕ Clear</button>
+          )}
+        </div>
 
-          {/* TOC sidebar */}
-          <aside className="hidden lg:block w-52 flex-shrink-0">
-            <div className="sticky top-6 space-y-0.5">
-              <p className="text-[10px] font-extrabold text-textDim uppercase tracking-widest mb-3">Contents</p>
-              {SECTIONS.map(sec => {
-                const Icon = sec.icon;
-                return (
-                  <a
-                    key={sec.id}
-                    href={`#section-${sec.id}`}
-                    onClick={() => setActiveId(sec.id)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                      activeId === sec.id
-                        ? "bg-cyanDim text-cyan"
-                        : "text-textMuted hover:text-text hover:bg-bg3"
-                    }`}>
-                    <Icon size={12} />
-                    <span className="truncate">{sec.label}</span>
-                  </a>
-                );
-              })}
+        {q && (
+          <div className="mb-6 flex items-center gap-2 text-sm">
+            <Search size={13} className="text-cyan" />
+            <span className="text-textMuted">Results for</span>
+            <span className="text-cyan font-semibold">"{q}"</span>
+          </div>
+        )}
+
+        <div className="flex gap-8">
+          {/* ── TOC ─────────────────────────────── */}
+          <aside className="hidden xl:block w-56 flex-shrink-0">
+            <div className="sticky top-6">
+              <p className="text-[9px] font-extrabold text-textDim uppercase tracking-widest mb-3 px-1">Chapters</p>
+              <div className="space-y-0.5">
+                {CHAPTERS.map(ch => {
+                  const Icon = ch.icon;
+                  return (
+                    <a key={ch.id} href={`#ch-${ch.id}`}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-colors text-textMuted hover:text-text hover:bg-bg3 group">
+                      <span className="font-mono text-[9px] text-textDim w-5 flex-shrink-0 group-hover:text-cyan">{ch.number}</span>
+                      <Icon size={11} className={ch.color} />
+                      <span className="truncate">{ch.title}</span>
+                    </a>
+                  );
+                })}
+              </div>
             </div>
           </aside>
 
-          {/* Main content */}
+          {/* ── Content ─────────────────────────── */}
           <main className="flex-1 min-w-0">
-            {q && (
-              <p className="text-textMuted text-xs mb-6">
-                Showing results for <span className="text-cyan font-semibold">"{q}"</span>
-              </p>
-            )}
-            {SECTIONS.map(sec => (
-              <SectionBlock key={sec.id} section={sec} q={q} activeId={activeId} />
+            {CHAPTERS.map(ch => (
+              <ChapterBlock key={ch.id} ch={ch} q={q} active={active} setActive={setActive} />
             ))}
-            {q && SECTIONS.every(sec =>
-              !sec.entries.some(e =>
-                e.title.toLowerCase().includes(q.toLowerCase()) ||
-                e.what.toLowerCase().includes(q.toLowerCase()) ||
-                e.features.some(f =>
-                  f.label.toLowerCase().includes(q.toLowerCase()) ||
-                  f.detail.toLowerCase().includes(q.toLowerCase())
-                )
+
+            {/* No results */}
+            {q && CHAPTERS.every(ch =>
+              !ch.sections.some(sec =>
+                sec.title.toLowerCase().includes(q.toLowerCase()) ||
+                sec.blocks.some(b => {
+                  if (b.type === "para") return b.text.toLowerCase().includes(q.toLowerCase());
+                  if (b.type === "steps" || b.type === "bullets") return b.items.some(i => i.toLowerCase().includes(q.toLowerCase()));
+                  if (b.type === "callout") return (b.text + (b.title || "")).toLowerCase().includes(q.toLowerCase());
+                  if (b.type === "table") return b.rows.some(r => r.some(c => c.toLowerCase().includes(q.toLowerCase())));
+                  return false;
+                })
               )
             ) && (
-              <div className="text-center py-16">
-                <p className="text-textMuted text-sm">No results for <span className="text-text font-semibold">"{q}"</span></p>
-                <button onClick={() => setQ("")} className="mt-3 text-cyan text-sm hover:underline">Clear search</button>
+              <div className="text-center py-20">
+                <BookOpen size={40} className="text-textDim mx-auto mb-4" />
+                <p className="text-textMuted text-base mb-2">No results for <span className="text-text font-semibold">"{q}"</span></p>
+                <p className="text-textDim text-sm mb-4">Try a different search term — e.g. the feature name, role, or page name</p>
+                <button onClick={() => setQ("")} className="text-cyan text-sm hover:underline font-semibold">Clear search and browse all chapters</button>
+              </div>
+            )}
+
+            {/* Footer */}
+            {!q && (
+              <div className="mt-12 pt-8 border-t border-border text-center">
+                <p className="text-textDim text-xs">Tag n Ride System Manual — Internal Use Only</p>
+                <p className="text-textDim text-xs mt-1">For support, contact your system administrator or the technical team</p>
               </div>
             )}
           </main>
