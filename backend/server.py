@@ -8956,7 +8956,7 @@ async def admin_list_wallets(
             "user_id": r["id"], "full_name": r["full_name"],
             "phone_number": r["phone_number"], "role": r["role"],
             "is_active": r["is_active"], "balance": float(r["balance"] or 0),
-            "is_frozen": r["is_frozen"], "freeze_reason": r["frozen_reason"],
+            "is_frozen": r["is_frozen"], "frozen_reason": r["frozen_reason"],
             "updated_at": iso(r["updated_at"]),
         }
         for r in rows
@@ -8997,8 +8997,10 @@ async def admin_unfreeze_wallet(user_id: str, admin: dict = Depends(require_admi
 
 @api.post("/admin/wallets/{user_id}/adjust")
 async def admin_adjust_wallet(
-    user_id: str, body: WalletAdjustIn, admin: dict = Depends(require_superadmin)
+    user_id: str, body: WalletAdjustIn, admin: dict = Depends(require_admin)
 ):
+    if not has_permission(admin, "adjust_balance"):
+        raise HTTPException(status_code=403, detail="Permission denied: requires adjust_balance")
     async with pool.acquire() as conn:
         wallet = await conn.fetchrow("SELECT balance FROM wallets WHERE user_id=$1", user_id)
         if not wallet:
