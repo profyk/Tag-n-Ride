@@ -198,6 +198,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Daily Operations", href: "/admin/daily-ops", icon: Zap,      permission: "view_analytics" },
       { label: "Coverage Zones",  href: "/admin/geography", icon: Globe,    permission: "view_analytics" },
       { label: "System Health",   href: "/admin/health",    icon: Activity, permission: "view_audit" },
+      { label: "System Manual",   href: "/admin/manual",    icon: BookOpen, permission: null },
     ],
   },
 ];
@@ -215,6 +216,7 @@ const SUPERADMIN_NAV: NavItem[] = [
   { label: "Database",          href: "/admin/database",   icon: Database },
   { label: "Superadmin Tools",  href: "/admin/superadmin", icon: ShieldCheck },
   { label: "Test Users",        href: "/admin/test-users", icon: FlaskConical },
+  { label: "System Manual",     href: "/admin/manual",     icon: BookOpen },
 ];
 
 // ── ThemeToggle ───────────────────────────────────────────────────────────────
