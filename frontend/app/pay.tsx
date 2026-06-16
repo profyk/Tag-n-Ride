@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -55,6 +56,15 @@ export default function Pay() {
       const r = await api.transfer(driver.user_id, a, note || undefined);
       setResultTxn(r.transaction);
       setStage("success");
+      try {
+        const raw = await AsyncStorage.getItem("tnr_recent_pays");
+        const prev: any[] = raw ? JSON.parse(raw) : [];
+        const updated = [
+          { code: qrCode, name: driver.full_name, phone: driver.phone_number, ts: Date.now() },
+          ...prev.filter((x: any) => x.code !== qrCode),
+        ].slice(0, 5);
+        await AsyncStorage.setItem("tnr_recent_pays", JSON.stringify(updated));
+      } catch {}
     } catch (e: any) {
       setErr(e?.message || "Payment failed");
     } finally {
