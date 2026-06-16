@@ -1255,6 +1255,28 @@ async def topup_legacy(_body: TopUpIn, _user: dict = Depends(get_current_user)):
         detail="Direct top-up is disabled. Use POST /api/wallet/topup/initiate to start a gateway-verified payment."
     )
 
+@api.get("/wallet/driver/qr/{code}")
+async def lookup_driver_by_qr(code: str, _: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        drv = await conn.fetchrow(
+            "SELECT d.qr_code,d.vehicle_plate,d.is_verified,d.rating_avg,d.rating_count,d.user_id FROM drivers d WHERE d.qr_code=$1",
+            code
+        )
+        if not drv:
+            drv = await conn.fetchrow(
+                "SELECT d.qr_code,d.vehicle_plate,d.is_verified,d.rating_avg,d.rating_count,d.user_id FROM drivers d WHERE d.user_id=$1",
+                code
+            )
+        if not drv:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        user = await conn.fetchrow("SELECT id,full_name,phone_number FROM users WHERE id=$1", drv["user_id"])
+    return {
+        "user_id": user["id"], "full_name": user["full_name"], "phone_number": user["phone_number"],
+        "qr_code": drv["qr_code"], "vehicle_plate": drv["vehicle_plate"],
+        "is_verified": drv["is_verified"], "rating_avg": float(drv["rating_avg"]),
+        "rating_count": drv["rating_count"],
+    }
+
 @api.get("/wallet/driver/{driver_user_id}")
 async def lookup_driver_by_user_id(driver_user_id: str, _: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
@@ -1280,28 +1302,6 @@ async def list_user_withdrawals(user: dict = Depends(get_current_user)):
             user["id"]
         )
     return [{**dict(r), "amount": float(r["amount"] or 0), "created_at": iso(r["created_at"])} for r in rows]
-
-@api.get("/wallet/driver/qr/{code}")
-async def lookup_driver_by_qr(code: str, _: dict = Depends(get_current_user)):
-    async with pool.acquire() as conn:
-        drv = await conn.fetchrow(
-            "SELECT d.qr_code,d.vehicle_plate,d.is_verified,d.rating_avg,d.rating_count,d.user_id FROM drivers d WHERE d.qr_code=$1",
-            code
-        )
-        if not drv:
-            drv = await conn.fetchrow(
-                "SELECT d.qr_code,d.vehicle_plate,d.is_verified,d.rating_avg,d.rating_count,d.user_id FROM drivers d WHERE d.user_id=$1",
-                code
-            )
-        if not drv:
-            raise HTTPException(status_code=404, detail="Driver not found")
-        user = await conn.fetchrow("SELECT id,full_name,phone_number FROM users WHERE id=$1", drv["user_id"])
-    return {
-        "user_id": user["id"], "full_name": user["full_name"], "phone_number": user["phone_number"],
-        "qr_code": drv["qr_code"], "vehicle_plate": drv["vehicle_plate"],
-        "is_verified": drv["is_verified"], "rating_avg": float(drv["rating_avg"]),
-        "rating_count": drv["rating_count"],
-    }
 
 @api.post("/wallet/transfer")
 async def transfer(body: TransferIn, user: dict = Depends(get_current_user)):
