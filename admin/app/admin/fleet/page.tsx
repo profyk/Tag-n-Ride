@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { AdminShell } from "@/components/ui/AdminShell";
+import { AdminShell } from "@/components/layout/AdminShell";
 import { api, Owner, OwnerDetail, OwnerDriver, CommissionRequest } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
