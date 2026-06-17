@@ -11,53 +11,25 @@ import QRCode from "qrcode";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
 async function generateQRWithLogo(text: string): Promise<string> {
-  return new Promise(async (resolve) => {
-    // Step 1 — generate base QR as data URL
-    const baseUrl = await QRCode.toDataURL(text, {
-      width: 400,
-      margin: 2,
-      color: { dark: "#000000", light: "#ffffff" },
-      errorCorrectionLevel: "H",
-    });
-
-    // Step 2 — draw QR onto canvas
-    const canvas = document.createElement("canvas");
-    canvas.width = 400;
-    canvas.height = 400;
-    const ctx = canvas.getContext("2d")!;
-
-    const qrImg = new Image();
-    qrImg.onload = () => {
-      // Draw QR code
-      ctx.drawImage(qrImg, 0, 0, 400, 400);
-
-      const cx = 200;
-      const cy = 200;
-      const r = 46;
-
-      // White ring around logo
-      ctx.beginPath();
-      ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffffff";
-      ctx.fill();
-
-      // Cyan circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = "#00D4FF";
-      ctx.fill();
-
-      // TNR text
-      ctx.fillStyle = "#05050A";
-      ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("TNR", cx, cy);
-
-      resolve(canvas.toDataURL("image/png"));
-    };
-    qrImg.src = baseUrl;
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 400;
+  await (QRCode as any).toCanvas(canvas, text, {
+    width: 400, margin: 2,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H",
   });
+  const ctx = canvas.getContext("2d")!;
+  const cx = 200, cy = 200, r = 46;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff"; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#00D4FF"; ctx.fill();
+  ctx.fillStyle = "#05050A";
+  ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("TNR", cx, cy);
+  return canvas.toDataURL("image/png");
 }
 
 export default function DriverDetailPage() {

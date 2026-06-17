@@ -15,34 +15,25 @@ import toast from "react-hot-toast";
 import QRCode from "qrcode";
 
 async function generateQRWithLogo(text: string): Promise<string> {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const baseUrl = await QRCode.toDataURL(text, {
-        width: 400, margin: 2,
-        color: { dark: "#000000", light: "#ffffff" },
-        errorCorrectionLevel: "H",
-      });
-      const canvas = document.createElement("canvas");
-      canvas.width = 400; canvas.height = 400;
-      const ctx = canvas.getContext("2d")!;
-      const img = new Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0, 400, 400);
-        const cx = 200, cy = 200, r = 46;
-        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
-        ctx.fillStyle = "#ffffff"; ctx.fill();
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fillStyle = "#00D4FF"; ctx.fill();
-        ctx.fillStyle = "#05050A";
-        ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText("TNR", cx, cy);
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.onerror = reject;
-      img.src = baseUrl;
-    } catch (e) { reject(e); }
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 400;
+  await (QRCode as any).toCanvas(canvas, text, {
+    width: 400, margin: 2,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H",
   });
+  const ctx = canvas.getContext("2d")!;
+  const cx = 200, cy = 200, r = 46;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff"; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#00D4FF"; ctx.fill();
+  ctx.fillStyle = "#05050A";
+  ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("TNR", cx, cy);
+  return canvas.toDataURL("image/png");
 }
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
@@ -287,8 +278,8 @@ function OwnerModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
                 </>
               ) : (
                 <div className="w-full py-5 flex flex-col items-center gap-3">
-                  <QrCodeIcon size={36} className="text-bg3" />
-                  <p className="text-textDim text-xs">No QR code assigned yet</p>
+                  <QrCodeIcon size={36} className="text-textDim" />
+                  <p className="text-textMuted text-xs">No QR code assigned yet</p>
                   <button onClick={async () => {
                     try {
                       const res = await api.generateDriverQR(owner.user_id);
