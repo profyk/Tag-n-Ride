@@ -52,17 +52,50 @@ export function WebQrScanner({ active, torch, onScan, onTorchSupportChange, onEr
     rafRef.current = requestAnimationFrame(tick);
   }, [onScan]);
 
+  // Finds the rear/environment camera as reliably as the web platform allows.
+  // `facingMode: "ideal"` is only a hint — many browsers happily ignore it and
+  // hand back the front camera instead, so we layer several strategies:
+  //   1. Ask for an exact environment-facing camera.
+  //   2. If that's unsupported (e.g. no exact match), enumerate devices and
+  //      pick one whose label says "back"/"rear"/"environment".
+  //   3. Fall back to an "ideal" (non-exact) environment request.
+  //   4. Last resort: whatever camera is available (e.g. a laptop webcam).
+  const acquireStream = useCallback(async (): Promise<MediaStream> => {
+    const videoBase = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { ...videoBase, facingMode: { exact: "environment" } },
+        audio: false,
+      });
+    } catch {}
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const rear = devices.find(
+        d => d.kind === "videoinput" && /back|rear|environment/i.test(d.label)
+      );
+      if (rear) {
+        return await navigator.mediaDevices.getUserMedia({
+          video: { ...videoBase, deviceId: { exact: rear.deviceId } },
+          audio: false,
+        });
+      }
+    } catch {}
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { ...videoBase, facingMode: "environment" },
+        audio: false,
+      });
+    } catch {}
+
+    return navigator.mediaDevices.getUserMedia({ video: videoBase, audio: false });
+  }, []);
+
   const start = useCallback(async () => {
     stop();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
+      const stream = await acquireStream();
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -75,7 +108,7 @@ export function WebQrScanner({ active, torch, onScan, onTorchSupportChange, onEr
     } catch {
       onError?.("Camera access denied. Please allow camera access in your browser settings.");
     }
-  }, [stop, tick, onTorchSupportChange, onError]);
+  }, [stop, tick, acquireStream, onTorchSupportChange, onError]);
 
   useEffect(() => {
     if (Platform.OS !== "web") return;

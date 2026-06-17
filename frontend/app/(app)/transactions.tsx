@@ -11,6 +11,7 @@ import { api, Txn, Dispute } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { Pill } from "../../src/ui";
+import { ConfirmDialog } from "../../src/ConfirmDialog";
 import { formatZAR, formatDate, radius } from "../../src/theme";
 
 type Filter = "all" | "in" | "out" | "topup" | "withdrawal";
@@ -33,6 +34,7 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Txn | null>(null);
   const [undone, setUndone] = useState<{ txn: Txn; index: number } | null>(null);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
   const undoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [showDisputeForm, setShowDisputeForm] = useState(false);
@@ -106,23 +108,16 @@ export default function Transactions() {
   };
 
   const handleClearAll = () => {
+    if (!items.length) return;
+    setShowClearAllConfirm(true);
+  };
+
+  const confirmClearAll = async () => {
+    setShowClearAllConfirm(false);
     const allIds = items.map(t => t.id);
-    if (!allIds.length) return;
-    Alert.alert(
-      "Clear all transactions?",
-      `All ${allIds.length} transaction${allIds.length === 1 ? "" : "s"} will be permanently removed from your history on every device. This can't be undone from here — contact support to restore it.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear all", style: "destructive",
-          onPress: async () => {
-            setItems([]);
-            setSelected(null);
-            try { await api.hideTransactions(allIds); } catch { load(); }
-          },
-        },
-      ]
-    );
+    setItems([]);
+    setSelected(null);
+    try { await api.hideTransactions(allIds); } catch { load(); }
   };
 
   const filtered = items.filter(t => {
@@ -427,6 +422,17 @@ export default function Transactions() {
           </TouchableOpacity>
         </View>
       )}
+
+      <ConfirmDialog
+        visible={showClearAllConfirm}
+        title="Clear all transactions?"
+        message={`All ${items.length} transaction${items.length === 1 ? "" : "s"} will be permanently removed from your history on every device. This can't be undone from here — contact support to restore it.`}
+        confirmLabel="Clear all"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={confirmClearAll}
+        onCancel={() => setShowClearAllConfirm(false)}
+      />
     </SafeAreaView>
   );
 }
