@@ -155,29 +155,106 @@ function OwnerDetailModal({
 
   return (
     <Modal open onClose={onClose} title="Fleet Owner Profile">
-      <div className="space-y-5">
+      <div className="space-y-4">
 
         {/* Hero */}
-        <div className="rounded-xl p-5 border border-border bg-bg2 flex items-start gap-4">
+        <div className="rounded-xl p-4 border border-border bg-bg2 flex items-start gap-3">
           <Avatar name={owner.full_name} size="lg" />
           <div className="flex-1 min-w-0">
-            <p className="text-text font-black text-lg leading-tight">{owner.full_name}</p>
+            <p className="text-text font-black text-base leading-tight">{owner.full_name}</p>
             {owner.business_name && (
-              <div className="flex items-center gap-1.5 mt-1">
-                <Building2 size={11} className="text-textDim" />
+              <div className="flex items-center gap-1 mt-0.5">
+                <Building2 size={10} className="text-textDim" />
                 <p className="text-textMuted text-xs font-semibold">{owner.business_name}</p>
               </div>
             )}
-            <p className="text-textDim text-xs font-mono mt-1">{owner.phone_number}</p>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <p className="text-textDim text-xs font-mono mt-0.5">{owner.phone_number}</p>
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               <CashupPill method={owner.cashup_method} />
               <span className="text-[10px] text-textDim">Joined {formatDate(owner.created_at)}</span>
             </div>
           </div>
-          <button onClick={() => { navigator.clipboard.writeText(owner.user_id); toast.success("ID copied"); }}
-            className="text-textDim hover:text-textMuted flex-shrink-0">
-            <Copy size={12} />
+          <button onClick={() => { navigator.clipboard.writeText(owner.user_id); toast.success("Copied"); }}
+            className="text-textDim hover:text-textMuted flex-shrink-0 p-1">
+            <Copy size={11} />
           </button>
+        </div>
+
+        {/* ── QR Code — shown first so it's always visible ── */}
+        <div className="border border-border rounded-xl overflow-hidden">
+          {/* Header bar */}
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-bg3 border-b border-border">
+            <div className="w-6 h-6 rounded bg-cyan flex items-center justify-center flex-shrink-0">
+              <span className="font-black text-[9px] text-bg">TNR</span>
+            </div>
+            <p className="text-text text-xs font-bold">Payment QR Code</p>
+            <span className="text-textDim text-[10px] ml-auto">Scan to pay this owner</span>
+          </div>
+
+          {/* QR body */}
+          <div className="p-4 flex flex-col items-center bg-bg2">
+            {owner.qr_code ? (
+              <>
+                {/* QR image */}
+                <div className="bg-white rounded-xl p-3 mb-3 shadow-inner">
+                  {qrDataUrl && qrDataUrl !== "error" ? (
+                    <img src={qrDataUrl} alt="Owner QR Code" className="w-48 h-48 block" />
+                  ) : qrDataUrl === "error" ? (
+                    <div className="w-48 h-48 flex flex-col items-center justify-center gap-2 bg-gray-50 rounded-lg">
+                      <QrCodeIcon size={24} className="text-gray-300" />
+                      <p className="text-gray-400 text-[10px] text-center">Failed to render</p>
+                      <button
+                        onClick={() => { setQrDataUrl(""); generateQRWithLogo(owner.qr_code!).then(setQrDataUrl).catch(() => setQrDataUrl("error")); }}
+                        className="text-[10px] text-blue-500 underline">Retry</button>
+                    </div>
+                  ) : (
+                    <div className="w-48 h-48 flex items-center justify-center">
+                      <div className="w-7 h-7 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+
+                {/* TNR code pill */}
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-cyan/10 border border-cyan/20 rounded-full mb-4">
+                  <span className="text-cyan font-black text-[10px] tracking-widest">TNR</span>
+                  <span className="font-mono text-[10px] font-bold text-text">{owner.qr_code}</span>
+                  <button onClick={() => { navigator.clipboard.writeText(owner.qr_code!); toast.success("Code copied"); }}>
+                    <Copy size={9} className="text-textDim hover:text-textMuted" />
+                  </button>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 w-full">
+                  <button onClick={handleDownload} disabled={!qrDataUrl || qrDataUrl === "error"}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-bg3 border border-border text-textMuted text-xs font-bold hover:text-text transition-colors disabled:opacity-40">
+                    <Download size={12} /> Download
+                  </button>
+                  <button onClick={handlePrint} disabled={!qrDataUrl || qrDataUrl === "error"}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-cyan/10 border border-cyan/20 text-cyan text-xs font-bold hover:bg-cyan/20 transition-colors disabled:opacity-40">
+                    <Printer size={12} /> Print
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="w-full py-6 flex flex-col items-center gap-3">
+                <QrCodeIcon size={36} className="text-bg3" />
+                <p className="text-textDim text-xs text-center">No QR code assigned yet</p>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await api.generateDriverQR(owner.user_id);
+                      const code = res.data.qr_code;
+                      const url = await generateQRWithLogo(code);
+                      setQrDataUrl(url);
+                      toast.success("QR code generated");
+                    } catch (e: any) { toast.error(e.message || "Failed to generate QR"); }
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-cyan/10 border border-cyan/20 text-cyan text-xs font-bold rounded-lg hover:bg-cyan/20 transition-colors">
+                  <QrCodeIcon size={12} /> Generate QR Code
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Stats grid */}
@@ -193,52 +270,6 @@ function OwnerDetailModal({
               <p className={`${s.small ? "text-xs" : "text-sm"} font-black ${s.color} truncate`}>{s.value}</p>
             </div>
           ))}
-        </div>
-
-        {/* QR Code */}
-        <div className="bg-white rounded-2xl p-5 flex flex-col items-center shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 self-start mb-4">
-            <div className="w-8 h-8 rounded-lg bg-[#00D4FF] flex items-center justify-center flex-shrink-0">
-              <span className="font-black text-[11px] text-[#05050A]">TNR</span>
-            </div>
-            <div>
-              <p className="text-gray-800 font-bold text-xs">Fleet Owner QR Code</p>
-              <p className="text-gray-400 text-[10px]">Scan to pay this owner</p>
-            </div>
-          </div>
-
-          {owner.qr_code ? (
-            <>
-              <div className="border border-gray-100 rounded-xl p-2.5 mb-3">
-                {qrDataUrl ? (
-                  <img src={qrDataUrl} alt="Owner QR Code" className="w-44 h-44" />
-                ) : (
-                  <div className="w-44 h-44 flex items-center justify-center">
-                    <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-2 mb-4 bg-blue-50 rounded-full px-3 py-1.5 border border-[#00D4FF33]">
-                <span className="text-[#00D4FF] font-black text-[10px] tracking-wider">TNR</span>
-                <span className="font-mono text-[10px] font-bold text-gray-700">{owner.qr_code}</span>
-              </div>
-              <div className="flex gap-2 w-full">
-                <button onClick={handleDownload} disabled={!qrDataUrl}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition-colors disabled:opacity-40">
-                  <Download size={12} /> Download
-                </button>
-                <button onClick={handlePrint} disabled={!qrDataUrl}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-gray-700 transition-colors disabled:opacity-40">
-                  <Printer size={12} /> Print
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="w-full py-8 flex flex-col items-center gap-2">
-              <QrCodeIcon size={32} className="text-gray-200" />
-              <p className="text-gray-400 text-xs text-center">No QR code assigned to this owner</p>
-            </div>
-          )}
         </div>
 
         {/* Bank account */}
