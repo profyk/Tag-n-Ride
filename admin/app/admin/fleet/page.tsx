@@ -6,34 +6,142 @@ import { formatZAR, formatDate } from "@/lib/utils";
 import {
   Download, Search, ChevronRight, RefreshCw, Building2,
   Wallet, Banknote, CheckCircle, Clock, TrendingUp, Copy,
-  X, ExternalLink, Printer, QrCode as QrCodeIcon, AlertTriangle,
-  Star, Users, BadgeDollarSign, CreditCard, ShieldCheck,
-  ThumbsUp, ThumbsDown, ReceiptText, Filter,
+  X, ExternalLink, Printer, QrCode as QrCodeIcon,
+  CreditCard, ShieldCheck, ThumbsUp, ThumbsDown, ReceiptText, Filter,
 } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import QRCode from "qrcode";
 
-async function generateQRWithLogo(text: string): Promise<string> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 400;
-  canvas.height = 400;
-  await (QRCode as any).toCanvas(canvas, text, {
-    width: 400, margin: 2,
-    color: { dark: "#000000", light: "#ffffff" },
-    errorCorrectionLevel: "H",
-  });
-  const ctx = canvas.getContext("2d")!;
-  const cx = 200, cy = 200, r = 46;
-  ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
-  ctx.fillStyle = "#ffffff"; ctx.fill();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = "#00D4FF"; ctx.fill();
-  ctx.fillStyle = "#05050A";
-  ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("TNR", cx, cy);
-  return canvas.toDataURL("image/png");
+// ── Direct canvas QR renderer ─────────────────────────────────────────────
+function QrBlock({ code, ownerName, ownerUserId, onGenerate }: {
+  code: string | null;
+  ownerName: string;
+  ownerUserId: string;
+  onGenerate: (newCode: string) => void;
+}) {
+  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  const [ready,    setReady]    = useState(false);
+  const [errored,  setErrored]  = useState(false);
+  const [genning,  setGenning]  = useState(false);
+
+  useEffect(() => {
+    if (!code || !canvasRef.current) return;
+    setReady(false);
+    setErrored(false);
+    const canvas = canvasRef.current;
+    (QRCode as any).toCanvas(canvas, code, {
+      width: 200, margin: 2,
+      color: { dark: "#000000", light: "#ffffff" },
+      errorCorrectionLevel: "H",
+    }).then(() => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { setErrored(true); return; }
+      const cx = canvas.width / 2, cy = canvas.height / 2, r = 23;
+      ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff"; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#00D4FF"; ctx.fill();
+      ctx.fillStyle = "#05050A";
+      ctx.font = "900 11px Arial, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("TNR", cx, cy);
+      setReady(true);
+    }).catch(() => setErrored(true));
+  }, [code]);
+
+  const handleDownload = () => {
+    if (!canvasRef.current) return;
+    const a = document.createElement("a");
+    a.href = canvasRef.current.toDataURL("image/png");
+    a.download = `qr-owner-${ownerName.replace(/[^a-zA-Z0-9]/g, "-")}.png`;
+    a.click();
+    toast.success("Downloaded");
+  };
+
+  const handlePrint = () => {
+    if (!canvasRef.current) return;
+    const dataUrl = canvasRef.current.toDataURL("image/png");
+    const pw = window.open("", "_blank", "width=480,height=580");
+    if (!pw) { toast.error("Allow pop-ups to print"); return; }
+    pw.document.write(`<!DOCTYPE html><html><head><title>QR</title>
+<style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;background:#fff;padding:32px;margin:0}.n{font-size:18px;font-weight:900;margin-bottom:16px}img{width:220px;height:220px}@media print{@page{margin:0;size:A5}}</style>
+</head><body><p class="n">${ownerName}</p><img src="${dataUrl}"/><script>window.onload=function(){window.print()}<\/script></body></html>`);
+    pw.document.close();
+  };
+
+  const handleGenerate = async () => {
+    setGenning(true);
+    try {
+      const res = await api.generateDriverQR(ownerUserId);
+      onGenerate(res.data.qr_code);
+      toast.success("QR generated");
+    } catch (e: any) { toast.error(e.message || "Failed to generate QR"); }
+    finally { setGenning(false); }
+  };
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-bg3 border-b border-border">
+        <div className="w-6 h-6 rounded bg-cyan flex items-center justify-center flex-shrink-0">
+          <span className="font-black text-[9px] text-bg">TNR</span>
+        </div>
+        <p className="text-text text-xs font-bold flex-1">Payment QR Code</p>
+        <span className="text-textDim text-[10px]">Scan to pay this owner</span>
+      </div>
+      <div className="p-4 flex flex-col items-center bg-bg2">
+        {code ? (
+          <>
+            <div className="bg-white rounded-xl p-3 mb-3 shadow-sm flex items-center justify-center" style={{ minHeight: 224 }}>
+              <canvas ref={canvasRef} width={200} height={200}
+                style={{ display: ready ? "block" : "none", imageRendering: "pixelated" }} />
+              {!ready && !errored && (
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                  <p className="text-gray-400 text-[10px]">Rendering…</p>
+                </div>
+              )}
+              {errored && (
+                <div className="flex flex-col items-center gap-2">
+                  <QrCodeIcon size={28} className="text-gray-300" />
+                  <p className="text-gray-400 text-[10px]">Failed to render</p>
+                  <button onClick={() => { setErrored(false); setReady(false); }}
+                    className="text-[10px] text-cyan underline">Retry</button>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-cyan/10 border border-cyan/20 rounded-full mb-3">
+              <span className="text-cyan font-black text-[10px]">TNR</span>
+              <span className="font-mono text-[10px] font-bold text-text">{code}</span>
+              <button onClick={() => { navigator.clipboard.writeText(code); toast.success("Copied"); }}>
+                <Copy size={8} className="text-textDim hover:text-textMuted" />
+              </button>
+            </div>
+            <div className="flex gap-2 w-full">
+              <button onClick={handleDownload} disabled={!ready}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-bg3 border border-border text-textMuted text-xs font-bold hover:text-text transition-colors disabled:opacity-40">
+                <Download size={12} /> Download
+              </button>
+              <button onClick={handlePrint} disabled={!ready}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-cyan/10 border border-cyan/20 text-cyan text-xs font-bold hover:bg-cyan/20 transition-colors disabled:opacity-40">
+                <Printer size={12} /> Print
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="w-full py-6 flex flex-col items-center gap-3">
+            <QrCodeIcon size={40} className="text-textDim" />
+            <p className="text-textMuted text-sm font-semibold">No QR code assigned</p>
+            <p className="text-textDim text-xs text-center">This owner doesn't have a QR code yet.</p>
+            <button onClick={handleGenerate} disabled={genning}
+              className="flex items-center gap-1.5 px-4 py-2 bg-cyan/10 border border-cyan/20 text-cyan text-xs font-bold rounded-lg hover:bg-cyan/20 transition-colors disabled:opacity-50">
+              <QrCodeIcon size={12} /> {genning ? "Generating…" : "Generate QR Code"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
@@ -93,7 +201,6 @@ function SkeletonRow() {
 function OwnerModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
   const [detail,        setDetail]        = useState<OwnerDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
-  const [qrDataUrl,     setQrDataUrl]     = useState("");
   const [qrCode,        setQrCode]        = useState(owner.qr_code);
   const [showAllDrivers,setShowAllDrivers] = useState(false);
   const [showAllCashups,setShowAllCashups] = useState(false);
@@ -106,37 +213,11 @@ function OwnerModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
       .finally(() => setDetailLoading(false));
   }, [owner.user_id]);
 
-  useEffect(() => {
-    if (!qrCode) { setQrDataUrl(""); return; }
-    setQrDataUrl("");
-    generateQRWithLogo(qrCode).then(setQrDataUrl).catch(() => setQrDataUrl("error"));
-  }, [qrCode]);
-
   const drivers   = detail?.drivers || [];
   const cashups   = detail?.cashup_history || [];
   const verified  = drivers.filter(d => d.is_verified).length;
   const topEarner = [...drivers].sort((a, b) => b.total_earnings - a.total_earnings)[0];
   const fleetEarnings = drivers.reduce((s, d) => s + d.total_earnings, 0);
-  const safeName  = owner.full_name.replace(/[^a-zA-Z0-9]/g, "-");
-
-  const handleDownload = () => {
-    if (!qrDataUrl || qrDataUrl === "error") return;
-    const a = document.createElement("a");
-    a.href = qrDataUrl; a.download = `qr-owner-${safeName}.png`; a.click();
-    toast.success("Downloaded");
-  };
-
-  const handlePrint = () => {
-    if (!qrDataUrl || qrDataUrl === "error") return;
-    const pw = window.open("", "_blank", "width=480,height=580");
-    if (!pw) { toast.error("Allow pop-ups to print"); return; }
-    pw.document.write(`<!DOCTYPE html><html><head><title>Tag-n-Ride Owner QR</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,sans-serif;background:#fff;padding:32px}.logo{font-size:12px;font-weight:800;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:20px}.name{font-size:20px;font-weight:900;color:#111;margin-bottom:4px}.biz{font-size:13px;color:#888;margin-bottom:20px}img{width:240px;height:240px}.note{font-size:11px;color:#aaa;margin-top:16px;text-align:center}@media print{@page{margin:0;size:A5}body{padding:16px}}</style>
-</head><body><p class="logo">Tag-n-Ride Fleet Owner</p><p class="name">${owner.full_name}</p>${owner.business_name ? `<p class="biz">${owner.business_name}</p>` : ""}
-<img src="${qrDataUrl}" alt="QR"/><p class="note">Fleet Owner Payment QR · tagnride.app</p>
-<script>window.onload=function(){window.print()}<\/script></body></html>`);
-    pw.document.close();
-  };
 
   const handleBillNow = async () => {
     if (!confirm(`Bill ${owner.full_name} subscription now?`)) return;
@@ -231,69 +312,12 @@ function OwnerModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
           )}
 
           {/* ── QR Code ── */}
-          <div className="border border-border rounded-xl overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-bg3 border-b border-border">
-              <div className="w-6 h-6 rounded bg-cyan flex items-center justify-center flex-shrink-0">
-                <span className="font-black text-[9px] text-bg">TNR</span>
-              </div>
-              <p className="text-text text-xs font-bold flex-1">Payment QR Code</p>
-              <span className="text-textDim text-[10px]">Scan to pay this owner</span>
-            </div>
-            <div className="p-4 flex flex-col items-center bg-bg2">
-              {qrCode ? (
-                <>
-                  <div className="bg-white rounded-xl p-3 mb-3 shadow-inner">
-                    {qrDataUrl && qrDataUrl !== "error" ? (
-                      <img src={qrDataUrl} alt="QR" className="w-44 h-44 block" />
-                    ) : qrDataUrl === "error" ? (
-                      <div className="w-44 h-44 flex flex-col items-center justify-center gap-2">
-                        <QrCodeIcon size={24} className="text-gray-300" />
-                        <p className="text-gray-400 text-[10px]">Render failed</p>
-                        <button onClick={() => { setQrDataUrl(""); generateQRWithLogo(qrCode).then(setQrDataUrl).catch(() => setQrDataUrl("error")); }}
-                          className="text-[10px] text-cyan underline">Retry</button>
-                      </div>
-                    ) : (
-                      <div className="w-44 h-44 flex items-center justify-center">
-                        <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-cyan/10 border border-cyan/20 rounded-full mb-3">
-                    <span className="text-cyan font-black text-[10px]">TNR</span>
-                    <span className="font-mono text-[10px] font-bold text-text">{qrCode}</span>
-                    <button onClick={() => { navigator.clipboard.writeText(qrCode); toast.success("Copied"); }}>
-                      <Copy size={8} className="text-textDim hover:text-textMuted" />
-                    </button>
-                  </div>
-                  <div className="flex gap-2 w-full">
-                    <button onClick={handleDownload} disabled={!qrDataUrl || qrDataUrl === "error"}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-bg3 border border-border text-textMuted text-xs font-bold hover:text-text transition-colors disabled:opacity-40">
-                      <Download size={12} /> Download
-                    </button>
-                    <button onClick={handlePrint} disabled={!qrDataUrl || qrDataUrl === "error"}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-cyan/10 border border-cyan/20 text-cyan text-xs font-bold hover:bg-cyan/20 transition-colors disabled:opacity-40">
-                      <Printer size={12} /> Print
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="w-full py-5 flex flex-col items-center gap-3">
-                  <QrCodeIcon size={36} className="text-textDim" />
-                  <p className="text-textMuted text-xs">No QR code assigned yet</p>
-                  <button onClick={async () => {
-                    try {
-                      const res = await api.generateDriverQR(owner.user_id);
-                      setQrCode(res.data.qr_code);
-                      toast.success("QR generated");
-                    } catch (e: any) { toast.error(e.message || "Failed"); }
-                  }}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-cyan/10 border border-cyan/20 text-cyan text-xs font-bold rounded-lg hover:bg-cyan/20 transition-colors">
-                    <QrCodeIcon size={12} /> Generate QR
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+          <QrBlock
+            code={qrCode}
+            ownerName={owner.full_name}
+            ownerUserId={owner.user_id}
+            onGenerate={(newCode) => setQrCode(newCode)}
+          />
 
           {/* ── Bank account ── */}
           {owner.cashup_method === "bank" && owner.account_number && (
