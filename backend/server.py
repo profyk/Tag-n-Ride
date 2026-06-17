@@ -2162,12 +2162,12 @@ async def admin_generate_driver_qr(user_id: str, request: Request, admin: dict =
 
 # ── Admin: Analytics ─────────────────────────────────────────
 @api.get("/admin/analytics")
-async def admin_analytics(range: Optional[str] = "30d", admin: dict = Depends(require_admin)):
+async def admin_analytics(period: Optional[str] = "30d", admin: dict = Depends(require_admin)):
     if not has_permission(admin, "view_analytics"):
         raise HTTPException(status_code=403, detail="Permission denied")
     try:
         days_map = {"7d": 7, "30d": 30, "90d": 90}
-        days = days_map.get(range, 30)
+        days = days_map.get(period, 30)
         def _f(v): return float(v) if v is not None else 0.0
         async with pool.acquire() as conn:
             daily = await conn.fetch(
