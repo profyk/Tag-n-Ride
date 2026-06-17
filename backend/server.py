@@ -461,6 +461,8 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )""",
+                # wallets.updated_at — required by GET /admin/wallets
+                "ALTER TABLE wallets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
             ]:
                 try:
                     await conn.execute(_sql)
@@ -8937,7 +8939,8 @@ async def admin_list_wallets(
     async with pool.acquire() as conn:
         q = """
             SELECT u.id, u.full_name, u.phone_number, u.role, u.is_active,
-                   w.balance, w.is_frozen, w.frozen_reason, w.updated_at
+                   w.balance, w.is_frozen, w.frozen_reason,
+                   COALESCE(w.updated_at, w.created_at) AS updated_at
             FROM users u
             JOIN wallets w ON w.user_id=u.id
             WHERE u.is_test IS NOT TRUE
@@ -8973,7 +8976,7 @@ async def admin_freeze_wallet(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         await conn.execute(
-            "UPDATE wallets SET is_frozen=TRUE, frozen_reason=$2, frozen_at=NOW() WHERE user_id=$1",
+            "UPDATE wallets SET is_frozen=TRUE, frozen_reason=$2, frozen_at=NOW(), updated_at=NOW() WHERE user_id=$1",
             user_id, body.reason
         )
         await audit(conn, admin["id"], "freeze_wallet", user_id, "user",
@@ -8989,7 +8992,7 @@ async def admin_unfreeze_wallet(user_id: str, admin: dict = Depends(require_admi
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         await conn.execute(
-            "UPDATE wallets SET is_frozen=FALSE, frozen_reason=NULL, frozen_at=NULL WHERE user_id=$1", user_id
+            "UPDATE wallets SET is_frozen=FALSE, frozen_reason=NULL, frozen_at=NULL, updated_at=NOW() WHERE user_id=$1", user_id
         )
         await audit(conn, admin["id"], "unfreeze_wallet", user_id, "user",
                     {"target_name": user["full_name"]})
@@ -9010,7 +9013,7 @@ async def admin_adjust_wallet(
             raise HTTPException(status_code=400, detail="Adjustment would result in negative balance")
         ref = f"ADJ-{uuid.uuid4().hex[:10].upper()}"
         await conn.execute(
-            "UPDATE wallets SET balance=$2 WHERE user_id=$1", user_id, new_bal
+            "UPDATE wallets SET balance=$2, updated_at=NOW() WHERE user_id=$1", user_id, new_bal
         )
         await conn.execute(
             """INSERT INTO transactions (id,reference,type,status,amount,sender_id,receiver_id,note)
