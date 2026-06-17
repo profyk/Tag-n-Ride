@@ -211,9 +211,16 @@ function AnalyticsTab() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    api.analytics(range)
-      .then(r => setData(r.data))
-      .catch(e => setError(e?.response?.data?.detail || e?.message || "Failed to load analytics"))
+    const token = typeof window !== "undefined" ? localStorage.getItem("tnr_admin_token") : null;
+    fetch(`https://tag-n-ride-production.up.railway.app/api/admin/analytics?range=${range}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json?.detail || `HTTP ${r.status}`);
+        setData(json);
+      })
+      .catch(e => setError(e?.message || "Failed to load analytics"))
       .finally(() => setLoading(false));
   }, [range]);
 
