@@ -8,10 +8,42 @@ import {
   Download, Search, ChevronRight, RefreshCw, Building2,
   Wallet, Banknote, Star, CheckCircle, Clock, Users,
   TrendingUp, Copy, X, ExternalLink, Award, ChevronDown,
-  ChevronUp, FileText,
+  ChevronUp, FileText, Printer, QrCode as QrCodeIcon,
 } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import QRCode from "qrcode";
+
+async function generateQRWithLogo(text: string): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const baseUrl = await QRCode.toDataURL(text, {
+        width: 400, margin: 2,
+        color: { dark: "#000000", light: "#ffffff" },
+        errorCorrectionLevel: "H",
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = 400; canvas.height = 400;
+      const ctx = canvas.getContext("2d")!;
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, 400, 400);
+        const cx = 200, cy = 200, r = 46;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff"; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "#00D4FF"; ctx.fill();
+        ctx.fillStyle = "#05050A";
+        ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("TNR", cx, cy);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = reject;
+      img.src = baseUrl;
+    } catch (e) { reject(e); }
+  });
+}
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
 const authHdrs = () => ({ Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}` });
@@ -82,6 +114,7 @@ function OwnerDetailModal({
   const [detail, setDetail] = useState<OwnerDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const [showAll, setShowAll] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
 
   useEffect(() => {
     api.ownerDetail(owner.user_id)
@@ -89,6 +122,32 @@ function OwnerDetailModal({
       .catch(() => {})
       .finally(() => setDetailLoading(false));
   }, [owner.user_id]);
+
+  useEffect(() => {
+    if (!owner.qr_code) return;
+    generateQRWithLogo(owner.qr_code).then(setQrDataUrl).catch(() => {});
+  }, [owner.qr_code]);
+
+  const safeName = owner.full_name.replace(/[^a-zA-Z0-9]/g, "-");
+
+  const handleDownload = () => {
+    if (!qrDataUrl) return;
+    const a = document.createElement("a");
+    a.href = qrDataUrl; a.download = `qr-${safeName}.png`; a.click();
+    toast.success("QR downloaded");
+  };
+
+  const handlePrint = () => {
+    if (!qrDataUrl) return;
+    const pw = window.open("", "_blank", "width=480,height=580");
+    if (!pw) { toast.error("Allow pop-ups to print"); return; }
+    pw.document.write(`<!DOCTYPE html><html><head><title>Tag-n-Ride Owner QR</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,sans-serif;background:#fff;padding:32px}.logo{font-size:12px;font-weight:800;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:20px}.name{font-size:20px;font-weight:900;color:#111;margin-bottom:4px}.biz{font-size:13px;color:#888;margin-bottom:20px}img{width:240px;height:240px}.note{font-size:11px;color:#aaa;margin-top:16px;text-align:center}@media print{@page{margin:0;size:A5}body{padding:16px}}</style>
+</head><body><p class="logo">Tag-n-Ride</p><p class="name">${owner.full_name}</p>${owner.business_name ? `<p class="biz">${owner.business_name}</p>` : ""}
+<img src="${qrDataUrl}" alt="Owner QR"/><p class="note">Fleet Owner Payment QR · tagnride.app</p>
+<script>window.onload=function(){window.print()}<\/script></body></html>`);
+    pw.document.close();
+  };
 
   const drivers = detail?.drivers || [];
   const cashups = detail?.cashup_history || [];
@@ -134,6 +193,52 @@ function OwnerDetailModal({
               <p className={`${s.small ? "text-xs" : "text-sm"} font-black ${s.color} truncate`}>{s.value}</p>
             </div>
           ))}
+        </div>
+
+        {/* QR Code */}
+        <div className="bg-white rounded-2xl p-5 flex flex-col items-center shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 self-start mb-4">
+            <div className="w-8 h-8 rounded-lg bg-[#00D4FF] flex items-center justify-center flex-shrink-0">
+              <span className="font-black text-[11px] text-[#05050A]">TNR</span>
+            </div>
+            <div>
+              <p className="text-gray-800 font-bold text-xs">Fleet Owner QR Code</p>
+              <p className="text-gray-400 text-[10px]">Scan to pay this owner</p>
+            </div>
+          </div>
+
+          {owner.qr_code ? (
+            <>
+              <div className="border border-gray-100 rounded-xl p-2.5 mb-3">
+                {qrDataUrl ? (
+                  <img src={qrDataUrl} alt="Owner QR Code" className="w-44 h-44" />
+                ) : (
+                  <div className="w-44 h-44 flex items-center justify-center">
+                    <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mb-4 bg-blue-50 rounded-full px-3 py-1.5 border border-[#00D4FF33]">
+                <span className="text-[#00D4FF] font-black text-[10px] tracking-wider">TNR</span>
+                <span className="font-mono text-[10px] font-bold text-gray-700">{owner.qr_code}</span>
+              </div>
+              <div className="flex gap-2 w-full">
+                <button onClick={handleDownload} disabled={!qrDataUrl}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition-colors disabled:opacity-40">
+                  <Download size={12} /> Download
+                </button>
+                <button onClick={handlePrint} disabled={!qrDataUrl}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-gray-700 transition-colors disabled:opacity-40">
+                  <Printer size={12} /> Print
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="w-full py-8 flex flex-col items-center gap-2">
+              <QrCodeIcon size={32} className="text-gray-200" />
+              <p className="text-gray-400 text-xs text-center">No QR code assigned to this owner</p>
+            </div>
+          )}
         </div>
 
         {/* Bank account */}
