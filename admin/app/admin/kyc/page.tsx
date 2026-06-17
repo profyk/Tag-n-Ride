@@ -8,6 +8,7 @@ import {
   Eye, CheckCircle, XCircle, Clock, AlertTriangle,
   ZoomIn, Download, ChevronLeft, ChevronRight, X,
   ImageOff, RefreshCw, ExternalLink, User, Trash2,
+  RotateCw, Search, Columns2, Rows3, Copy, Hash,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -102,12 +103,16 @@ function Lightbox({
   onNext: () => void;
 }) {
   const current = images[index];
+  const [rotation, setRotation] = useState(0);
+
+  useEffect(() => { setRotation(0); }, [index]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowLeft") onPrev();
       if (e.key === "ArrowRight") onNext();
+      if (e.key === "r" || e.key === "R") setRotation(r => (r + 90) % 360);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -123,6 +128,12 @@ function Lightbox({
       </div>
 
       <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+        <button
+          onClick={e => { e.stopPropagation(); setRotation(r => (r + 90) % 360); }}
+          title="Rotate (R)"
+          className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white">
+          <RotateCw size={16} />
+        </button>
         <a
           href={current.src}
           target="_blank"
@@ -161,7 +172,8 @@ function Lightbox({
       <img
         src={preview(current.src)}
         alt={current.label}
-        className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
+        style={{ transform: `rotate(${rotation}deg)` }}
+        className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl transition-transform duration-200"
         onClick={e => e.stopPropagation()}
       />
 
@@ -198,8 +210,10 @@ export default function KYCPage() {
   const [rejecting, setRejecting] = useState(false);
   const [deletingDocs, setDeletingDocs] = useState(false);
   const [deleteDocsTarget, setDeleteDocsTarget] = useState<KYCDocument | null>(null);
+  const [search, setSearch] = useState("");
 
   const [imageTab, setImageTab] = useState(0);
+  const [compareMode, setCompareMode] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
@@ -227,6 +241,7 @@ export default function KYCPage() {
 
   const handleView = async (doc: KYCDocument) => {
     setImageTab(0);
+    setCompareMode(false);
     setLoadingDetail(true);
     setViewDoc(doc);
     try {
@@ -273,7 +288,32 @@ export default function KYCPage() {
     finally { setDeletingDocs(false); }
   };
 
-  const filtered = docs.filter((d) => filter === "all" || d.status === filter);
+  const exportCsv = (rows: KYCDocument[]) => {
+    const header = ["Name", "Phone", "ID Number", "Status", "Submitted", "Reviewed By", "Reviewed At", "Rejection Reason"];
+    const csv = [
+      header,
+      ...rows.map((d) => [
+        d.full_name || "", d.phone_number || "", d.id_number || "",
+        d.status, formatDate(d.submitted_at),
+        d.reviewed_by || "", d.reviewed_at ? formatDate(d.reviewed_at) : "",
+        d.rejection_reason || "",
+      ]),
+    ].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "kyc-review.csv"; a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} record${rows.length !== 1 ? "s" : ""}`);
+  };
+
+  const filtered = docs
+    .filter((d) => filter === "all" || d.status === filter)
+    .filter((d) =>
+      !search ||
+      d.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      d.phone_number?.includes(search) ||
+      d.id_number?.toLowerCase().includes(search.toLowerCase())
+    );
   const pendingDocs = docs.filter((d) => d.status === "pending");
   const oldestWait = pendingDocs.length > 0
     ? Math.max(...pendingDocs.map((d) => waitDays(d.submitted_at)))
@@ -335,18 +375,34 @@ export default function KYCPage() {
           </div>
         )}
 
-        {/* Filter tabs */}
-        <div className="flex gap-2 flex-wrap">
-          {(["pending", "approved", "rejected", "all"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all capitalize ${
-                filter === f ? "bg-cyanDim text-cyan border-cyan/20" : "bg-bg2 text-textMuted border-border hover:text-text"
-              }`}>
-              {f} ({docs.filter((d) => f === "all" || d.status === f).length})
-            </button>
-          ))}
+        {/* Filter tabs + search + export */}
+        <div className="flex gap-3 flex-wrap items-center justify-between">
+          <div className="flex gap-2 flex-wrap">
+            {(["pending", "approved", "rejected", "all"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all capitalize ${
+                  filter === f ? "bg-cyanDim text-cyan border-cyan/20" : "bg-bg2 text-textMuted border-border hover:text-text"
+                }`}>
+                {f} ({docs.filter((d) => f === "all" || d.status === f).length})
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 items-center">
+            <div className="relative w-56">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-textDim" />
+              <input
+                placeholder="Search name, phone, ID..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-bg border border-border rounded-lg text-text text-sm placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors"
+              />
+            </div>
+            <Button variant="secondary" onClick={() => exportCsv(filtered)} disabled={!filtered.length}>
+              <Download size={13} /> Export
+            </Button>
+          </div>
         </div>
 
         {loading ? <Spinner /> : (
@@ -392,7 +448,9 @@ export default function KYCPage() {
                         </div>
                       )}
                     </Td>
-                    <Td className="text-textMuted text-xs">{doc.reviewed_by || (doc.reviewed_at ? formatDate(doc.reviewed_at) : "—")}</Td>
+                    <Td className="text-textMuted text-xs">
+                      {doc.status !== "pending" ? (doc.reviewed_by || (doc.reviewed_at ? formatDate(doc.reviewed_at) : "—")) : "—"}
+                    </Td>
                     <Td>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {doc.status === "pending" && (
@@ -450,6 +508,14 @@ export default function KYCPage() {
                 <div>
                   <h3 className="text-text font-bold text-lg">{viewDoc.full_name}</h3>
                   <p className="text-textMuted text-xs font-mono">{viewDoc.phone_number}</p>
+                  {viewDoc.id_number && (
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(viewDoc.id_number!); toast.success("ID number copied"); }}
+                      title="Click to copy — cross-check against the licence photo"
+                      className="flex items-center gap-1 text-textDim hover:text-cyan text-xs font-mono mt-0.5 transition-colors">
+                      <Hash size={10} /> {viewDoc.id_number} <Copy size={9} />
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -502,24 +568,60 @@ export default function KYCPage() {
                 </div>
               )}
 
-              {/* Image tab selector */}
+              {/* Image tab selector + compare toggle */}
               {imageTabs.length > 0 && (
-                <div className="flex gap-1 p-1 bg-bg border border-border rounded-xl w-fit">
-                  {imageTabs.map((t, i) => (
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex gap-1 p-1 bg-bg border border-border rounded-xl w-fit">
+                    {imageTabs.map((t, i) => (
+                      <button
+                        key={t.key}
+                        onClick={() => setImageTab(i)}
+                        disabled={compareMode}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 ${
+                          imageTab === i && !compareMode ? "bg-cyanDim text-cyan" : "text-textMuted hover:text-text"
+                        }`}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  {viewDoc.selfie_url && viewDoc.licence_front_url && (
                     <button
-                      key={t.key}
-                      onClick={() => setImageTab(i)}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        imageTab === i ? "bg-cyanDim text-cyan" : "text-textMuted hover:text-text"
+                      onClick={() => setCompareMode(v => !v)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                        compareMode ? "bg-cyanDim text-cyan border-cyan/20" : "text-textMuted border-border hover:text-text"
                       }`}>
-                      {t.label}
+                      {compareMode ? <Rows3 size={12} /> : <Columns2 size={12} />}
+                      {compareMode ? "Single view" : "Compare faces"}
                     </button>
-                  ))}
+                  )}
+                </div>
+              )}
+
+              {/* Compare view — selfie vs licence front, side by side for face matching */}
+              {compareMode && viewDoc.selfie_url && viewDoc.licence_front_url && (
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { src: viewDoc.selfie_url, label: "Selfie" },
+                    { src: viewDoc.licence_front_url, label: "Licence Front" },
+                  ].map((img) => {
+                    const lbIdx = lightboxImages.findIndex(i => i.src === img.src);
+                    return (
+                      <div key={img.label}>
+                        <KycImage
+                          src={img.src}
+                          alt={img.label}
+                          className="w-full aspect-square"
+                          onClick={() => lbIdx >= 0 && openLightbox(lbIdx)}
+                        />
+                        <p className="text-textDim text-[10px] text-center mt-1.5 font-bold uppercase tracking-wider">{img.label}</p>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
               {/* Main image display */}
-              {imageTabs.length > 0 && (() => {
+              {!compareMode && imageTabs.length > 0 && (() => {
                 const active = imageTabs[imageTab];
                 const lbIdx = lightboxImages.findIndex(img => img.src === active?.src);
                 return (
@@ -565,7 +667,7 @@ export default function KYCPage() {
               })()}
 
               {/* Thumbnail strip */}
-              {imageTabs.length > 1 && (
+              {!compareMode && imageTabs.length > 1 && (
                 <div className="flex gap-3">
                   {imageTabs.map((t, i) => (
                     <button
@@ -604,7 +706,7 @@ export default function KYCPage() {
                 </div>
               )}
 
-              {viewDoc.reviewed_by && (
+              {viewDoc.status !== "pending" && viewDoc.reviewed_by && (
                 <p className="text-textDim text-[10px] text-center">
                   Reviewed by <span className="font-bold text-textMuted">{viewDoc.reviewed_by}</span>
                   {viewDoc.reviewed_at && <> on {formatDate(viewDoc.reviewed_at)}</>}

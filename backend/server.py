@@ -1637,7 +1637,8 @@ async def kyc_submit(
                    SET selfie_url=$1, licence_front_url=$2,
                        selfie_public_id=$3, licence_public_id=$4,
                        storage='cloudinary', status='pending',
-                       submitted_at=NOW(), rejection_reason=NULL
+                       submitted_at=NOW(), rejection_reason=NULL,
+                       reviewed_by=NULL, reviewed_at=NULL
                    WHERE user_id=$5""",
                 selfie_url, licence_url,
                 selfie_public_id, licence_public_id,
@@ -2159,16 +2160,22 @@ async def admin_kyc_list(admin: dict = Depends(require_admin)):
     if not has_permission(admin, "review_kyc"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT k.*,u.full_name,u.phone_number FROM kyc_documents k JOIN users u ON u.id=k.user_id ORDER BY k.submitted_at DESC")
-    return [{**dict(r), "submitted_at": iso(r["submitted_at"]), "reviewed_at": iso(r["reviewed_at"]) if r["reviewed_at"] else None,
-             "selfie_url": None, "licence_front_url": None} for r in rows]
+        rows = await conn.fetch(
+            "SELECT k.*,u.full_name,u.phone_number,u.id_number FROM kyc_documents k "
+            "JOIN users u ON u.id=k.user_id ORDER BY k.submitted_at DESC"
+        )
+    return [{**dict(r), "submitted_at": iso(r["submitted_at"]), "reviewed_at": iso(r["reviewed_at"]) if r["reviewed_at"] else None}
+            for r in rows]
 
 @api.get("/admin/kyc/{user_id}")
 async def admin_kyc_detail(user_id: str, admin: dict = Depends(require_admin)):
     if not has_permission(admin, "review_kyc"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
-        doc = await conn.fetchrow("SELECT * FROM kyc_documents WHERE user_id=$1", user_id)
+        doc = await conn.fetchrow(
+            "SELECT k.*,u.full_name,u.phone_number,u.id_number FROM kyc_documents k "
+            "JOIN users u ON u.id=k.user_id WHERE k.user_id=$1", user_id
+        )
     if not doc: raise HTTPException(status_code=404, detail="KYC not found")
     return {**dict(doc), "submitted_at": iso(doc["submitted_at"]), "reviewed_at": iso(doc["reviewed_at"]) if doc["reviewed_at"] else None}
 
@@ -2179,12 +2186,30 @@ async def admin_kyc_review(user_id: str, body: KYCReviewIn, request: Request, ad
     if body.action == "reject" and not body.rejection_reason:
         raise HTTPException(status_code=400, detail="Rejection reason required")
     async with pool.acquire() as conn:
+        user_row = await conn.fetchrow("SELECT phone_number, full_name FROM users WHERE id=$1", user_id)
         await conn.execute(
             "UPDATE kyc_documents SET status=$1,reviewed_by=$2,reviewed_at=NOW(),rejection_reason=$3 WHERE user_id=$4",
             body.action + "d", admin["id"], body.rejection_reason, user_id
         )
         if body.action == "approve":
             await conn.execute("UPDATE drivers SET is_verified=TRUE WHERE user_id=$1", user_id)
+            await send_sms(user_row["phone_number"], "Tag n Ride: Your KYC has been approved! You can now receive payments.")
+            await notify_user(conn, "KYC Approved", "Your identity has been verified. You can now receive payments!", "kyc", user_id)
+            await conn.execute(
+                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
+                   VALUES (gen_random_uuid()::text,$1,'kyc','Identity Verified',
+                   'Your KYC verification has been approved. You can now receive payments.','app',false)""",
+                user_id
+            )
+        else:
+            await send_sms(user_row["phone_number"], f"Tag n Ride: Your KYC was not approved. Reason: {body.rejection_reason}. Please resubmit.")
+            await notify_user(conn, "KYC Rejected", f"KYC not approved: {body.rejection_reason}. Tap to resubmit.", "error", user_id)
+            await conn.execute(
+                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
+                   VALUES (gen_random_uuid()::text,$1,'kyc','KYC Verification Failed',
+                   'Your identity verification was not approved. Please resubmit your documents.','app',false)""",
+                user_id
+            )
         await audit(conn, admin["id"], f"KYC_{body.action.upper()}", user_id, "kyc", {"reason": body.rejection_reason}, request.client.host)
     return {"ok": True}
 
@@ -6902,44 +6927,6 @@ async def admin_routes_stats(admin: dict = Depends(require_admin)):
         "peak_hours": [{"hour": int(r["hour"]), "count": r["count"]} for r in peak_hours],
         "hourly_today": [{"hour": int(r["hour"]), "routes": r["routes"], "collected": float(r["collected"])} for r in hourly],
     }
-
-# ════════════════════════════════════════════════════════════════
-# ENHANCED KYC REVIEW WITH SMS
-# ════════════════════════════════════════════════════════════════
-
-@api.post("/admin/kyc/{user_id}/review/v2")
-async def admin_kyc_review_v2(user_id: str, body: KYCReviewIn, request: Request, admin: dict = Depends(require_admin)):
-    if not has_permission(admin, "review_kyc"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-    if body.action == "reject" and not body.rejection_reason:
-        raise HTTPException(status_code=400, detail="Rejection reason required")
-    async with pool.acquire() as conn:
-        user_row = await conn.fetchrow("SELECT phone_number, full_name FROM users WHERE id=$1", user_id)
-        await conn.execute(
-            "UPDATE kyc_documents SET status=$1,reviewed_by=$2,reviewed_at=NOW(),rejection_reason=$3 WHERE user_id=$4",
-            body.action + "d", admin["id"], body.rejection_reason, user_id
-        )
-        if body.action == "approve":
-            await conn.execute("UPDATE drivers SET is_verified=TRUE WHERE user_id=$1", user_id)
-            await send_sms(user_row["phone_number"], "Tag n Ride: Your KYC has been approved! You can now receive payments.")
-            await notify_user(conn, "KYC Approved", "Your identity has been verified. You can now receive payments!", "kyc", user_id)
-            await conn.execute(
-                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
-                   VALUES (gen_random_uuid()::text,$1,'kyc','Identity Verified',
-                   'Your KYC verification has been approved. You can now receive payments.','app',false)""",
-                user_id
-            )
-        else:
-            await send_sms(user_row["phone_number"], f"Tag n Ride: Your KYC was not approved. Reason: {body.rejection_reason}. Please resubmit.")
-            await notify_user(conn, f"KYC Rejected", "KYC not approved: {body.rejection_reason}. Tap to resubmit.", "error", user_id)
-            await conn.execute(
-                """INSERT INTO user_documents (id,user_id,document_type,title,description,source,is_read)
-                   VALUES (gen_random_uuid()::text,$1,'kyc','KYC Verification Failed',
-                   'Your identity verification was not approved. Please resubmit your documents.','app',false)""",
-                user_id
-            )
-        await audit(conn, admin["id"], f"KYC_{body.action.upper()}", user_id, "kyc", {"reason": body.rejection_reason}, request.client.host)
-    return {"ok": True}
 
 # ════════════════════════════════════════════════════════════════
 # WITHDRAWAL APPROVAL WITH STITCH INSTANT PAYOUT

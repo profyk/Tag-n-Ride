@@ -228,6 +228,7 @@ export type KYCDocument = {
   user_id: string;
   full_name?: string;
   phone_number?: string;
+  id_number?: string | null;
   selfie_url?: string;
   licence_front_url?: string;
   licence_back_url?: string;
