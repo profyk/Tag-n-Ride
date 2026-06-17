@@ -212,7 +212,7 @@ function AnalyticsTab() {
     setLoading(true);
     setError(null);
     const token = typeof window !== "undefined" ? localStorage.getItem("tnr_admin_token") : null;
-    fetch(`https://tag-n-ride-production.up.railway.app/api/admin/analytics?range=${range}`, {
+    fetch(`https://tag-n-ride-production.up.railway.app/api/admin/analytics?period=${range}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async r => {

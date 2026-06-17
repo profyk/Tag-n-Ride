@@ -652,7 +652,7 @@ export const api = {
       withdrawal_trend: { date: string; amount: number; count: number }[];
       prev_volume?: number;
       prev_count?: number;
-    }>(`/api/admin/analytics?range=${range}`),
+    }>(`/api/admin/analytics?period=${range}`),
 
   auditLogs: () => client.get<AuditLog[]>("/api/admin/audit-logs"),
 
