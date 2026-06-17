@@ -750,6 +750,8 @@ export const api = {
   // Chargebacks
   chargebacks: (status?: string) =>
     client.get<Chargeback[]>("/api/admin/chargebacks", { params: status ? { status } : {} }),
+  createChargeback: (body: { user_id: string; transaction_id?: string; amount: number; reason: string }) =>
+    client.post<{ ok: boolean; id: string }>("/api/admin/chargebacks", body),
   updateChargeback: (id: string, body: { status: string; resolution_note?: string; amount_recovered?: number }) =>
     client.patch(`/api/admin/chargebacks/${id}`, body),
 

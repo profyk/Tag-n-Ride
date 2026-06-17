@@ -9586,10 +9586,41 @@ async def admin_delete_zone(zone_id: str, admin: dict = Depends(require_superadm
 # CHARGEBACKS
 # ════════════════════════════════════════════════════════════════
 
+class ChargebackCreateIn(BaseModel):
+    user_id: str
+    transaction_id: Optional[str] = None
+    amount: float = Field(gt=0, le=1_000_000)
+    reason: str = Field(min_length=3, max_length=500)
+
 class ChargebackUpdateIn(BaseModel):
     status: str  # "won" | "lost" | "under_review"
     resolution_note: Optional[str] = None
     amount_recovered: Optional[float] = None
+
+@api.post("/admin/chargebacks")
+async def admin_create_chargeback(
+    body: ChargebackCreateIn, request: Request, admin: dict = Depends(require_admin)
+):
+    if not has_permission(admin, "manage_refunds"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT id, full_name FROM users WHERE id=$1", body.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if body.transaction_id:
+            txn = await conn.fetchrow("SELECT id FROM transactions WHERE id=$1", body.transaction_id)
+            if not txn:
+                raise HTTPException(status_code=404, detail="Transaction not found")
+        cid = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO chargebacks (id, user_id, transaction_id, amount, reason, status, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())""",
+            cid, body.user_id, body.transaction_id, body.amount, body.reason
+        )
+        await audit(conn, admin["id"], "create_chargeback", cid, "chargeback",
+                    {"amount": body.amount, "reason": body.reason, "user": user["full_name"]},
+                    request.client.host)
+    return {"ok": True, "id": cid}
 
 @api.get("/admin/chargebacks")
 async def admin_list_chargebacks(
