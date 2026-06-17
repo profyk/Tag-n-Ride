@@ -2165,67 +2165,75 @@ async def admin_generate_driver_qr(user_id: str, request: Request, admin: dict =
 async def admin_analytics(range: Optional[str] = "30d", admin: dict = Depends(require_admin)):
     if not has_permission(admin, "view_analytics"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    days_map = {"7d": 7, "30d": 30, "90d": 90}
-    days = days_map.get(range, 30)
-    async with pool.acquire() as conn:
-        daily = await conn.fetch(
-            """SELECT DATE(created_at) as date,
-                      SUM(amount) as amount,
-                      COUNT(*) as count,
-                      COALESCE(SUM(platform_fee),0) as fees
-               FROM transactions
-               WHERE created_at>=NOW()-INTERVAL '%s days' AND is_test IS NOT TRUE
-               GROUP BY DATE(created_at) ORDER BY date ASC""" % days
-        )
-        prev_period = await conn.fetchrow(
-            """SELECT COALESCE(SUM(amount),0) as vol, COUNT(*) as cnt
-               FROM transactions
-               WHERE created_at>=NOW()-INTERVAL '%s days'
-                 AND created_at<NOW()-INTERVAL '%s days'
-                 AND is_test IS NOT TRUE""" % (days * 2, days)
-        )
-        weekly = await conn.fetch(
-            """SELECT DATE_TRUNC('week',created_at) as week, SUM(amount) as amount, COALESCE(SUM(platform_fee),0) as fees
-               FROM transactions WHERE type='payment' AND status='completed' AND created_at>=NOW()-INTERVAL '12 weeks' AND is_test IS NOT TRUE
-               GROUP BY DATE_TRUNC('week',created_at) ORDER BY week ASC"""
-        )
-        leaderboard = await conn.fetch(
-            "SELECT u.full_name as name,COALESCE(d.total_earnings,0) as earnings FROM drivers d JOIN users u ON u.id=d.user_id ORDER BY earnings DESC LIMIT 10"
-        )
-        by_type = await conn.fetch(
-            "SELECT type,COUNT(*) as count,COALESCE(SUM(amount),0) as volume,COALESCE(SUM(platform_fee),0) as fees FROM transactions WHERE is_test IS NOT TRUE GROUP BY type"
-        )
-        top_passengers = await conn.fetch(
-            """SELECT u.full_name as name,COUNT(t.id) as txn_count,COALESCE(SUM(t.amount),0) as total_spent
-               FROM transactions t JOIN users u ON u.id=t.sender_id
-               WHERE t.type='payment' AND t.is_test IS NOT TRUE GROUP BY u.full_name ORDER BY total_spent DESC LIMIT 5"""
-        )
-        withdrawal_trend = await conn.fetch(
-            """SELECT DATE(created_at) as date,SUM(amount) as amount,COUNT(*) as count
-               FROM withdrawal_requests WHERE created_at>=NOW()-INTERVAL '%s days'
-               GROUP BY DATE(created_at) ORDER BY date ASC""" % days
-        )
-        dow_data = await conn.fetch(
-            """SELECT EXTRACT(DOW FROM created_at)::int as dow,
-                      COUNT(*) as count, COALESCE(SUM(amount),0) as amount
-               FROM transactions WHERE type='payment' AND is_test IS NOT TRUE
-                 AND created_at>=NOW()-INTERVAL '90 days'
-               GROUP BY dow ORDER BY dow ASC"""
-        )
-    dow_map = {r["dow"]: {"count": r["count"], "amount": float(r["amount"])} for r in dow_data}
-    dow_labels = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
-    def _f(v): return float(v) if v is not None else 0.0
-    return {
-        "daily_volume": [{"date": str(r["date"]), "amount": _f(r["amount"]), "count": r["count"], "fees": _f(r["fees"])} for r in daily],
-        "weekly_revenue": [{"week": str(r["week"])[:10], "amount": _f(r["amount"]), "fees": _f(r["fees"])} for r in weekly],
-        "driver_leaderboard": [{"name": r["name"], "earnings": _f(r["earnings"])} for r in leaderboard],
-        "transactions_by_type": [{"type": r["type"], "count": r["count"], "volume": _f(r["volume"]), "fees": _f(r["fees"])} for r in by_type],
-        "top_passengers": [{"name": r["name"], "txn_count": r["txn_count"], "total_spent": _f(r["total_spent"])} for r in top_passengers],
-        "withdrawal_trend": [{"date": str(r["date"]), "amount": _f(r["amount"]), "count": r["count"]} for r in withdrawal_trend],
-        "prev_volume": _f(prev_period["vol"]),
-        "prev_count": int(prev_period["cnt"] or 0),
-        "day_of_week": [{"day": dow_labels[i], "rides": dow_map.get(i, {}).get("count", 0), "revenue": dow_map.get(i, {}).get("amount", 0)} for i in range(7)],
-    }
+    try:
+        days_map = {"7d": 7, "30d": 30, "90d": 90}
+        days = days_map.get(range, 30)
+        def _f(v): return float(v) if v is not None else 0.0
+        async with pool.acquire() as conn:
+            daily = await conn.fetch(
+                """SELECT DATE(created_at) as date,
+                          COALESCE(SUM(amount),0) as amount,
+                          COUNT(*) as count,
+                          COALESCE(SUM(platform_fee),0) as fees
+                   FROM transactions
+                   WHERE created_at>=NOW()-INTERVAL '%s days' AND is_test IS NOT TRUE
+                   GROUP BY DATE(created_at) ORDER BY date ASC""" % days
+            )
+            prev_period = await conn.fetchrow(
+                """SELECT COALESCE(SUM(amount),0) as vol, COUNT(*) as cnt
+                   FROM transactions
+                   WHERE created_at>=NOW()-INTERVAL '%s days'
+                     AND created_at<NOW()-INTERVAL '%s days'
+                     AND is_test IS NOT TRUE""" % (days * 2, days)
+            )
+            weekly = await conn.fetch(
+                """SELECT DATE_TRUNC('week',created_at) as week,
+                          COALESCE(SUM(amount),0) as amount,
+                          COALESCE(SUM(platform_fee),0) as fees
+                   FROM transactions WHERE type='payment' AND status='completed'
+                   AND created_at>=NOW()-INTERVAL '12 weeks' AND is_test IS NOT TRUE
+                   GROUP BY DATE_TRUNC('week',created_at) ORDER BY week ASC"""
+            )
+            leaderboard = await conn.fetch(
+                "SELECT u.full_name as name,COALESCE(d.total_earnings,0) as earnings FROM drivers d JOIN users u ON u.id=d.user_id ORDER BY earnings DESC LIMIT 10"
+            )
+            by_type = await conn.fetch(
+                "SELECT type,COUNT(*) as count,COALESCE(SUM(amount),0) as volume,COALESCE(SUM(platform_fee),0) as fees FROM transactions WHERE is_test IS NOT TRUE GROUP BY type"
+            )
+            top_passengers = await conn.fetch(
+                """SELECT u.full_name as name,COUNT(t.id) as txn_count,COALESCE(SUM(t.amount),0) as total_spent
+                   FROM transactions t JOIN users u ON u.id=t.sender_id
+                   WHERE t.type='payment' AND t.is_test IS NOT TRUE GROUP BY u.full_name ORDER BY total_spent DESC LIMIT 5"""
+            )
+            withdrawal_trend = await conn.fetch(
+                """SELECT DATE(created_at) as date,COALESCE(SUM(amount),0) as amount,COUNT(*) as count
+                   FROM withdrawal_requests WHERE created_at>=NOW()-INTERVAL '%s days'
+                   GROUP BY DATE(created_at) ORDER BY date ASC""" % days
+            )
+            dow_data = await conn.fetch(
+                """SELECT EXTRACT(DOW FROM created_at)::int as dow,
+                          COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+                   FROM transactions WHERE type='payment' AND is_test IS NOT TRUE
+                     AND created_at>=NOW()-INTERVAL '90 days'
+                   GROUP BY dow ORDER BY dow ASC"""
+            )
+        dow_map = {r["dow"]: {"count": r["count"], "amount": _f(r["amount"])} for r in dow_data}
+        dow_labels = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
+        return {
+            "daily_volume": [{"date": str(r["date"]), "amount": _f(r["amount"]), "count": r["count"], "fees": _f(r["fees"])} for r in daily],
+            "weekly_revenue": [{"week": str(r["week"])[:10], "amount": _f(r["amount"]), "fees": _f(r["fees"])} for r in weekly],
+            "driver_leaderboard": [{"name": r["name"], "earnings": _f(r["earnings"])} for r in leaderboard],
+            "transactions_by_type": [{"type": r["type"], "count": r["count"], "volume": _f(r["volume"]), "fees": _f(r["fees"])} for r in by_type],
+            "top_passengers": [{"name": r["name"], "txn_count": r["txn_count"], "total_spent": _f(r["total_spent"])} for r in top_passengers],
+            "withdrawal_trend": [{"date": str(r["date"]), "amount": _f(r["amount"]), "count": r["count"]} for r in withdrawal_trend],
+            "prev_volume": _f(prev_period["vol"]),
+            "prev_count": int(prev_period["cnt"] or 0),
+            "day_of_week": [{"day": dow_labels[i], "rides": dow_map.get(i, {}).get("count", 0), "revenue": dow_map.get(i, {}).get("amount", 0)} for i in range(7)],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analytics error: {type(e).__name__}: {e}")
 
 # ── Admin: Revenue breakdown by stream ───────────────────────
 @api.get("/admin/revenue/summary")
@@ -2277,9 +2285,19 @@ async def admin_revenue_summary(range: str = "30d", offset: int = 0, admin: dict
 async def admin_audit_logs(admin: dict = Depends(require_admin)):
     if not has_permission(admin, "view_audit"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT al.*,u.full_name as admin_name,u.role as admin_role FROM audit_logs al LEFT JOIN users u ON u.id=al.admin_id ORDER BY al.created_at DESC LIMIT 500")
-    return [{**dict(r), "metadata": json.loads(r["metadata"]) if r["metadata"] else {}, "created_at": iso(r["created_at"])} for r in rows]
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT al.*,u.full_name as admin_name,u.role as admin_role FROM audit_logs al LEFT JOIN users u ON u.id=al.admin_id ORDER BY al.created_at DESC LIMIT 500")
+        def _meta(v):
+            if not v: return {}
+            if isinstance(v, dict): return v
+            try: return json.loads(v)
+            except Exception: return {}
+        return [{**dict(r), "metadata": _meta(r["metadata"]), "created_at": iso(r["created_at"])} for r in rows]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Audit log error: {type(e).__name__}: {e}")
 
 # ── Admin: Support lookup ────────────────────────────────────
 @api.get("/admin/support/user/{query}")
