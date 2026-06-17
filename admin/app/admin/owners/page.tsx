@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input } from "@/components/ui";
@@ -7,41 +7,55 @@ import { api, Owner } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { ExternalLink, X, Download, Printer, QrCode, ImageOff, RefreshCw, Wallet, Banknote } from "lucide-react";
 import toast from "react-hot-toast";
+import QRCode from "qrcode";
 
 // ── QR modal ──────────────────────────────────────────────────────────────────
 
-function QrModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
-  const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">("loading");
-  const imgRef = useRef<HTMLImageElement>(null);
+async function generateQRWithLogo(text: string): Promise<string> {
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 400;
+  await (QRCode as any).toCanvas(canvas, text, {
+    width: 400, margin: 2,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H",
+  });
+  const ctx = canvas.getContext("2d")!;
+  const cx = 200, cy = 200, r = 46;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff"; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#00D4FF"; ctx.fill();
+  ctx.fillStyle = "#05050A";
+  ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("TNR", cx, cy);
+  return canvas.toDataURL("image/png");
+}
 
-  const qrSrc = (() => {
-    const v = owner.qr_code;
-    if (!v) return "";
-    if (v.startsWith("data:") || v.startsWith("http")) return v;
-    return `data:image/png;base64,${v}`;
-  })();
+function QrModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
+  const [qrSrc, setQrSrc] = useState("");
+
+  useEffect(() => {
+    if (!owner.qr_code) { setQrSrc(""); return; }
+    setQrSrc("");
+    generateQRWithLogo(owner.qr_code).then(setQrSrc).catch(() => setQrSrc("error"));
+  }, [owner.qr_code]);
+
+  const imgStatus: "loading" | "loaded" | "error" =
+    qrSrc === "error" ? "error" : qrSrc ? "loaded" : "loading";
 
   const safeName = owner.full_name.replace(/[^a-zA-Z0-9]/g, "-");
 
-  const handleDownload = async () => {
-    if (!qrSrc) return;
-    try {
-      if (qrSrc.startsWith("data:")) {
-        const a = document.createElement("a");
-        a.href = qrSrc; a.download = `qr-${safeName}.png`; a.click(); return;
-      }
-      const res = await fetch(qrSrc);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `qr-${safeName}.png`; a.click();
-      URL.revokeObjectURL(url);
-      toast.success("QR code downloaded");
-    } catch { toast.error("Download failed"); }
+  const handleDownload = () => {
+    if (!qrSrc || qrSrc === "error") return;
+    const a = document.createElement("a");
+    a.href = qrSrc; a.download = `qr-${safeName}.png`; a.click();
+    toast.success("QR code downloaded");
   };
 
   const handlePrint = () => {
-    if (!qrSrc) return;
+    if (!qrSrc || qrSrc === "error") return;
     const pw = window.open("", "_blank", "width=500,height=600");
     if (!pw) { toast.error("Allow pop-ups to print"); return; }
     pw.document.write(`<!DOCTYPE html>
@@ -89,34 +103,35 @@ function QrModal({ owner, onClose }: { owner: Owner; onClose: () => void }) {
 
         <div className="flex items-center justify-center mb-5">
           <div className="relative w-56 h-56 bg-white rounded-2xl p-3 shadow-inner">
-            {imgStatus === "loading" && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white">
-                <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
-              </div>
-            )}
-            {imgStatus === "error" || !qrSrc ? (
+            {!owner.qr_code ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-50 p-4">
                 <ImageOff size={24} className="text-gray-400" />
                 <p className="text-gray-500 text-xs text-center font-medium">No QR code generated yet</p>
               </div>
+            ) : imgStatus === "loading" ? (
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white">
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
+              </div>
+            ) : imgStatus === "error" ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-50 p-4">
+                <ImageOff size={24} className="text-gray-400" />
+                <p className="text-gray-500 text-xs text-center font-medium">Failed to render QR code</p>
+              </div>
             ) : (
               <img
-                ref={imgRef}
                 src={qrSrc}
                 alt={`QR for ${owner.full_name}`}
-                className={`w-full h-full object-contain transition-opacity duration-200 ${imgStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
-                onLoad={() => setImgStatus("loaded")}
-                onError={() => setImgStatus("error")}
+                className="w-full h-full object-contain"
               />
             )}
           </div>
         </div>
 
         <div className="flex gap-3">
-          <Button variant="secondary" className="flex-1 justify-center" onClick={handleDownload} disabled={!qrSrc || imgStatus === "error"}>
+          <Button variant="secondary" className="flex-1 justify-center" onClick={handleDownload} disabled={!qrSrc || imgStatus !== "loaded"}>
             <Download size={13} /> Download
           </Button>
-          <Button className="flex-1 justify-center" onClick={handlePrint} disabled={!qrSrc || imgStatus === "error"}>
+          <Button className="flex-1 justify-center" onClick={handlePrint} disabled={!qrSrc || imgStatus !== "loaded"}>
             <Printer size={13} /> Print
           </Button>
         </div>
