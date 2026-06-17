@@ -1013,10 +1013,21 @@ async def register(body: RegisterIn):
                     "INSERT INTO fleet_owners (id,user_id,business_name,registered_as_driver) VALUES ($1,$2,$3,$4)",
                     str(uuid.uuid4()), user_id, body.business_name, bool(body.driver_mode)
                 )
-                await conn.execute(
-                    "INSERT INTO drivers (id,user_id,qr_code,vehicle_plate) VALUES ($1,$2,$3,$4)",
-                    str(uuid.uuid4()), user_id, generate_qr_code(), ""
-                )
+                # Always give owners a QR code immediately on registration.
+                # ON CONFLICT (user_id) is a safety net; ON CONFLICT (qr_code) retries
+                # with a fresh code so a collision never blocks registration.
+                for _attempt in range(10):
+                    _qr = generate_qr_code()
+                    try:
+                        await conn.execute(
+                            "INSERT INTO drivers (id,user_id,qr_code,vehicle_plate) VALUES ($1,$2,$3,$4) "
+                            "ON CONFLICT (user_id) DO UPDATE SET qr_code = COALESCE(drivers.qr_code, EXCLUDED.qr_code)",
+                            str(uuid.uuid4()), user_id, _qr, ""
+                        )
+                        break
+                    except Exception:
+                        if _attempt == 9:
+                            raise
     log.info("register | id=%s role=%s", user_id, body.role)
     token = create_access_token(user_id, body.role)
     return {
@@ -8121,11 +8132,23 @@ async def create_test_user(body: CreateTestUserIn, request: Request, admin: dict
                 wallet_id, user_id, body.initial_balance
             )
             if body.role in ("driver", "owner"):
-                driver_id = str(uuid.uuid4())
-                qr = generate_qr_code()
+                for _attempt in range(10):
+                    qr = generate_qr_code()
+                    try:
+                        await conn.execute(
+                            "INSERT INTO drivers (id,user_id,qr_code,is_verified) VALUES ($1,$2,$3,TRUE) "
+                            "ON CONFLICT (user_id) DO UPDATE SET qr_code = COALESCE(drivers.qr_code, EXCLUDED.qr_code)",
+                            str(uuid.uuid4()), user_id, qr, True
+                        )
+                        break
+                    except Exception:
+                        if _attempt == 9:
+                            raise
+            if body.role == "owner":
                 await conn.execute(
-                    "INSERT INTO drivers (id,user_id,qr_code,is_verified) VALUES ($1,$2,$3,TRUE)",
-                    driver_id, user_id, qr
+                    "INSERT INTO fleet_owners (id,user_id,business_name,registered_as_driver) VALUES ($1,$2,$3,$4) "
+                    "ON CONFLICT (user_id) DO NOTHING",
+                    str(uuid.uuid4()), user_id, body.full_name, False
                 )
             # Record initial balance as test transaction
             if body.initial_balance > 0:
