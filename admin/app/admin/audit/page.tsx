@@ -189,7 +189,7 @@ export default function AuditPage() {
   }, [load]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const uniqueAdmins = useMemo(() => [...new Set(logs.map(l => l.admin_name).filter(Boolean))], [logs]);
+  const uniqueAdmins = useMemo(() => Array.from(new Set(logs.map(l => l.admin_name).filter((n): n is string => Boolean(n)))), [logs]);
 
   const todayLogs = useMemo(() => {
     const today = new Date().toDateString();
