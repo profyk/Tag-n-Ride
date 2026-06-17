@@ -23,7 +23,7 @@ import { WebQrScanner } from "../../src/WebQrScanner";
 const FRAME   = 260;   // viewport cutout size
 const CORNER  = 34;   // corner bracket arm length
 const BW      = 4;    // bracket line width
-const LASER_H = 46;   // scan line height
+const LASER_H = 22;   // scan line height
 const CYAN    = "#00D4FF";
 const GREEN   = "#00FF88";
 const OVERLAY = "rgba(5,5,10,0.84)";
@@ -479,14 +479,14 @@ function PassengerScan() {
                 <LinearGradient
                   colors={[
                     "rgba(0,212,255,0)",
-                    "rgba(0,212,255,0.05)",
-                    "rgba(0,212,255,0.52)",
+                    "rgba(0,212,255,0.12)",
+                    "rgba(0,212,255,0.55)",
                     "rgba(0,212,255,1)",
-                    "rgba(0,212,255,0.52)",
-                    "rgba(0,212,255,0.05)",
+                    "rgba(0,212,255,0.55)",
+                    "rgba(0,212,255,0.12)",
                     "rgba(0,212,255,0)",
                   ]}
-                  locations={[0, 0.06, 0.28, 0.5, 0.72, 0.94, 1]}
+                  locations={[0, 0.38, 0.46, 0.5, 0.54, 0.62, 1]}
                   start={{ x: 0.5, y: 0 }}
                   end={{ x: 0.5, y: 1 }}
                   style={{ flex: 1 }}
