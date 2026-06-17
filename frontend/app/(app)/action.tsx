@@ -196,7 +196,14 @@ function PassengerScan() {
 
     let code = data.trim();
     const m = data.match(/driver_id=([^&]+)/);
-    if (m) code = m[1];
+    if (m) code = decodeURIComponent(m[1].trim());
+
+    if (!code) {
+      setBusy(false);
+      setDetected(false);
+      setScanning(true);
+      return;
+    }
 
     setTimeout(() => {
       setBusy(false);
@@ -499,7 +506,7 @@ function PassengerScan() {
             }}>
               <Ionicons name="scan-outline" size={16} color="rgba(255,255,255,0.6)" />
               <Text style={{ color: "rgba(255,255,255,0.78)", fontSize: 13, fontWeight: "600" }}>
-                Aim camera at driver's QR code
+                Aim camera at driver or owner QR code
               </Text>
             </View>
           )}
@@ -518,7 +525,7 @@ function PassengerScan() {
               Scan & Pay
             </Text>
             <Text style={{ color: "rgba(255,255,255,0.44)", fontSize: 12, marginTop: 1 }}>
-              Point at any TNR driver QR code
+              Point at any TNR driver or owner QR code
             </Text>
           </View>
           <View style={{ flexDirection: "row", gap: 10 }}>
@@ -642,7 +649,7 @@ function PassengerScan() {
             borderWidth: 1, borderColor: "rgba(0,212,255,0.28)",
           }}>
             <ActivityIndicator color={CYAN} size="large" />
-            <Text style={{ color: "#FFF", fontSize: 14, fontWeight: "600" }}>Looking up driver…</Text>
+            <Text style={{ color: "#FFF", fontSize: 14, fontWeight: "600" }}>Looking up recipient…</Text>
           </View>
         </View>
       )}

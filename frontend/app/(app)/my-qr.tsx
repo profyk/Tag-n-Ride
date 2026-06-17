@@ -116,7 +116,7 @@ export default function MyQRScreen() {
           {/* Name and code */}
           <Text style={styles.driverName}>{u.full_name}</Text>
           <View style={styles.codePill}>
-            <Text style={styles.codePillPrefix}>TNR</Text>
+            <Ionicons name="finger-print" size={13} color="#00D4FF" />
             <Text style={styles.codePillText}>{qrCode || "—"}</Text>
           </View>
           <Text style={styles.scanHint}>Scan to pay me instantly</Text>

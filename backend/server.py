@@ -469,8 +469,8 @@ async def lifespan(app: FastAPI):
                           'TNR' || LPAD((ABS(('x' || LEFT(MD5(u.id), 15))::bit(60)::bigint) % 9000000000000 + 1000000000000)::text, 13, '0'),
                           ''
                    FROM users u
-                   JOIN fleet_owners fo ON fo.user_id = u.id
-                   WHERE NOT EXISTS (SELECT 1 FROM drivers d WHERE d.user_id = u.id)
+                   WHERE u.role IN ('driver', 'owner')
+                   AND NOT EXISTS (SELECT 1 FROM drivers d WHERE d.user_id = u.id)
                    ON CONFLICT DO NOTHING""",
             ]:
                 try:
@@ -1244,7 +1244,7 @@ async def get_wallet(user: dict = Depends(get_current_user)):
                     "SELECT qr_code,vehicle_plate,total_earnings,is_verified,rating_avg,rating_count FROM drivers WHERE user_id=$1",
                     user["id"]
                 )
-                if not driver and user["role"] == "owner":
+                if not driver and user["role"] in ("owner", "driver"):
                     qr = generate_qr_code()
                     await conn.execute(
                         "INSERT INTO drivers (id, user_id, qr_code, vehicle_plate) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id) DO NOTHING",
@@ -1294,9 +1294,10 @@ async def lookup_driver_by_qr(code: str, _: dict = Depends(get_current_user)):
         user = await conn.fetchrow("SELECT id,full_name,phone_number FROM users WHERE id=$1", drv["user_id"])
     return {
         "user_id": user["id"], "full_name": user["full_name"], "phone_number": user["phone_number"],
-        "qr_code": drv["qr_code"], "vehicle_plate": drv["vehicle_plate"],
-        "is_verified": drv["is_verified"], "rating_avg": float(drv["rating_avg"]),
-        "rating_count": drv["rating_count"],
+        "qr_code": drv["qr_code"], "vehicle_plate": drv["vehicle_plate"] or "",
+        "is_verified": bool(drv["is_verified"]),
+        "rating_avg": float(drv["rating_avg"] or 0),
+        "rating_count": drv["rating_count"] or 0,
     }
 
 @api.get("/wallet/driver/{driver_user_id}")

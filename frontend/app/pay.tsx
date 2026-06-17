@@ -100,7 +100,7 @@ export default function Pay() {
         </View>
         <View style={{ padding: 20, alignItems: "center", marginTop: 40 }}>
           <Ionicons name="alert-circle" size={56} color={colors.red} />
-          <Text style={styles.title}>Driver not found</Text>
+          <Text style={styles.title}>Recipient not found</Text>
           <Text style={styles.sub}>{err}</Text>
           <View style={{ height: 16 }} />
           <Button label="Try again" onPress={() => router.back()} variant="secondary" />
@@ -152,7 +152,7 @@ export default function Pay() {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Pay driver</Text>
+            <Text style={styles.title}>Pay</Text>
             <TouchableOpacity onPress={() => router.back()} style={styles.close} testID="pay-close-btn">
               <Ionicons name="close" size={22} color={colors.text} />
             </TouchableOpacity>
@@ -164,7 +164,7 @@ export default function Pay() {
                 <Ionicons name="car-sport" size={26} color={colors.cyan} />
               </View>
               <Text style={styles.driverName} testID="pay-driver-name">{driver.full_name}</Text>
-              <Text style={styles.driverPhone}>{driver.phone_number}</Text>
+              {driver.phone_number ? <Text style={styles.driverPhone}>{driver.phone_number}</Text> : null}
               {driver.vehicle_plate ? (
                 <View style={styles.plateBox} testID="pay-driver-plate">
                   <Text style={styles.plateLabel}>VEHICLE</Text>
