@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Badge, Button, Spinner, Input, Modal } from "@/components/ui";
 import { api, User, hasPermission, isSuperAdmin } from "@/lib/api";
@@ -275,12 +276,24 @@ function UserDetailModal({
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
 export default function UsersPage() {
+  return (
+    <Suspense fallback={<AdminShell title="User Management"><Spinner /></AdminShell>}>
+      <UsersPageInner />
+    </Suspense>
+  );
+}
+
+function UsersPageInner() {
+  const params = useSearchParams();
+  const initialRole   = params.get("role") || "all";
+  const initialSearch  = params.get("search") || "";
+
   const [users,       setUsers]       = useState<User[]>([]);
   const [riskMap,     setRiskMap]     = useState<Record<string, number>>({});
   const [loading,     setLoading]     = useState(true);
-  const [search,      setSearch]      = useState("");
-  const [query,       setQuery]       = useState("");
-  const [roleTab,     setRoleTab]     = useState("all");
+  const [search,      setSearch]      = useState(initialSearch);
+  const [query,       setQuery]       = useState(initialSearch);
+  const [roleTab,     setRoleTab]     = useState(initialRole);
   const [statusTab,   setStatusTab]   = useState("all");
   const [countdown,   setCountdown]   = useState(60);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -319,7 +332,7 @@ export default function UsersPage() {
 
   const refresh = useCallback(() => { load(); setCountdown(60); }, [load]);
 
-  useEffect(() => { load(""); }, []);
+  useEffect(() => { load(initialSearch); }, []);
 
   useEffect(() => {
     timerRef.current = setInterval(() => {

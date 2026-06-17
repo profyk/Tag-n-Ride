@@ -5695,7 +5695,22 @@ async def passenger_analytics(admin: dict = Depends(require_admin)):
             AND created_at >= NOW()-INTERVAL '12 weeks'
             GROUP BY DATE_TRUNC('week',created_at) ORDER BY week ASC
         """)
+        total_passengers = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role='passenger'")
+        new_this_week = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE role='passenger' AND created_at >= NOW()-INTERVAL '7 days'")
+        active_7d = await conn.fetchval("""
+            SELECT COUNT(DISTINCT sender_id) FROM transactions
+            WHERE type='payment' AND status='completed' AND created_at >= NOW()-INTERVAL '7 days'
+        """)
+        total_wallet_balance = await conn.fetchval("""
+            SELECT COALESCE(SUM(w.balance),0) FROM wallets w
+            JOIN users u ON u.id=w.user_id WHERE u.role='passenger'
+        """)
     return {
+        "total_passengers": int(total_passengers or 0),
+        "new_this_week": int(new_this_week or 0),
+        "active_7d": int(active_7d or 0),
+        "total_wallet_balance": float(total_wallet_balance or 0),
         "top_spenders": [{
             "full_name": r["full_name"], "phone_number": r["phone_number"], "id": r["id"],
             "txn_count": r["txn_count"], "total_spent": float(r["total_spent"] or 0),

@@ -654,6 +654,17 @@ export const api = {
       prev_count?: number;
     }>(`/api/admin/analytics?period=${range}`),
 
+  passengerAnalytics: () =>
+    client.get<{
+      total_passengers: number;
+      new_this_week: number;
+      active_7d: number;
+      total_wallet_balance: number;
+      top_spenders: { id: string; full_name: string; phone_number: string; txn_count: number; total_spent: number; avg_spend: number; last_active: string | null }[];
+      inactive_passengers: { full_name: string; phone_number: string; created_at: string; last_transaction: string | null }[];
+      topup_patterns: { week: string; topups: number; total: number }[];
+    }>("/api/admin/passengers/analytics"),
+
   auditLogs: () => client.get<AuditLog[]>("/api/admin/audit-logs"),
 
   supportLookup: (phone: string) =>
