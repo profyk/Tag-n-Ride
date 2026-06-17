@@ -7,28 +7,51 @@ import { Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
 import { api, OwnerDetail, OwnerDriver } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { ArrowLeft, Car, Star, Phone, Building2, CreditCard, Wallet, ExternalLink } from "lucide-react";
+import QRCode from "qrcode";
+
+async function generateQRWithLogo(text: string): Promise<string> {
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 400;
+  await (QRCode as any).toCanvas(canvas, text, {
+    width: 400, margin: 2,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H",
+  });
+  const ctx = canvas.getContext("2d")!;
+  const cx = 200, cy = 200, r = 46;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff"; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#00D4FF"; ctx.fill();
+  ctx.fillStyle = "#05050A";
+  ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("TNR", cx, cy);
+  return canvas.toDataURL("image/png");
+}
 
 export default function OwnerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<OwnerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"drivers" | "cashups">("drivers");
+  const [qrSrc, setQrSrc] = useState("");
 
   useEffect(() => {
     api.ownerDetail(id).then(r => setData(r.data)).finally(() => setLoading(false));
   }, [id]);
 
+  useEffect(() => {
+    const code = data?.owner.qr_code;
+    if (!code) { setQrSrc(""); return; }
+    generateQRWithLogo(code).then(setQrSrc).catch(() => setQrSrc("error"));
+  }, [data?.owner.qr_code]);
+
   if (loading) return <AdminShell title="Fleet Owner"><Spinner /></AdminShell>;
   if (!data)   return <AdminShell title="Fleet Owner"><p className="text-red-400">Owner not found.</p></AdminShell>;
 
   const { owner, drivers, cashup_history } = data;
-
-  const qrSrc = (() => {
-    const v = owner.qr_code;
-    if (!v) return "";
-    if (v.startsWith("data:") || v.startsWith("http")) return v;
-    return `data:image/png;base64,${v}`;
-  })();
 
   const totalEarnings = drivers.reduce((s, d) => s + d.total_earnings, 0);
   const confirmedCount = drivers.filter(d => d.confirmed).length;
@@ -105,10 +128,14 @@ export default function OwnerDetailPage() {
           <div className="bg-bg2 border border-border rounded-2xl p-6 flex flex-col items-center justify-center gap-4">
             <p className="text-xs text-textMuted uppercase tracking-wide">Owner QR Code</p>
             <div className="w-44 h-44 bg-white rounded-2xl p-2.5 shadow-inner flex items-center justify-center">
-              {qrSrc ? (
+              {!owner.qr_code ? (
+                <p className="text-gray-400 text-xs text-center">No QR generated</p>
+              ) : qrSrc === "error" ? (
+                <p className="text-gray-400 text-xs text-center">Failed to render QR</p>
+              ) : qrSrc ? (
                 <img src={qrSrc} alt="Owner QR" className="w-full h-full object-contain" />
               ) : (
-                <p className="text-gray-400 text-xs text-center">No QR generated</p>
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
               )}
             </div>
             <p className="text-textDim text-[10px] text-center">Used when owner drives a vehicle</p>
