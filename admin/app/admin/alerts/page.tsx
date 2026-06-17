@@ -173,7 +173,7 @@ export default function AlertsPage() {
 
   const timerRef = useRef<any>(null);
 
-  const snooze = (id: string) => setSnoozed(s => new Set([...s, id]));
+  const snooze = (id: string) => setSnoozed(s => new Set(Array.from(s).concat(id)));
   const clearSnooze = () => setSnoozed(new Set());
 
   // ── Load system health ───────────────────────────────────────────────────
