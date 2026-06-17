@@ -11820,6 +11820,50 @@ async def admin_waive_subscription(owner_user_id: str, admin: dict = Depends(req
             "subscription", owner_user_id)
     return {"ok": True}
 
+@api.get("/admin/subscriptions/billing-history")
+async def admin_subscription_billing_history(
+    admin: dict = Depends(require_admin),
+    limit: int = 100,
+    status: Optional[str] = None,
+):
+    if not has_permission(admin, "view_users"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    async with pool.acquire() as conn:
+        where = "WHERE 1=1"
+        args: list = []
+        if status:
+            args.append(status)
+            where += f" AND sbr.status=${len(args)}"
+        rows = await conn.fetch(f"""
+            SELECT sbr.*, u.full_name, u.email,
+                   fo.business_name
+            FROM subscription_billing_records sbr
+            JOIN users u ON u.id = sbr.owner_user_id
+            LEFT JOIN fleet_owners fo ON fo.user_id = sbr.owner_user_id
+            {where}
+            ORDER BY sbr.billed_at DESC NULLS LAST
+            LIMIT {limit}
+        """, *args)
+    return [
+        {
+            "id": r["id"],
+            "owner_user_id": r["owner_user_id"],
+            "full_name": r["full_name"],
+            "business_name": r["business_name"],
+            "period": f"{r['period_month']:02d}/{r['period_year']}",
+            "period_month": r["period_month"],
+            "period_year": r["period_year"],
+            "taxi_count": r["taxi_count"],
+            "billable_taxis": r["billable_taxis"],
+            "price_per_taxi": float(r["price_per_taxi"] or 0),
+            "amount": float(r["amount"] or 0),
+            "status": r["status"],
+            "billed_at": r["billed_at"].isoformat() if r["billed_at"] else None,
+            "failure_reason": r.get("failure_reason"),
+        }
+        for r in rows
+    ]
+
 @api.get("/admin/maintenance-fee/preview")
 async def admin_maintenance_fee_preview(admin: dict = Depends(require_admin)):
     """Return how many wallets would be charged and total revenue if billing ran now."""

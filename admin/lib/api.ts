@@ -612,6 +612,12 @@ export const api = {
     client.post(`/api/admin/subscriptions/${ownerUserId}/bill-now`),
   waiveSubscription: (ownerUserId: string) =>
     client.post(`/api/admin/subscriptions/${ownerUserId}/waive`),
+  subscriptionBillingHistory: (params?: { status?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.limit)  q.set("limit",  String(params.limit));
+    return client.get<any[]>(`/api/admin/subscriptions/billing-history?${q}`);
+  },
 
   transactions: (params?: {
     type?: string;
