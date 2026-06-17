@@ -105,7 +105,6 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Refunds",               href: "/admin/refunds",        icon: RotateCcw,    permission: "manage_refunds" },
       { label: "Chargebacks",           href: "/admin/chargebacks",    icon: AlertOctagon, permission: "manage_refunds" },
       { label: "Wallet Operations",     href: "/admin/wallet-ops",     icon: Banknote,     permission: "view_audit" },
-      { label: "Accounting",            href: "/admin/accounting",     icon: Calculator,   permission: "view_analytics" },
       { label: "Statements",            href: "/admin/statements",     icon: FileText,     permission: "download_statements" },
       { label: "Financial Reports",     href: "/admin/reports",        icon: BarChart3,    permission: "view_analytics" },
       { label: "Subscriptions",         href: "/admin/subscriptions",  icon: Tag,          permission: "view_analytics" },
