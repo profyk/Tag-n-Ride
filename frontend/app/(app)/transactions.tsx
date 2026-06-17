@@ -7,7 +7,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, Txn, Dispute } from "../../src/api";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
@@ -15,7 +14,6 @@ import { Pill } from "../../src/ui";
 import { formatZAR, formatDate, radius } from "../../src/theme";
 
 type Filter = "all" | "in" | "out" | "topup" | "withdrawal";
-const HIDDEN_KEY = "tnr_hidden_transactions";
 
 const DISPUTE_CATEGORIES = [
   "Incorrect amount",
@@ -26,30 +24,15 @@ const DISPUTE_CATEGORIES = [
   "Other",
 ];
 
-async function getHidden(): Promise<string[]> {
-  try {
-    const raw = await AsyncStorage.getItem(HIDDEN_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-async function addHidden(ids: string[]) {
-  try {
-    const existing = await getHidden();
-    await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(new Set([...existing, ...ids]))));
-  } catch {}
-}
-
 export default function Transactions() {
   const { state } = useAuth();
   const { colors } = useTheme();
   const [items, setItems] = useState<Txn[]>([]);
-  const [hidden, setHidden] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Txn | null>(null);
-  const [undoId, setUndoId] = useState<string | null>(null);
+  const [undone, setUndone] = useState<{ txn: Txn; index: number } | null>(null);
   const undoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [showDisputeForm, setShowDisputeForm] = useState(false);
@@ -59,9 +42,8 @@ export default function Transactions() {
 
   const load = useCallback(async () => {
     try {
-      const [t, h, d] = await Promise.all([api.transactions(), getHidden(), api.myDisputes().catch(() => [])]);
+      const [t, d] = await Promise.all([api.transactions(), api.myDisputes().catch(() => [])]);
       setItems(t);
-      setHidden(h);
       setDisputes(d);
     } catch {}
     finally { setRefreshing(false); setLoading(false); }
@@ -69,26 +51,34 @@ export default function Transactions() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // Hiding a transaction is permanent on this passenger's account — it's
+  // recorded server-side (per-user) so it never resurfaces on any device,
+  // while the underlying transaction row stays untouched for audit purposes.
   const handleHide = async (id: string) => {
-    await addHidden([id]);
-    setHidden(prev => [...prev, id]);
+    const index = items.findIndex(t => t.id === id);
+    const txn = items[index];
+    if (!txn) return;
+    setItems(prev => prev.filter(t => t.id !== id));
     if (selected?.id === id) setSelected(null);
-    // Show undo for 4 seconds
-    setUndoId(id);
+    try { await api.hideTransactions([id]); } catch { /* still hidden locally; safe to retry via undo/reload */ }
+
+    setUndone({ txn, index });
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = setTimeout(() => setUndoId(null), 4000);
+    undoTimerRef.current = setTimeout(() => setUndone(null), 4000);
   };
 
   const handleUndoHide = async () => {
-    if (!undoId) return;
+    if (!undone) return;
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    const id = undoId;
-    setUndoId(null);
+    const { txn, index } = undone;
+    setUndone(null);
     try {
-      const existing = await AsyncStorage.getItem(HIDDEN_KEY);
-      const ids: string[] = existing ? JSON.parse(existing) : [];
-      await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify(ids.filter(i => i !== id)));
-      setHidden(prev => prev.filter(i => i !== id));
+      await api.unhideTransaction(txn.id);
+      setItems(prev => {
+        const next = [...prev];
+        next.splice(Math.min(index, next.length), 0, txn);
+        return next;
+      });
     } catch {}
   };
 
@@ -116,36 +106,33 @@ export default function Transactions() {
   };
 
   const handleClearAll = () => {
-    // Capture IDs now, before the Alert closes over a potentially stale `filtered`
-    const allIds = items.filter(t => !hidden.includes(t.id)).map(t => t.id);
+    const allIds = items.map(t => t.id);
     if (!allIds.length) return;
     Alert.alert(
       "Clear all transactions?",
-      `All ${allIds.length} transaction${allIds.length === 1 ? "" : "s"} will be removed from this device.`,
+      `All ${allIds.length} transaction${allIds.length === 1 ? "" : "s"} will be permanently removed from your history on every device. This can't be undone from here — contact support to restore it.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete all", style: "destructive",
+          text: "Clear all", style: "destructive",
           onPress: async () => {
-            await addHidden(allIds);
-            setHidden(prev => [...new Set([...prev, ...allIds])]);
+            setItems([]);
             setSelected(null);
+            try { await api.hideTransactions(allIds); } catch { load(); }
           },
         },
       ]
     );
   };
 
-  const filtered = items
-    .filter(t => !hidden.includes(t.id))
-    .filter(t => {
-      if (filter === "all") return true;
-      if (filter === "topup") return t.type === "topup";
-      if (filter === "withdrawal") return t.type === "withdrawal";
-      if (filter === "in") return t.direction === "in";
-      if (filter === "out") return t.direction === "out";
-      return true;
-    });
+  const filtered = items.filter(t => {
+    if (filter === "all") return true;
+    if (filter === "topup") return t.type === "topup";
+    if (filter === "withdrawal") return t.type === "withdrawal";
+    if (filter === "in") return t.direction === "in";
+    if (filter === "out") return t.direction === "out";
+    return true;
+  });
 
   const isDriver = state.status === "authed" && state.user.role === "driver";
   const filters: Filter[] = isDriver ? ["all", "in", "withdrawal"] : ["all", "out", "topup"];
@@ -181,7 +168,7 @@ export default function Transactions() {
       <FlatList
         data={filtered}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={{ padding: 20, paddingBottom: undoId ? 80 : 40, gap: 10 }}
+        contentContainerStyle={{ padding: 20, paddingBottom: undone ? 80 : 40, gap: 10 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -432,7 +419,7 @@ export default function Transactions() {
       </Modal>
 
       {/* Undo hide banner */}
-      {undoId && (
+      {undone && (
         <View style={[s.undoBanner, { backgroundColor: colors.bg2, borderColor: colors.border }]}>
           <Text style={{ color: colors.textMuted, fontSize: 13 }}>Transaction hidden</Text>
           <TouchableOpacity onPress={handleUndoHide} style={{ paddingHorizontal: 12, paddingVertical: 4 }}>

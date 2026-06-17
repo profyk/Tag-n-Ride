@@ -1429,7 +1429,10 @@ async def transfer(body: TransferIn, user: dict = Depends(get_current_user)):
 async def wallet_transactions(limit: int = 50, user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM transactions WHERE sender_id=$1 OR receiver_id=$1 ORDER BY created_at DESC LIMIT $2",
+            """SELECT t.* FROM transactions t
+               WHERE (t.sender_id=$1 OR t.receiver_id=$1)
+               AND NOT EXISTS (SELECT 1 FROM hidden_transactions h WHERE h.user_id=$1 AND h.transaction_id=t.id)
+               ORDER BY t.created_at DESC LIMIT $2""",
             user["id"], min(limit, 200)
         )
         items = []
@@ -1444,6 +1447,32 @@ async def wallet_transactions(limit: int = 50, user: dict = Depends(get_current_
             t["direction"] = "out" if t.get("sender_id") == user["id"] else "in"
             items.append(t)
     return items
+
+class HideTransactionsIn(BaseModel):
+    transaction_ids: List[str]
+
+@api.post("/wallet/transactions/hide")
+async def hide_transactions(body: HideTransactionsIn, user: dict = Depends(get_current_user)):
+    if not body.transaction_ids:
+        return {"ok": True, "hidden": 0}
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for txn_id in body.transaction_ids:
+                await conn.execute(
+                    """INSERT INTO hidden_transactions (id,user_id,transaction_id) VALUES ($1,$2,$3)
+                       ON CONFLICT (user_id,transaction_id) DO NOTHING""",
+                    str(uuid.uuid4()), user["id"], txn_id
+                )
+    return {"ok": True, "hidden": len(body.transaction_ids)}
+
+@api.delete("/wallet/transactions/hide/{transaction_id}")
+async def unhide_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM hidden_transactions WHERE user_id=$1 AND transaction_id=$2",
+            user["id"], transaction_id
+        )
+    return {"ok": True}
 
 @api.post("/wallet/withdraw")
 async def withdraw(body: WithdrawIn, user: dict = Depends(get_current_user)):
@@ -3802,6 +3831,14 @@ CREATE TABLE IF NOT EXISTS system_alerts (
     severity TEXT DEFAULT 'warning',
     resolved BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS hidden_transactions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    transaction_id TEXT NOT NULL REFERENCES transactions(id),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, transaction_id)
 );
 """
 

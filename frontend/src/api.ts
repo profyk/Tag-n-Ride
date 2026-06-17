@@ -153,6 +153,17 @@ export const api = {
 
   transactions: () => request<Txn[]>("/api/wallet/transactions"),
 
+  hideTransactions: (transaction_ids: string[]) =>
+    request<{ ok: boolean; hidden: number }>("/api/wallet/transactions/hide", {
+      method: "POST",
+      body: JSON.stringify({ transaction_ids }),
+    }),
+
+  unhideTransaction: (transaction_id: string) =>
+    request<{ ok: boolean }>(`/api/wallet/transactions/hide/${transaction_id}`, {
+      method: "DELETE",
+    }),
+
   submitDispute: (body: { transaction_id: string; reason: string; category?: string }) =>
     request<{ ok: boolean }>("/api/wallet/dispute", {
       method: "POST",

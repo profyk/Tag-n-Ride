@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Easing,
-  ActivityIndicator, Alert, Share, ScrollView, TextInput,
+  ActivityIndicator, Alert, Share, ScrollView, TextInput, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -17,6 +17,7 @@ import { useTheme } from "../../src/ThemeContext";
 import { api, Wallet } from "../../src/api";
 import { Button } from "../../src/ui";
 import { radius } from "../../src/theme";
+import { WebQrScanner } from "../../src/WebQrScanner";
 
 // ── Constants ────────────────────────────────────────────────
 const FRAME   = 260;   // viewport cutout size
@@ -76,6 +77,8 @@ function PassengerScan() {
   const [showManual, setShowManual] = useState(false);
   const [busy,       setBusy]       = useState(false);
   const [torch,      setTorch]      = useState(false);
+  const [torchSupported, setTorchSupported] = useState(Platform.OS !== "web");
+  const [webCamError, setWebCamError] = useState<string | null>(null);
   const [detected,   setDetected]   = useState(false);
   const [recent,     setRecent]     = useState<RecentPay[]>([]);
 
@@ -161,6 +164,7 @@ function PassengerScan() {
     setScanning(true);
     setDetected(false);
     setBusy(false);
+    setWebCamError(null);
     mountFrame();
     startLaser();
     loadRecent();
@@ -413,13 +417,38 @@ function PassengerScan() {
     <View style={{ flex: 1, backgroundColor: "#000" }} testID="scan-screen">
 
       {/* ── Live camera (fills entire screen) ── */}
-      <CameraView
-        style={StyleSheet.absoluteFillObject}
-        facing="back"
-        enableTorch={torch}
-        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-        onBarcodeScanned={r => onScan(r.data)}
-      />
+      {Platform.OS === "web" ? (
+        <WebQrScanner
+          active={scanning}
+          torch={torch}
+          onScan={onScan}
+          onTorchSupportChange={setTorchSupported}
+          onError={setWebCamError}
+        />
+      ) : (
+        <CameraView
+          style={StyleSheet.absoluteFillObject}
+          facing="back"
+          enableTorch={torch}
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={r => onScan(r.data)}
+        />
+      )}
+
+      {/* ── Web camera error ── */}
+      {webCamError && (
+        <View style={[StyleSheet.absoluteFillObject, { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.7)", padding: 32 }]}>
+          <Ionicons name="camera-outline" size={40} color="#FF5C5C" style={{ marginBottom: 14 }} />
+          <Text style={{ color: "#FFF", fontSize: 15, fontWeight: "700", textAlign: "center", marginBottom: 8 }}>
+            Camera unavailable
+          </Text>
+          <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, textAlign: "center", marginBottom: 20 }}>
+            {webCamError}
+          </Text>
+          <Button label="Enter Code Manually" variant="secondary" icon="keypad-outline"
+            onPress={() => setShowManual(true)} />
+        </View>
+      )}
 
       {/* ── Dark overlay with viewport cutout (4-bar method) ── */}
       <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
@@ -530,25 +559,27 @@ function PassengerScan() {
           </View>
           <View style={{ flexDirection: "row", gap: 10 }}>
             {/* Torch toggle */}
-            <TouchableOpacity
-              onPress={() => {
-                setTorch(t => !t);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              }}
-              testID="torch-btn"
-              style={{
-                width: 46, height: 46, borderRadius: 23,
-                alignItems: "center", justifyContent: "center",
-                backgroundColor: torch ? "rgba(255,214,10,0.2)" : "rgba(255,255,255,0.1)",
-                borderWidth: 1,
-                borderColor: torch ? "rgba(255,214,10,0.55)" : "rgba(255,255,255,0.18)",
-              }}>
-              <Ionicons
-                name={torch ? "flashlight" : "flashlight-outline"}
-                size={22}
-                color={torch ? "#FFD60A" : "#FFF"}
-              />
-            </TouchableOpacity>
+            {torchSupported && (
+              <TouchableOpacity
+                onPress={() => {
+                  setTorch(t => !t);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                }}
+                testID="torch-btn"
+                style={{
+                  width: 46, height: 46, borderRadius: 23,
+                  alignItems: "center", justifyContent: "center",
+                  backgroundColor: torch ? "rgba(255,214,10,0.2)" : "rgba(255,255,255,0.1)",
+                  borderWidth: 1,
+                  borderColor: torch ? "rgba(255,214,10,0.55)" : "rgba(255,255,255,0.18)",
+                }}>
+                <Ionicons
+                  name={torch ? "flashlight" : "flashlight-outline"}
+                  size={22}
+                  color={torch ? "#FFD60A" : "#FFF"}
+                />
+              </TouchableOpacity>
+            )}
             {/* Manual entry */}
             <TouchableOpacity
               onPress={() => {
