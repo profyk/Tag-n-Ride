@@ -206,10 +206,15 @@ function AnalyticsTab() {
   const [range, setRange]   = useState<"7d" | "30d" | "90d">("30d");
   const [data, setData]     = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError]   = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    api.analytics(range).then(r => setData(r.data)).finally(() => setLoading(false));
+    setError(null);
+    api.analytics(range)
+      .then(r => setData(r.data))
+      .catch(e => setError(e?.response?.data?.detail || e?.message || "Failed to load analytics"))
+      .finally(() => setLoading(false));
   }, [range]);
 
   if (loading) return (
@@ -217,7 +222,12 @@ function AnalyticsTab() {
       {[1,2,3].map(i => <div key={i} className="h-48 bg-bg2 animate-pulse rounded-xl" />)}
     </div>
   );
-  if (!data) return <p className="text-textMuted text-sm py-8 text-center">Failed to load analytics</p>;
+  if (error || !data) return (
+    <div className="py-12 text-center">
+      <p className="text-red font-bold text-sm">{error || "No data returned"}</p>
+      <p className="text-textDim text-xs mt-1">Check that your role has the <code className="bg-bg3 px-1 rounded">view_analytics</code> permission.</p>
+    </div>
+  );
 
   const TYPE_COLORS_PIE: Record<string, string> = {
     payment: "#22c55e", topup: "#06b6d4", withdrawal: "#a855f7", transfer: "#eab308",
@@ -275,13 +285,13 @@ function AnalyticsTab() {
             <div className="space-y-3">
               {data.transactions_by_type.map((t: any) => {
                 const color = TYPE_COLOR[t.type] || "text-textMuted";
-                const max = Math.max(...data.transactions_by_type.map((x: any) => x.total));
-                const pct = max > 0 ? (t.total / max) * 100 : 0;
+                const max = Math.max(...data.transactions_by_type.map((x: any) => x.volume));
+                const pct = max > 0 ? (t.volume / max) * 100 : 0;
                 return (
                   <div key={t.type}>
                     <div className="flex justify-between text-xs mb-1">
                       <span className={`font-bold ${color} capitalize`}>{t.type}</span>
-                      <span className="text-textMuted font-semibold">{t.count.toLocaleString()} txns — {formatZAR(t.total)}</span>
+                      <span className="text-textMuted font-semibold">{t.count.toLocaleString()} txns — {formatZAR(t.volume)}</span>
                     </div>
                     <div className="h-1.5 bg-bg3 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full ${color.replace("text-", "bg-")}`}
