@@ -12,7 +12,39 @@ import {
   Users, UserCheck, Clock, Shield, Phone, Copy, Filter,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import QRCode from "qrcode";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
+
+async function generateQRWithLogo(text: string): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const baseUrl = await QRCode.toDataURL(text, {
+        width: 400, margin: 2,
+        color: { dark: "#000000", light: "#ffffff" },
+        errorCorrectionLevel: "H",
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = 400; canvas.height = 400;
+      const ctx = canvas.getContext("2d")!;
+      const qrImg = new Image();
+      qrImg.onload = () => {
+        ctx.drawImage(qrImg, 0, 0, 400, 400);
+        const cx = 200, cy = 200, r = 46;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff"; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "#00D4FF"; ctx.fill();
+        ctx.fillStyle = "#05050A";
+        ctx.font = "900 22px 'Arial Black', Arial, sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("TNR", cx, cy);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      qrImg.onerror = reject;
+      qrImg.src = baseUrl;
+    } catch (e) { reject(e); }
+  });
+}
 
 // ── Avatar ──────────────────────────────────────────────────────────────────
 const AVATAR_COLORS = [
@@ -211,27 +243,25 @@ function DriverProfileModal({
 // ════════════════════════════════════════════════════════════════════════════
 function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: () => void; onQrGenerated: (qrCode: string) => void }) {
   const [currentQr, setCurrentQr] = useState(driver.qr_code);
-  const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [qrDataUrl, setQrDataUrl] = useState("");
   const [generating, setGenerating] = useState(false);
-  const imgRef = useRef<HTMLImageElement>(null);
   const [regenModal, setRegenModal] = useState(false);
   const [regenReason, setRegenReason] = useState<"compromised" | "vehicle_change" | "">("");
   const [regenAcknowledged, setRegenAcknowledged] = useState(false);
   const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
 
-  const qrSrc = (() => {
-    const v = currentQr;
-    if (!v) return "";
-    if (v.startsWith("data:") || v.startsWith("http")) return v;
-    return `data:image/png;base64,${v}`;
-  })();
+  useEffect(() => {
+    if (!currentQr) { setQrDataUrl(""); return; }
+    setQrDataUrl("");
+    generateQRWithLogo(currentQr).then(setQrDataUrl).catch(() => setQrDataUrl("error"));
+  }, [currentQr]);
 
   const handleFirstGenerate = async () => {
     setGenerating(true);
     try {
       const res = await api.generateDriverQR(driver.user_id);
       const newQr = res.data.qr_code;
-      setCurrentQr(newQr); setImgStatus("loading");
+      setCurrentQr(newQr);
       onQrGenerated(newQr); toast.success("QR code generated");
     } catch (e: any) { toast.error(e.message || "Failed to generate QR code"); }
     finally { setGenerating(false); }
@@ -246,7 +276,7 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
     try {
       const res = await api.generateDriverQR(driver.user_id);
       const newQr = res.data.qr_code;
-      setCurrentQr(newQr); setImgStatus("loading");
+      setCurrentQr(newQr);
       onQrGenerated(newQr);
       toast.success("QR code regenerated — old code is now permanently invalid");
     } catch (e: any) { toast.error(e.message || "Failed to regenerate QR code"); }
@@ -255,27 +285,21 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
 
   const safeName = driver.full_name.replace(/[^a-zA-Z0-9]/g, "-");
 
-  const handleDownload = async () => {
-    if (!qrSrc) return;
-    try {
-      if (qrSrc.startsWith("data:")) {
-        const a = document.createElement("a"); a.href = qrSrc; a.download = `qr-${safeName}.png`; a.click(); return;
-      }
-      const res = await fetch(qrSrc); const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `qr-${safeName}.png`; a.click();
-      URL.revokeObjectURL(url); toast.success("QR code downloaded");
-    } catch { toast.error("Download failed"); }
+  const handleDownload = () => {
+    if (!qrDataUrl || qrDataUrl === "error") return;
+    const a = document.createElement("a");
+    a.href = qrDataUrl; a.download = `qr-${safeName}.png`; a.click();
+    toast.success("QR code downloaded");
   };
 
   const handlePrint = () => {
-    if (!qrSrc) return;
+    if (!qrDataUrl || qrDataUrl === "error") return;
     const pw = window.open("", "_blank", "width=500,height=600");
     if (!pw) { toast.error("Allow pop-ups to print"); return; }
     pw.document.write(`<!DOCTYPE html><html><head><title>Tag-n-Ride Driver QR Code</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,sans-serif;background:#fff;color:#111;padding:32px}.logo{font-size:13px;font-weight:800;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:24px}.name{font-size:22px;font-weight:700;margin-bottom:6px}.id{font-size:11px;color:#888;font-family:monospace;margin-bottom:24px}img{width:260px;height:260px;display:block}.note{font-size:11px;color:#aaa;margin-top:20px;text-align:center}@media print{@page{margin:0;size:A5}body{padding:16px}}</style>
 </head><body><p class="logo">Tag-n-Ride</p><p class="name">${driver.full_name}</p><p class="id">ID: ${driver.user_id}</p>
-<img src="${qrSrc}" alt="QR Code"/><p class="note">Scan to identify this driver</p>
+<img src="${qrDataUrl}" alt="QR Code"/><p class="note">Scan to identify this driver</p>
 <script>window.onload=function(){window.print()}<\/script></body></html>`);
     pw.document.close();
   };
@@ -299,26 +323,37 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
 
         <div className="flex items-center justify-center mb-5">
           <div className="relative w-56 h-56 bg-white rounded-2xl p-3 shadow-inner">
-            {imgStatus === "loading" && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white">
+            {/* Generating / rendering spinner */}
+            {(generating || (currentQr && !qrDataUrl)) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl bg-white">
                 <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
+                <p className="text-gray-400 text-[10px]">{generating ? "Generating…" : "Rendering…"}</p>
               </div>
             )}
-            {imgStatus === "error" || !qrSrc ? (
+            {/* No QR yet */}
+            {!currentQr && !generating && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-50 p-4">
-                <ImageOff size={24} className="text-gray-400" />
-                <p className="text-gray-500 text-xs text-center font-medium">{!qrSrc ? "No QR code yet" : "Failed to load QR code"}</p>
-                <button onClick={currentQr ? () => { setRegenReason(""); setRegenAcknowledged(false); setRegenModal(true); } : handleFirstGenerate}
-                  disabled={generating}
+                <QrCode size={28} className="text-gray-300" />
+                <p className="text-gray-500 text-xs text-center font-medium">No QR code yet</p>
+                <button onClick={handleFirstGenerate} disabled={generating}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
-                  {generating ? <RefreshCw size={11} className="animate-spin" /> : <QrCode size={11} />}
-                  {generating ? "Generating…" : (currentQr ? "Regenerate QR" : "Generate QR")}
+                  <QrCode size={11} /> Generate QR
                 </button>
               </div>
-            ) : (
-              <img ref={imgRef} src={qrSrc} alt={`QR code for ${driver.full_name}`}
-                className={`w-full h-full object-contain transition-opacity duration-200 ${imgStatus === "loaded" ? "opacity-100" : "opacity-0"}`}
-                onLoad={() => setImgStatus("loaded")} onError={() => setImgStatus("error")} />
+            )}
+            {/* QR ready */}
+            {qrDataUrl && qrDataUrl !== "error" && (
+              <img src={qrDataUrl} alt={`QR code for ${driver.full_name}`}
+                className="w-full h-full object-contain" />
+            )}
+            {/* Generation error */}
+            {qrDataUrl === "error" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4">
+                <ImageOff size={24} className="text-gray-400" />
+                <p className="text-gray-500 text-xs text-center">Render failed — tap retry</p>
+                <button onClick={() => { setQrDataUrl(""); generateQRWithLogo(currentQr!).then(setQrDataUrl).catch(() => setQrDataUrl("error")); }}
+                  className="text-xs text-gray-600 underline">Retry</button>
+              </div>
             )}
           </div>
         </div>
@@ -330,10 +365,10 @@ function QrModal({ driver, onClose, onQrGenerated }: { driver: Driver; onClose: 
         )}
 
         <div className="flex gap-3">
-          <Button variant="secondary" className="flex-1 justify-center" onClick={handleDownload} disabled={!qrSrc || imgStatus === "error" || generating}>
+          <Button variant="secondary" className="flex-1 justify-center" onClick={handleDownload} disabled={!qrDataUrl || qrDataUrl === "error" || generating}>
             <Download size={13} /> Download
           </Button>
-          <Button className="flex-1 justify-center" onClick={handlePrint} disabled={!qrSrc || imgStatus === "error" || generating}>
+          <Button className="flex-1 justify-center" onClick={handlePrint} disabled={!qrDataUrl || qrDataUrl === "error" || generating}>
             <Printer size={13} /> Print
           </Button>
         </div>

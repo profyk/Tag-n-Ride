@@ -5,9 +5,10 @@ import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Badge, Button, Spinner, Table, Tr, Td } from "@/components/ui";
 import { api, Driver, Transaction, TaxiAssociation, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { ArrowLeft, CheckCircle, Star, Printer, Download, Building2, X } from "lucide-react";
+import { ArrowLeft, CheckCircle, Star, Printer, Download, Building2, X, RefreshCw, ShieldAlert, AlertTriangle, QrCode as QrCodeIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import QRCode from "qrcode";
+import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 
 async function generateQRWithLogo(text: string): Promise<string> {
   return new Promise(async (resolve) => {
@@ -72,6 +73,13 @@ export default function DriverDetailPage() {
   const [savingAssoc, setSavingAssoc] = useState(false);
   const canManage = hasPermission("manage_drivers");
 
+  // QR regeneration
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenReason, setRegenReason] = useState<"compromised" | "vehicle_change" | "">("");
+  const [regenAck, setRegenAck] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
+
   useEffect(() => {
     if (!id) return;
     Promise.all([
@@ -109,6 +117,24 @@ export default function DriverDetailPage() {
       toast.success("Driver verified");
       setDriver({ ...driver, is_verified: true });
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleRegenerate = async () => {
+    if (!regenReason || !regenAck || !driver) return;
+    setRegenOpen(false);
+    const token = await requestPin();
+    if (!token) return;
+    setRegenerating(true);
+    try {
+      const res = await api.generateDriverQR(driver.user_id);
+      const newCode = res.data.qr_code;
+      const newUrl = await generateQRWithLogo(newCode);
+      setDriver({ ...driver, qr_code: newCode });
+      setQrDataUrl(newUrl);
+      setRegenReason(""); setRegenAck(false);
+      toast.success("QR code regenerated — old code is permanently invalid");
+    } catch (e: any) { toast.error(e.message || "Failed to regenerate QR code"); }
+    finally { setRegenerating(false); }
   };
 
   const handlePrint = () => {
@@ -331,17 +357,40 @@ export default function DriverDetailPage() {
               </div>
 
               {/* QR with TNR logo */}
-              <div className="border border-gray-100 rounded-xl p-3 mb-4">
-                {qrDataUrl ? (
-                  <img
-                    src={qrDataUrl}
-                    alt="Driver QR Code"
-                    className="w-56 h-56"
-                  />
-                ) : (
-                  <div className="w-56 h-56 flex items-center justify-center">
-                    <Spinner />
+              <div className="border border-gray-100 rounded-xl p-3 mb-4 relative">
+                {/* No QR code assigned yet */}
+                {!driver.qr_code && !regenerating && (
+                  <div className="w-56 h-56 flex flex-col items-center justify-center gap-3 bg-gray-50 rounded-lg">
+                    <QrCodeIcon size={32} className="text-gray-300" />
+                    <p className="text-gray-400 text-xs text-center font-medium">No QR code assigned</p>
+                    <button
+                      onClick={async () => {
+                        setRegenerating(true);
+                        try {
+                          const res = await api.generateDriverQR(driver.user_id);
+                          const newCode = res.data.qr_code;
+                          const newUrl = await generateQRWithLogo(newCode);
+                          setDriver({ ...driver, qr_code: newCode });
+                          setQrDataUrl(newUrl);
+                          toast.success("QR code generated");
+                        } catch (e: any) { toast.error(e.message || "Failed"); }
+                        finally { setRegenerating(false); }
+                      }}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-gray-700 transition-colors">
+                      <QrCodeIcon size={11} /> Generate QR Code
+                    </button>
                   </div>
+                )}
+                {/* Generating / rendering */}
+                {(regenerating || (driver.qr_code && !qrDataUrl)) && (
+                  <div className="w-56 h-56 flex flex-col items-center justify-center gap-2 bg-gray-50 rounded-lg">
+                    <div className="w-7 h-7 border-2 border-gray-200 border-t-gray-700 rounded-full animate-spin" />
+                    <p className="text-gray-400 text-[10px]">{regenerating ? "Generating…" : "Rendering…"}</p>
+                  </div>
+                )}
+                {/* QR ready */}
+                {qrDataUrl && (
+                  <img src={qrDataUrl} alt="Driver QR Code" className="w-56 h-56" />
                 )}
               </div>
 
@@ -367,12 +416,76 @@ export default function DriverDetailPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Button onClick={handlePrint} className="justify-center">
+              <Button onClick={handlePrint} className="justify-center" disabled={!qrDataUrl}>
                 <Printer size={14} /> Print QR
               </Button>
-              <Button variant="secondary" onClick={handleDownload} className="justify-center">
+              <Button variant="secondary" onClick={handleDownload} className="justify-center" disabled={!qrDataUrl}>
                 <Download size={14} /> Download PNG
               </Button>
+            </div>
+
+            {/* ── Regenerate QR section ── */}
+            <div className="border border-red/20 rounded-xl overflow-hidden">
+              <button
+                onClick={() => { setRegenOpen(o => !o); setRegenReason(""); setRegenAck(false); }}
+                className="w-full flex items-center justify-between px-4 py-3 bg-red/5 hover:bg-red/10 transition-colors">
+                <div className="flex items-center gap-2">
+                  <RefreshCw size={13} className="text-red/70" />
+                  <span className="text-red/80 text-xs font-bold">Regenerate QR Code</span>
+                </div>
+                <span className="text-red/50 text-[10px]">{regenOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {regenOpen && (
+                <div className="px-4 pb-4 space-y-4 border-t border-red/10 pt-4">
+                  {/* Warning */}
+                  <div className="flex items-start gap-2.5 p-3 bg-red/5 border border-red/15 rounded-lg">
+                    <AlertTriangle size={13} className="text-red flex-shrink-0 mt-0.5" />
+                    <div className="text-xs space-y-1">
+                      <p className="text-red font-semibold">The current printed QR will be permanently invalidated.</p>
+                      <p className="text-gray-500">Passengers scanning the old code will see an error. A new QR must be reprinted and handed to the driver.</p>
+                    </div>
+                  </div>
+
+                  {/* Reason */}
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Reason <span className="text-red">*</span></p>
+                    {([
+                      { value: "compromised",    label: "QR reported as compromised or stolen",     sub: "Someone may have photographed or duplicated the driver's QR code" },
+                      { value: "vehicle_change", label: "Driver has changed taxi / vehicle",         sub: "New vehicle requires a new QR linked to the correct plate number" },
+                    ] as const).map(({ value, label, sub }) => (
+                      <label key={value}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${regenReason === value ? "bg-cyan/5 border-cyan/30" : "border-gray-200 hover:border-cyan/20"}`}>
+                        <input type="radio" name="detailRegenReason" value={value} checked={regenReason === value}
+                          onChange={() => setRegenReason(value)} className="mt-0.5 accent-cyan" />
+                        <div>
+                          <p className="text-gray-800 text-sm font-semibold">{label}</p>
+                          <p className="text-gray-400 text-[11px] mt-0.5">{sub}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Acknowledgment */}
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${regenAck ? "bg-yellow-50 border-yellow-300" : "border-gray-200 hover:border-yellow-200"}`}>
+                    <input type="checkbox" checked={regenAck} onChange={e => setRegenAck(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 accent-yellow-500" />
+                    <p className="text-gray-500 text-xs">
+                      I confirm the current printed QR will be <strong className="text-gray-800">destroyed and replaced</strong>.
+                      The driver has been informed and the old code will no longer function.
+                    </p>
+                  </label>
+
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={!regenReason || !regenAck || regenerating}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-red/15 border border-red/25 text-red font-bold text-sm disabled:opacity-40 hover:bg-red/25 transition-colors">
+                    {regenerating
+                      ? <><RefreshCw size={14} className="animate-spin" /> Regenerating…</>
+                      : <><ShieldAlert size={14} /> Regenerate — requires security PIN</>}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -444,6 +557,13 @@ export default function DriverDetailPage() {
           </Table>
         </Card>
       </div>
+
+      <DangerPinModal
+        open={pinOpen}
+        onSuccess={pinSuccess}
+        onCancel={pinCancel}
+        actionLabel="regenerate this driver's QR code"
+      />
     </AdminShell>
   );
 }
