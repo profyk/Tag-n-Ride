@@ -748,7 +748,7 @@ export default function AlertsPage() {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <AlertTriangle size={14} className="text-yellow" />
-                        <h3 className="text-sm font-bold text-text">Large Transactions (>R5,000 / 24h)</h3>
+                        <h3 className="text-sm font-bold text-text">Large Transactions ({'>'}R5,000 / 24h)</h3>
                         <span className="text-[10px] font-bold px-2 py-0.5 bg-yellow/10 text-yellow border border-yellow/20 rounded-full">
                           {compAlerts.large_transactions.length}
                         </span>
