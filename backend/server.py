@@ -463,6 +463,15 @@ async def lifespan(app: FastAPI):
                 )""",
                 # wallets.updated_at — required by GET /admin/wallets
                 "ALTER TABLE wallets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+                # backfill: ensure every fleet owner has a drivers row so qr_code is never NULL
+                """INSERT INTO drivers (id, user_id, qr_code, vehicle_plate)
+                   SELECT gen_random_uuid()::text, u.id,
+                          'TNR' || LPAD((ABS(('x' || LEFT(MD5(u.id), 15))::bit(60)::bigint) % 9000000000000 + 1000000000000)::text, 13, '0'),
+                          ''
+                   FROM users u
+                   JOIN fleet_owners fo ON fo.user_id = u.id
+                   WHERE NOT EXISTS (SELECT 1 FROM drivers d WHERE d.user_id = u.id)
+                   ON CONFLICT DO NOTHING""",
             ]:
                 try:
                     await conn.execute(_sql)
@@ -2152,11 +2161,19 @@ async def admin_generate_driver_qr(user_id: str, request: Request, admin: dict =
     if not has_permission(admin, "manage_drivers"):
         raise HTTPException(status_code=403, detail="Permission denied")
     async with pool.acquire() as conn:
-        drv = await conn.fetchrow("SELECT id FROM drivers WHERE user_id=$1", user_id)
-        if not drv:
-            raise HTTPException(status_code=404, detail="Driver not found")
+        user = await conn.fetchrow("SELECT id, role FROM users WHERE id=$1", user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
         new_qr = generate_qr_code()
-        await conn.execute("UPDATE drivers SET qr_code=$1 WHERE user_id=$2", new_qr, user_id)
+        drv = await conn.fetchrow("SELECT id FROM drivers WHERE user_id=$1", user_id)
+        if drv:
+            await conn.execute("UPDATE drivers SET qr_code=$1 WHERE user_id=$2", new_qr, user_id)
+        else:
+            # Owner (or user) with no drivers row — create one so they get a QR
+            await conn.execute(
+                "INSERT INTO drivers (id, user_id, qr_code, vehicle_plate) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id) DO UPDATE SET qr_code=EXCLUDED.qr_code",
+                str(uuid.uuid4()), user_id, new_qr, ""
+            )
         await audit(conn, admin["id"], "GENERATE_DRIVER_QR", user_id, "driver", {"new_qr": new_qr}, request.client.host)
     return {"ok": True, "qr_code": new_qr}
 
