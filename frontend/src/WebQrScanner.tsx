@@ -12,6 +12,11 @@ type Props = {
 
 const MAX_SCAN_DIM = 720; // downscale capture for fast per-frame decode
 
+// Remembered across mounts within the page session so re-opening the
+// scanner (e.g. cancelling out of /pay back to the scan screen) jumps
+// straight to the known-good camera instead of re-negotiating every time.
+let cachedDeviceId: string | null = null;
+
 // Decodes QR codes directly in the browser via a bundled jsQR — no CDN
 // dependency (expo-camera's web barcode path fetches jsQR from a CDN at
 // runtime, which silently fails to scan when that request is blocked).
@@ -52,41 +57,50 @@ export function WebQrScanner({ active, torch, onScan, onTorchSupportChange, onEr
     rafRef.current = requestAnimationFrame(tick);
   }, [onScan]);
 
-  // Finds the rear/environment camera as reliably as the web platform allows.
-  // `facingMode: "ideal"` is only a hint — many browsers happily ignore it and
-  // hand back the front camera instead, so we layer several strategies:
-  //   1. Ask for an exact environment-facing camera.
-  //   2. If that's unsupported (e.g. no exact match), enumerate devices and
-  //      pick one whose label says "back"/"rear"/"environment".
-  //   3. Fall back to an "ideal" (non-exact) environment request.
+  // Finds the rear/environment camera without paying for slow negotiation
+  // on every open. `facingMode: "ideal"` is just a hint, so:
+  //   1. Fast path — reuse the deviceId that worked last time (instant).
+  //   2. Common path — ask for "environment" (ideal). Almost all browsers
+  //      honour this promptly without throwing.
+  //   3. Verify: if the browser handed back the front camera anyway, look
+  //      for a device labelled "back"/"rear" and swap to it once.
   //   4. Last resort: whatever camera is available (e.g. a laptop webcam).
   const acquireStream = useCallback(async (): Promise<MediaStream> => {
     const videoBase = { width: { ideal: 1920 }, height: { ideal: 1080 } };
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        video: { ...videoBase, facingMode: { exact: "environment" } },
-        audio: false,
-      });
-    } catch {}
 
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const rear = devices.find(
-        d => d.kind === "videoinput" && /back|rear|environment/i.test(d.label)
-      );
-      if (rear) {
+    if (cachedDeviceId) {
+      try {
         return await navigator.mediaDevices.getUserMedia({
-          video: { ...videoBase, deviceId: { exact: rear.deviceId } },
+          video: { ...videoBase, deviceId: { exact: cachedDeviceId } },
           audio: false,
         });
+      } catch {
+        cachedDeviceId = null; // device may have disappeared; renegotiate below
       }
-    } catch {}
+    }
 
     try {
-      return await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: { ...videoBase, facingMode: "environment" },
         audio: false,
       });
+      const settings: any = stream.getVideoTracks()[0]?.getSettings?.() ?? {};
+      if (settings.facingMode !== "user") {
+        cachedDeviceId = settings.deviceId ?? null;
+        return stream;
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const rear = devices.find(
+        d => d.kind === "videoinput" && d.deviceId !== settings.deviceId && /back|rear|environment/i.test(d.label)
+      );
+      if (!rear) return stream; // no better option — keep what we have
+      stream.getTracks().forEach(t => t.stop());
+      const swapped = await navigator.mediaDevices.getUserMedia({
+        video: { ...videoBase, deviceId: { exact: rear.deviceId } },
+        audio: false,
+      });
+      cachedDeviceId = rear.deviceId;
+      return swapped;
     } catch {}
 
     return navigator.mediaDevices.getUserMedia({ video: videoBase, audio: false });

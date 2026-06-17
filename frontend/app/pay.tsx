@@ -94,7 +94,10 @@ export default function Pay() {
     return (
       <SafeAreaView style={styles.root} testID="pay-error-screen">
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.close}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.close}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <Ionicons name="close" size={22} color={colors.text} />
           </TouchableOpacity>
         </View>
@@ -153,7 +156,11 @@ export default function Pay() {
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
             <Text style={styles.title}>Pay</Text>
-            <TouchableOpacity onPress={() => router.back()} style={styles.close} testID="pay-close-btn">
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.close}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              testID="pay-close-btn">
               <Ionicons name="close" size={22} color={colors.text} />
             </TouchableOpacity>
           </View>
