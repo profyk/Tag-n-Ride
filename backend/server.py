@@ -2913,7 +2913,7 @@ async def owner_driver_earnings(driver_user_id: str, user: dict = Depends(requir
             driver_user_id
         )
         last_cashup = await conn.fetchrow(
-            "SELECT cashup_amount,owner_received,fuel_deducted,driver_profit,created_at "
+            "SELECT cashup_amount,fuel_deducted,driver_profit,created_at "
             "FROM cashup_records WHERE driver_user_id=$1 AND owner_user_id=$2 ORDER BY created_at DESC LIMIT 1",
             driver_user_id, user["id"]
         )
@@ -2944,7 +2944,7 @@ async def owner_driver_earnings(driver_user_id: str, user: dict = Depends(requir
         "owner_total_received": float(owner_total or 0),
         "last_cashup": {
             "amount": float(last_cashup["cashup_amount"]),
-            "owner_received": float(last_cashup["owner_received"] or last_cashup["cashup_amount"]),
+            "owner_received": float(last_cashup["cashup_amount"]),
             "fuel_deducted": float(last_cashup["fuel_deducted"] or 0),
             "driver_profit": float(last_cashup["driver_profit"] or 0),
             "date": iso(last_cashup["created_at"]),

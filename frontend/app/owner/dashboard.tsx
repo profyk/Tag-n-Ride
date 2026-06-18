@@ -70,6 +70,13 @@ export default function OwnerDashboard() {
   const [sosModal, setSosModal] = useState(false);
   const [sosLoading, setSosLoading] = useState(false);
   const [sosActive, setSosActive] = useState<{ id: string; type: string } | null>(null);
+  const [sosEmergencyType, setSosEmergencyType] = useState<"police" | "ambulance" | null>(null);
+  const [sosLocation, setSosLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [sosLocationLoading, setSosLocationLoading] = useState(false);
+  const [sosHelpComing, setSosHelpComing] = useState(false);
+  const [sosTapCount, setSosTapCount] = useState(0);
+  const sosTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sosHelpComingRef = useRef(false);
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelPin, setCancelPin] = useState("");
   const [cancelError, setCancelError] = useState("");
@@ -88,6 +95,7 @@ export default function OwnerDashboard() {
   }, []);
 
   const startSosPing = useCallback((sosId: string) => {
+    sosHelpComingRef.current = false;
     stopSosPing();
     sosPingRef.current = setInterval(async () => {
       try {
@@ -95,9 +103,16 @@ export default function OwnerDashboard() {
         if (status !== "granted") return;
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         const res = await api.sosLocationPing(sosId, { latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-        if (res.resolved) { stopSosPing(); setSosActive(null); }
+        if (res.resolved) {
+          stopSosPing();
+          setSosActive(null);
+          setSosHelpComing(false);
+        } else if (res.help_coming && !sosHelpComingRef.current) {
+          sosHelpComingRef.current = true;
+          setSosHelpComing(true);
+        }
       } catch {}
-    }, 30000);
+    }, 10000);
   }, [stopSosPing]);
 
   // Ghost ping — active after dead man code used during SOS cancel
@@ -115,25 +130,73 @@ export default function OwnerDashboard() {
     }, 30000);
   }, [stopGhostPing]);
 
-  const handleSOS = async (type: "police" | "ambulance") => {
+  const openSosModal = async () => {
+    setSosModal(true);
+    setSosEmergencyType(null);
+    setSosLocation(null);
+    setSosLocationLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setSosLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+      }
+    } catch {} finally { setSosLocationLoading(false); }
+  };
+
+  const closeSosModal = () => {
+    setSosModal(false);
+    setSosLocation(null);
+    setSosEmergencyType(null);
+  };
+
+  const handleSosTap = () => {
+    if (sosLoading || sosActive) return;
+    const newCount = sosTapCount + 1;
+    setSosTapCount(newCount);
+    if (sosTapTimerRef.current) clearTimeout(sosTapTimerRef.current);
+    if (newCount >= 3) {
+      setSosTapCount(0);
+      openSosModal();
+      return;
+    }
+    sosTapTimerRef.current = setTimeout(() => setSosTapCount(0), 1500);
+  };
+
+  const handleSOS = async () => {
+    if (!sosEmergencyType) return;
+    const type = sosEmergencyType;
     setSosModal(false);
     setSosLoading(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      let lat: number | undefined; let lng: number | undefined;
-      if (status === "granted") {
-        try {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          lat = loc.coords.latitude; lng = loc.coords.longitude;
-        } catch {}
-      }
-      const res = await api.sosRequest({ emergency_type: type, latitude: lat, longitude: lng });
+      const res = await api.sosRequest({
+        emergency_type: type,
+        latitude: sosLocation?.latitude,
+        longitude: sosLocation?.longitude,
+      });
       setSosActive({ id: res.sos_id, type });
       startSosPing(res.sos_id);
-      Alert.alert("SOS Sent", `Emergency alert sent. Help is on the way.\nSOS ID: ${res.sos_id}`);
+      const label = type === "police" ? "Police" : "Ambulance";
+      Alert.alert(
+        "SOS Sent",
+        `${label} request sent to admin. Our team is contacting emergency services on your behalf. Stay calm and stay on the line.`,
+        [{ text: "OK" }]
+      );
     } catch (e: any) {
-      Alert.alert("SOS Failed", e?.message || "Could not send alert. Call 10111 directly.");
+      Alert.alert("SOS Failed", e?.message || "Could not send — call 10111 (Police) or 10177 (Ambulance) immediately.");
     } finally { setSosLoading(false); }
+  };
+
+  const confirmHelpReceived = async () => {
+    if (!sosActive) return;
+    try {
+      await api.sosReceived(sosActive.id);
+    } catch {}
+    stopSosPing();
+    setSosActive(null);
+    setSosHelpComing(false);
+    sosHelpComingRef.current = false;
+    Alert.alert("Thank you", "We're glad help arrived. Stay safe!");
   };
 
   const handleCancelSOS = async () => {
@@ -142,15 +205,13 @@ export default function OwnerDashboard() {
     try {
       const res = await api.sosCancelPin({ sos_id: sosActive.id, pin: cancelPin });
       setCancelModal(false); setCancelPin("");
+      stopSosPing();
+      setSosActive(null);
+      setSosHelpComing(false);
+      sosHelpComingRef.current = false;
       if (res.stealth) {
         // Dead man code was entered — appear to cancel but silently keep tracking
-        stopSosPing();
-        setSosActive(null);
         startGhostPing();
-      } else {
-        // Real PIN — genuine cancel
-        stopSosPing();
-        setSosActive(null);
       }
     } catch (e: any) {
       const msg = e?.message || "";
@@ -387,16 +448,19 @@ export default function OwnerDashboard() {
               <Ionicons name="qr-code-outline" size={18} color={colors.bg} />
               <Text style={s.driveBtnText}>Drive</Text>
             </TouchableOpacity>
-            {/* SOS button */}
+            {/* SOS button — tap 3× to arm */}
             <TouchableOpacity
-              onPress={() => sosActive ? setCancelModal(true) : setSosModal(true)}
-              style={[s.sosHeaderBtn, sosActive && { backgroundColor: colors.red }]}
+              onPress={() => sosActive ? setCancelModal(true) : handleSosTap()}
+              style={[s.sosHeaderBtn, sosActive && (sosHelpComing
+                ? { backgroundColor: "#15803d", borderColor: "#4ade80" }
+                : { backgroundColor: colors.red, borderColor: colors.red })]}
+              disabled={sosLoading}
               activeOpacity={0.8}>
               {sosLoading
                 ? <ActivityIndicator size="small" color={sosActive ? "#fff" : colors.red} />
                 : <Ionicons name="warning" size={14} color={sosActive ? "#fff" : colors.red} />}
               <Text style={[s.sosHeaderText, { color: sosActive ? "#fff" : colors.red }]}>
-                {sosActive ? "ACTIVE" : "SOS"}
+                {sosActive ? (sosHelpComing ? "HELP COMING" : "● LIVE") : (sosTapCount > 0 ? `${sosTapCount}×` : "SOS")}
               </Text>
             </TouchableOpacity>
             {/* Bell */}
@@ -410,6 +474,29 @@ export default function OwnerDashboard() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* ─── HELP COMING BANNER ─── */}
+        {sosHelpComing && (
+          <View style={{ marginHorizontal: 16, marginTop: 10, borderRadius: 14, backgroundColor: "#14532d", borderWidth: 2, borderColor: "#4ade80", padding: 14, alignItems: "center", gap: 10 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Ionicons name="checkmark-circle" size={22} color="#4ade80" />
+              <Text style={{ color: "#4ade80", fontWeight: "900", fontSize: 16, letterSpacing: 0.5 }}>HELP IS ON THE WAY</Text>
+            </View>
+            <Text style={{ color: "#86efac", fontSize: 12, textAlign: "center" }}>Admin has acknowledged your SOS. Stay calm and keep your phone with you.</Text>
+            <TouchableOpacity
+              onPress={() => Alert.alert(
+                "Received Help?",
+                "Press confirm only when help has physically arrived.",
+                [
+                  { text: "Not Yet", style: "cancel" },
+                  { text: "Confirm — Help Arrived", style: "default", onPress: confirmHelpReceived },
+                ]
+              )}
+              style={{ backgroundColor: "#15803d", borderRadius: 10, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: "#4ade80" }}>
+              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 14 }}>Received Help</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator color={colors.cyan} style={{ marginTop: 60 }} />
@@ -1240,8 +1327,8 @@ export default function OwnerDashboard() {
         </Modal>
       )}
       {/* ── SOS choice modal ── */}
-      <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
-        <Pressable style={ss.backdrop} onPress={() => setSosModal(false)}>
+      <Modal visible={sosModal} transparent animationType="slide" onRequestClose={closeSosModal}>
+        <Pressable style={ss.backdrop} onPress={closeSosModal}>
           <Pressable style={[ss.sheet, { backgroundColor: colors.bg2, borderColor: colors.border }]} onPress={() => {}}>
             <View style={ss.handle} />
             <View style={[ss.iconWrap, { backgroundColor: colors.redDim, borderColor: colors.red + "40" }]}>
@@ -1249,33 +1336,51 @@ export default function OwnerDashboard() {
             </View>
             <Text style={[ss.title, { color: colors.text }]}>Emergency SOS</Text>
             <Text style={[ss.sub, { color: colors.textMuted }]}>
-              Your location is sent to emergency services immediately. Only use in a genuine emergency.
+              Select the type of emergency — admin will contact services on your behalf
             </Text>
-            <TouchableOpacity
-              style={[ss.choice, { backgroundColor: "#1D4ED815", borderColor: "#1D4ED8" }]}
-              onPress={() => handleSOS("police")} activeOpacity={0.8}>
-              <View style={[ss.choiceIcon, { backgroundColor: "#1D4ED820" }]}>
-                <Ionicons name="shield-outline" size={22} color="#1D4ED8" />
-              </View>
+            <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
+              <TouchableOpacity
+                onPress={() => setSosEmergencyType("police")}
+                style={{ flex: 1, paddingVertical: 20, borderRadius: 14, borderWidth: 2,
+                  borderColor: sosEmergencyType === "police" ? "#1D4ED8" : colors.border,
+                  backgroundColor: sosEmergencyType === "police" ? "#1D4ED820" : colors.bg,
+                  alignItems: "center", gap: 8 }}>
+                <Ionicons name="shield" size={32} color={sosEmergencyType === "police" ? "#1D4ED8" : colors.textMuted} />
+                <Text style={{ fontWeight: "900", fontSize: 15, color: sosEmergencyType === "police" ? "#1D4ED8" : colors.textMuted, letterSpacing: 0.5 }}>POLICE</Text>
+                <Text style={{ fontSize: 10, color: colors.textDim, textAlign: "center" }}>Crime · Threat{"\n"}Assault · Hijacking</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setSosEmergencyType("ambulance")}
+                style={{ flex: 1, paddingVertical: 20, borderRadius: 14, borderWidth: 2,
+                  borderColor: sosEmergencyType === "ambulance" ? colors.red : colors.border,
+                  backgroundColor: sosEmergencyType === "ambulance" ? colors.red + "20" : colors.bg,
+                  alignItems: "center", gap: 8 }}>
+                <Ionicons name="medkit" size={32} color={sosEmergencyType === "ambulance" ? colors.red : colors.textMuted} />
+                <Text style={{ fontWeight: "900", fontSize: 15, color: sosEmergencyType === "ambulance" ? colors.red : colors.textMuted, letterSpacing: 0.5 }}>AMBULANCE</Text>
+                <Text style={{ fontSize: 10, color: colors.textDim, textAlign: "center" }}>Medical emergency{"\n"}Accident · Injury</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Location status */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.bg, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: colors.border, marginBottom: 16 }}>
+              <Ionicons name="location-outline" size={16} color={sosLocation ? colors.green : colors.textMuted} />
+              {sosLocationLoading
+                ? <ActivityIndicator size="small" color={colors.cyan} />
+                : sosLocation
+                  ? <Text style={{ color: colors.green, fontSize: 12, fontWeight: "600" }}>Location acquired — will be sent with your SOS</Text>
+                  : <Text style={{ color: colors.textMuted, fontSize: 12 }}>Acquiring location… enable GPS for best response</Text>}
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
               <View style={{ flex: 1 }}>
-                <Text style={[ss.choiceTitle, { color: "#1D4ED8" }]}>Police</Text>
-                <Text style={[ss.choiceSub, { color: colors.textMuted }]}>SAPS emergency response</Text>
+                <Button label="Cancel" variant="secondary" onPress={closeSosModal} />
               </View>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[ss.choice, { backgroundColor: colors.redDim, borderColor: colors.red }]}
-              onPress={() => handleSOS("ambulance")} activeOpacity={0.8}>
-              <View style={[ss.choiceIcon, { backgroundColor: colors.redDim }]}>
-                <Ionicons name="medkit-outline" size={22} color={colors.red} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[ss.choiceTitle, { color: colors.red }]}>Ambulance</Text>
-                <Text style={[ss.choiceSub, { color: colors.textMuted }]}>Medical emergency services</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setSosModal(false)} style={ss.cancelRow}>
-              <Text style={{ color: colors.textMuted, fontSize: 14, fontWeight: "600" }}>Cancel — not an emergency</Text>
-            </TouchableOpacity>
+              <TouchableOpacity onPress={handleSOS} disabled={!sosEmergencyType}
+                style={{ flex: 1, backgroundColor: sosEmergencyType ? colors.red : colors.border, borderRadius: 10, paddingVertical: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+                <Ionicons name="flash" size={16} color="#fff" />
+                <Text style={{ color: "#fff", fontWeight: "900", fontSize: 14, letterSpacing: 0.5 }}>SEND SOS</Text>
+              </TouchableOpacity>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1325,10 +1430,6 @@ const ss = StyleSheet.create({
   iconWrap: { width: 64, height: 64, borderRadius: 32, borderWidth: 1, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 14 },
   title: { fontSize: 22, fontWeight: "900", textAlign: "center", marginBottom: 6 },
   sub: { fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: 24 },
-  choice: { flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 12 },
-  choiceIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  choiceTitle: { fontSize: 16, fontWeight: "800" },
-  choiceSub: { fontSize: 12, marginTop: 2 },
   cancelRow: { alignItems: "center", paddingVertical: 14 },
   pinInput: { borderWidth: 1.5, borderRadius: 14, fontSize: 22, padding: 16, textAlign: "center", letterSpacing: 8, marginBottom: 8 },
   confirmBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, padding: 16, marginTop: 4 },

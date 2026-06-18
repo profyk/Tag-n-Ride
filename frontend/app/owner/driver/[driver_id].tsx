@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView,
-  ActivityIndicator, TouchableOpacity, Alert,
+  ActivityIndicator, TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -25,14 +25,19 @@ export default function OwnerDriverDetail() {
   const { colors } = useTheme();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = () => {
     if (!driver_id) return;
+    setLoading(true);
+    setError(null);
     api.ownerDriverEarnings(driver_id)
       .then(setData)
-      .catch((e: any) => Alert.alert("Error", e?.message || "Failed to load"))
+      .catch((e: any) => setError(e?.message || "Failed to load"))
       .finally(() => setLoading(false));
-  }, [driver_id]);
+  };
+
+  useEffect(load, [driver_id]);
 
   if (loading) {
     return (
@@ -41,7 +46,28 @@ export default function OwnerDriverDetail() {
       </SafeAreaView>
     );
   }
-  if (!data) return null;
+  if (error || !data) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
+        <TouchableOpacity onPress={() => router.back()} style={{
+          width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bg2,
+          borderWidth: 1, borderColor: colors.border,
+          alignItems: "center", justifyContent: "center", margin: 20,
+        }}>
+          <Ionicons name="arrow-back" size={20} color={colors.text} />
+        </TouchableOpacity>
+        <View style={{ alignItems: "center", padding: 32, gap: 8 }}>
+          <Ionicons name="alert-circle-outline" size={36} color={colors.textDim} />
+          <Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: 14, textAlign: "center" }}>
+            {error || "Failed to load"}
+          </Text>
+          <TouchableOpacity onPress={load} style={{ marginTop: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.cyanDim, borderWidth: 1, borderColor: colors.cyan + "55" }}>
+            <Text style={{ color: colors.cyan, fontWeight: "700" }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const {
     driver, today_total, today_trip_count, avg_per_trip_today,
