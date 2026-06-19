@@ -801,7 +801,7 @@ export const api = {
     request<{ ok: boolean; sos_id: string }>("/api/saferide/sos", { method: "POST", body: JSON.stringify(body) }),
 
   sosLocationPing: (sosId: string, body: { latitude: number; longitude: number }) =>
-    request<{ ok: boolean; resolved: boolean; help_coming: boolean }>(`/api/saferide/sos/${sosId}/location`, { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: boolean; resolved: boolean; help_coming: boolean; admin_notes: string | null }>(`/api/saferide/sos/${sosId}/location`, { method: "POST", body: JSON.stringify(body) }),
 
   sosReceived: (sosId: string) =>
     request<{ ok: boolean }>(`/api/saferide/sos/${sosId}/received`, { method: "PATCH" }),

@@ -50,6 +50,47 @@ export default function OwnerTransactions() {
   const totalGross = filtered.reduce((s, t) => s + t.gross_amount, 0);
   const totalFees = filtered.reduce((s, t) => s + t.platform_fee, 0);
 
+  const clearOne = (id: string) => {
+    Alert.alert("Clear transaction?", "This will remove it from your Fleet Earnings list. It won't affect driver payouts or statements.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear", style: "destructive",
+        onPress: async () => {
+          try {
+            await api.hideTransactions([id]);
+            setTxns((prev) => prev.filter((t) => t.id !== id));
+          } catch (e: any) {
+            Alert.alert("Error", e?.message || "Failed to clear transaction");
+          }
+        },
+      },
+    ]);
+  };
+
+  const clearAll = () => {
+    if (filtered.length === 0) return;
+    Alert.alert(
+      "Clear all transactions?",
+      `This will remove all ${filtered.length} transaction${filtered.length === 1 ? "" : "s"} shown from your Fleet Earnings list. It won't affect driver payouts or statements.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear All", style: "destructive",
+          onPress: async () => {
+            const ids = filtered.map((t) => t.id);
+            try {
+              await api.hideTransactions(ids);
+              const idSet = new Set(ids);
+              setTxns((prev) => prev.filter((t) => !idSet.has(t.id)));
+            } catch (e: any) {
+              Alert.alert("Error", e?.message || "Failed to clear transactions");
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <ScrollView
@@ -61,7 +102,15 @@ export default function OwnerTransactions() {
             tintColor={colors.cyan}
           />
         }>
-        <Text style={styles.title}>Fleet Earnings</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Fleet Earnings</Text>
+          {filtered.length > 0 && (
+            <TouchableOpacity style={styles.clearAllBtn} onPress={clearAll}>
+              <Ionicons name="trash-outline" size={14} color={colors.red} />
+              <Text style={styles.clearAllText}>Clear All</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         <View style={styles.filterRow}>
           <TouchableOpacity
@@ -125,6 +174,9 @@ export default function OwnerTransactions() {
               <View style={styles.txnFooter}>
                 <Text style={styles.txnRef}>{t.reference}</Text>
                 <Text style={styles.txnDate}>{formatDate(t.created_at)}</Text>
+                <TouchableOpacity style={styles.clearBtn} onPress={() => clearOne(t.id)}>
+                  <Ionicons name="close-circle-outline" size={16} color={colors.textDim} />
+                </TouchableOpacity>
               </View>
             </View>
           ))
@@ -136,7 +188,17 @@ export default function OwnerTransactions() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  title: { color: colors.text, fontSize: 24, fontWeight: "800", marginBottom: 16 },
+  headerRow: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 16,
+  },
+  title: { color: colors.text, fontSize: 24, fontWeight: "800" },
+  clearAllBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.red, backgroundColor: colors.redDim,
+  },
+  clearAllText: { color: colors.red, fontWeight: "700", fontSize: 12 },
   filterRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
   filterBtn: {
     paddingHorizontal: 20, paddingVertical: 8, borderRadius: 999,
@@ -170,11 +232,12 @@ const styles = StyleSheet.create({
   netAmount: { color: colors.green, fontWeight: "800", fontSize: 16 },
   grossAmount: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   txnFooter: {
-    flexDirection: "row", justifyContent: "space-between",
-    paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, gap: 8,
   },
   txnRef: { color: colors.textDim, fontSize: 11, fontFamily: "monospace" },
-  txnDate: { color: colors.textDim, fontSize: 11 },
+  txnDate: { color: colors.textDim, fontSize: 11, flex: 1, textAlign: "right", marginRight: 4 },
+  clearBtn: { padding: 2 },
   empty: { alignItems: "center", padding: 40 },
   emptyText: { color: colors.textMuted, marginTop: 12, fontWeight: "700" },
 });

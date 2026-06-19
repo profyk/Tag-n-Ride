@@ -74,6 +74,7 @@ export default function OwnerDashboard() {
   const [sosLocation, setSosLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [sosLocationLoading, setSosLocationLoading] = useState(false);
   const [sosHelpComing, setSosHelpComing] = useState(false);
+  const [sosAdminNote, setSosAdminNote] = useState<string | null>(null);
   const [sosTapCount, setSosTapCount] = useState(0);
   const sosTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sosHelpComingRef = useRef(false);
@@ -107,9 +108,13 @@ export default function OwnerDashboard() {
           stopSosPing();
           setSosActive(null);
           setSosHelpComing(false);
-        } else if (res.help_coming && !sosHelpComingRef.current) {
-          sosHelpComingRef.current = true;
-          setSosHelpComing(true);
+          setSosAdminNote(null);
+        } else if (res.help_coming) {
+          if (!sosHelpComingRef.current) {
+            sosHelpComingRef.current = true;
+            setSosHelpComing(true);
+          }
+          if (res.admin_notes) setSosAdminNote(res.admin_notes);
         }
       } catch {}
     }, 10000);
@@ -195,6 +200,7 @@ export default function OwnerDashboard() {
     stopSosPing();
     setSosActive(null);
     setSosHelpComing(false);
+    setSosAdminNote(null);
     sosHelpComingRef.current = false;
     Alert.alert("Thank you", "We're glad help arrived. Stay safe!");
   };
@@ -208,6 +214,7 @@ export default function OwnerDashboard() {
       stopSosPing();
       setSosActive(null);
       setSosHelpComing(false);
+      setSosAdminNote(null);
       sosHelpComingRef.current = false;
       if (res.stealth) {
         // Dead man code was entered — appear to cancel but silently keep tracking
@@ -482,7 +489,9 @@ export default function OwnerDashboard() {
               <Ionicons name="checkmark-circle" size={22} color="#4ade80" />
               <Text style={{ color: "#4ade80", fontWeight: "900", fontSize: 16, letterSpacing: 0.5 }}>HELP IS ON THE WAY</Text>
             </View>
-            <Text style={{ color: "#86efac", fontSize: 12, textAlign: "center" }}>Admin has acknowledged your SOS. Stay calm and keep your phone with you.</Text>
+            <Text style={{ color: "#86efac", fontSize: 12, textAlign: "center" }}>
+              {sosAdminNote || "Admin has acknowledged your SOS. Stay calm and keep your phone with you."}
+            </Text>
             <TouchableOpacity
               onPress={() => Alert.alert(
                 "Received Help?",

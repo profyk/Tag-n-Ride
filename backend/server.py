@@ -2961,8 +2961,11 @@ async def owner_transactions(user: dict = Depends(require_owner)):
         ids = [d["driver_user_id"] for d in driver_ids_rows]
         if not ids: return []
         rows = await conn.fetch(
-            "SELECT t.*,u.full_name as driver_name,d.vehicle_plate,su.full_name as passenger_name FROM transactions t JOIN drivers d ON d.user_id=t.receiver_id JOIN users u ON u.id=t.receiver_id LEFT JOIN users su ON su.id=t.sender_id WHERE t.receiver_id=ANY($1::text[]) AND t.type='payment' ORDER BY t.created_at DESC LIMIT 100",
-            ids
+            "SELECT t.*,u.full_name as driver_name,d.vehicle_plate,su.full_name as passenger_name FROM transactions t JOIN drivers d ON d.user_id=t.receiver_id JOIN users u ON u.id=t.receiver_id LEFT JOIN users su ON su.id=t.sender_id "
+            "WHERE t.receiver_id=ANY($1::text[]) AND t.type='payment' "
+            "AND NOT EXISTS (SELECT 1 FROM hidden_transactions h WHERE h.user_id=$2 AND h.transaction_id=t.id) "
+            "ORDER BY t.created_at DESC LIMIT 100",
+            ids, user["id"]
         )
     return [{"id": r["id"], "reference": r["reference"], "driver_name": r["driver_name"], "vehicle_plate": r["vehicle_plate"],
              "passenger": r["passenger_name"] or "Passenger", "gross_amount": float(r["amount"] or 0),
@@ -14476,11 +14479,11 @@ async def create_sos_request(body: SosRequestIn, user: dict = Depends(get_curren
 @api.post("/saferide/sos/{sos_id}/location")
 async def sos_location_ping(sos_id: str, body: SosLocationIn, user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
-        req = await conn.fetchrow("SELECT id,user_id,status FROM sos_requests WHERE id=$1", sos_id)
+        req = await conn.fetchrow("SELECT id,user_id,status,admin_notes FROM sos_requests WHERE id=$1", sos_id)
         if not req or req["user_id"] != user["id"]:
             raise HTTPException(404, "SOS request not found")
         if req["status"] in ("resolved", "help_received"):
-            return {"ok": True, "resolved": True, "help_coming": False}
+            return {"ok": True, "resolved": True, "help_coming": False, "admin_notes": req["admin_notes"]}
         await conn.execute(
             "INSERT INTO sos_locations (id,sos_id,latitude,longitude) VALUES ($1,$2,$3,$4)",
             str(uuid.uuid4()), sos_id, body.latitude, body.longitude
@@ -14490,7 +14493,7 @@ async def sos_location_ping(sos_id: str, body: SosLocationIn, user: dict = Depen
             body.latitude, body.longitude, sos_id
         )
     help_coming = req["status"] in ("help_coming", "dispatched")
-    return {"ok": True, "resolved": False, "help_coming": help_coming}
+    return {"ok": True, "resolved": False, "help_coming": help_coming, "admin_notes": req["admin_notes"]}
 
 
 # ── PATCH /api/saferide/sos/{sos_id}/received ── user confirms help arrived
