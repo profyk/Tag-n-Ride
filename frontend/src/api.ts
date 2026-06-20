@@ -9,6 +9,11 @@ export const tokenStore = {
   clear: () => AsyncStorage.removeItem(TOKEN_KEY),
 };
 
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
+}
+
 async function request<T>(path: string, opts: RequestInit = {}, timeoutMs = 20000): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -30,6 +35,10 @@ async function request<T>(path: string, opts: RequestInit = {}, timeoutMs = 2000
       const msg = Array.isArray(detail)
         ? detail.map((d: any) => d?.msg || JSON.stringify(d)).join(", ")
         : typeof detail === "string" ? detail : `Request failed (${res.status})`;
+      if (res.status === 401 && token) {
+        await tokenStore.clear();
+        onUnauthorized?.();
+      }
       throw new Error(msg);
     }
     return data as T;

@@ -9,12 +9,15 @@ import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
 import { useAuth } from "../../src/AuthContext";
+import { useTheme } from "../../src/ThemeContext";
 import { api } from "../../src/api";
-import { colors, radius } from "../../src/theme";
+import { radius } from "../../src/theme";
 
 export default function MyQRScreen() {
   const router = useRouter();
   const { state } = useAuth();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const qrRef = useRef<any>(null);
@@ -166,7 +169,7 @@ export default function MyQRScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: any) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: "row", alignItems: "center",

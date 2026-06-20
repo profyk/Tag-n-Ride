@@ -179,7 +179,7 @@ export default function OwnerDriveMode() {
           </View>
 
           <Text style={s.qrName}>{u.full_name}</Text>
-          <Text style={s.qrPhone}>{u.phone_number}</Text>
+          <Text style={s.qrPhone}>{u.phone_number || u.email}</Text>
 
           {driverModeActive && qrCode && <>
             <View style={s.qrCodePill}>
@@ -213,7 +213,7 @@ export default function OwnerDriveMode() {
           <Text style={[s.detailTitle, { color: colors.text }]}>Account Details</Text>
           {[
             { label: "Full Name", value: u.full_name, style: {} },
-            { label: "Phone", value: u.phone_number, style: {} },
+            { label: u.phone_number ? "Phone" : "Email", value: u.phone_number || u.email, style: {} },
             { label: "TNR Code", value: qrCode || "—", style: { color: colors.cyan, fontFamily: "monospace" } },
             {
               label: "KYC Status",

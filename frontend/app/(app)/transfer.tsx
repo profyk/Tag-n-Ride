@@ -33,10 +33,11 @@ export default function TransferScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
-  if (state.status !== "authed" || state.user.role !== "driver") {
-    router.replace("/(app)/profile");
-    return null;
-  }
+  useEffect(() => {
+    if (state.status === "authed" && state.user.role !== "driver") {
+      router.replace("/(app)/profile");
+    }
+  }, [state.status]);
 
   const loadActive = useCallback(async () => {
     setLoading(true);
@@ -47,6 +48,8 @@ export default function TransferScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { loadActive(); }, [loadActive]));
+
+  if (state.status !== "authed" || state.user.role !== "driver") return null;
 
   const handleSubmit = async () => {
     const code = ownerCode.trim();

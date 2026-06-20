@@ -44,11 +44,14 @@ ${reference ? `<div class="doc-meta">Ref: ${reference}</div>` : ""}
 </div>
 <div class="section"><div class="section-title">Earnings Summary</div>
 <div class="row"><span class="label">Cashup received from drivers</span><span class="value green">R ${Number(sm.total_cashup_received ?? 0).toFixed(2)}</span></div>
-<div class="row"><span class="label">Fuel deducted</span><span class="value red">- R ${Number(sm.total_fuel_deducted ?? 0).toFixed(2)}</span></div>
-<div class="row"><span class="label">Driver profit paid out</span><span class="value red">- R ${Number(sm.total_driver_profit ?? 0).toFixed(2)}</span></div>
 <div class="row"><span class="label">Subscription fees</span><span class="value red">- R ${Number(sm.subscription_fees_paid ?? 0).toFixed(2)}</span></div>
 <div class="row"><span class="label">Withdrawals / payouts</span><span class="value red">- R ${Number(sm.total_payouts ?? 0).toFixed(2)}</span></div>
 <div class="row"><span class="label" style="font-weight:700">Net earnings</span><span class="value ${(sm.net_earnings ?? 0) >= 0 ? "green" : "red"}">R ${Number(sm.net_earnings ?? 0).toFixed(2)}</span></div>
+</div>
+<div class="section"><div class="section-title">Fuel &amp; Driver Profit (Info Only)</div>
+<div class="row"><span class="label">Fuel deducted by drivers before cashup</span><span class="value">R ${Number(sm.total_fuel_deducted ?? 0).toFixed(2)}</span></div>
+<div class="row"><span class="label">Driver profit kept before cashup</span><span class="value">R ${Number(sm.total_driver_profit ?? 0).toFixed(2)}</span></div>
+<div class="doc-meta" style="text-align:left;margin-top:8px">Cashup received above is already net of these — they don't subtract again from your net earnings.</div>
 </div>
 ${driversHtml}${cashupHtml}
 <div class="footer">Tag n Ride · Verified fleet statement · ${reference}</div>
@@ -279,12 +282,18 @@ export default function OwnerStatementScreen() {
             {/* Summary */}
             <Section title="EARNINGS SUMMARY" colors={colors}>
               <Row label="Total cashup received from drivers" value={formatZAR(d.summary.total_cashup_received)} green colors={colors} />
-              <Row label="Total fuel deducted" value={`- ${formatZAR(d.summary.total_fuel_deducted)}`} red colors={colors} />
-              <Row label="Total driver profit paid out" value={`- ${formatZAR(d.summary.total_driver_profit)}`} colors={colors} />
               <Row label="Subscription fees paid" value={`- ${formatZAR(d.summary.subscription_fees_paid)}`} red colors={colors} />
               <Row label="Withdrawals / payouts" value={`- ${formatZAR(d.summary.total_payouts)}`} colors={colors} />
               <View style={s.divider} />
               <Row label="Net earnings" value={formatZAR(d.summary.net_earnings)} bold green={d.summary.net_earnings >= 0} red={d.summary.net_earnings < 0} colors={colors} />
+            </Section>
+
+            <Section title="FUEL & DRIVER PROFIT (INFO ONLY)" colors={colors}>
+              <Row label="Fuel deducted by drivers before cashup" value={formatZAR(d.summary.total_fuel_deducted)} colors={colors} />
+              <Row label="Driver profit kept before cashup" value={formatZAR(d.summary.total_driver_profit)} colors={colors} />
+              <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 8, lineHeight: 15 }}>
+                Cashup received above is already net of these — they don't subtract again from your net earnings.
+              </Text>
             </Section>
 
             {/* Fleet */}

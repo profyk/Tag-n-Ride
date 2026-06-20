@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api, tokenStore, User } from "./api";
+import { api, tokenStore, setUnauthorizedHandler, User } from "./api";
 
 type AuthState =
   | { status: "loading" }
@@ -38,6 +38,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setState({ status: "guest" }));
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   const signIn = useCallback(async (phone_number: string, pin: string) => {
     const r = await api.login({ phone_number, pin });

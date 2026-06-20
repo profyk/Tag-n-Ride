@@ -35,8 +35,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then(v => {
       if (v) {
-        try { setReadIds(new Set(JSON.parse(v))); } catch {}
+        try { setReadIds(new Set(JSON.parse(v))); return; } catch {}
       }
+      setReadIds(new Set());
     });
   }, [STORAGE_KEY]);
 

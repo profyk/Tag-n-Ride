@@ -214,10 +214,11 @@ export default function TripCentre() {
   };
 
   const handleShareTrip = async () => {
-    if (!trip?.id || sharing) return;
+    const shareTripId = trip?.id || tripSummary?.trip?.id;
+    if (!shareTripId || sharing) return;
     setSharing(true);
     try {
-      const res = await api.tripsShare({ trip_id: trip.id });
+      const res = await api.tripsShare({ trip_id: shareTripId });
       await Share.share({
         message: `Track my Tag n Ride trip live 📍\n${res.share_url}`,
         url: res.share_url,
