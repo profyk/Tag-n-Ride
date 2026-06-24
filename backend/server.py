@@ -195,6 +195,9 @@ class LoginRateLimiter:
 
 _login_limiter = LoginRateLimiter()
 _admin_login_limiter = LoginRateLimiter()
+_danger_pin_limiter = LoginRateLimiter()
+_safety_pin_limiter = LoginRateLimiter(max_attempts=5, window=300)
+_panic_limiter = LoginRateLimiter(max_attempts=1, window=120)
 
 def generate_qr_code() -> str:
     return "TNR" + "".join(random.choices(string.digits, k=13))
@@ -524,6 +527,24 @@ class DBHealthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 app.add_middleware(DBHealthMiddleware)
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Adds standard hardening headers — this is a JSON API with no first-party HTML pages,
+    so the policy is intentionally locked down (no inline scripts/styles/frames expected)."""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        # Skip the lockdown CSP on the dev-only Swagger/Redoc pages — they load CDN JS/CSS.
+        # In production docs_url/redoc_url are None (404), so this branch never matters there.
+        if not request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 @app.get("/health")
 async def health():
@@ -1590,6 +1611,12 @@ async def kyc_submit(
     selfie: UploadFile = File(...),
     licence_front: UploadFile = File(...)
 ):
+    allowed_types = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"}
+    if selfie.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Selfie must be a JPEG, PNG, WEBP, or HEIC image")
+    if licence_front.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Licence image must be a JPEG, PNG, WEBP, or HEIC image")
+
     selfie_bytes = await selfie.read()
     licence_bytes = await licence_front.read()
 
@@ -6454,7 +6481,15 @@ async def topup_initiate(body: TopupInitiateIn, request: Request, user: dict = D
 
 @api.post("/stitch/webhook")
 async def stitch_webhook(request: Request):
-    """Stitch webhook for payment events."""
+    """Stitch webhook for payment events.
+
+    SECURITY: this endpoint is unauthenticated (Stitch calls it directly), so the request body
+    is never trusted for anything but the `payment_id` lookup key. The amount and recipient
+    actually credited always come from the `transactions` row created server-side at
+    /wallet/topup/initiate — never from webhook-supplied fields — so a forged/replayed webhook
+    call can at most re-trigger completion of a real pending top-up for its real amount; it can
+    never inflate the amount or credit an attacker-chosen account.
+    """
     try:
         body = await request.json()
         event_type = body.get("type", "")
@@ -6464,17 +6499,26 @@ async def stitch_webhook(request: Request):
 
         if event_type == "payment_request.completed":
             payment_id = data.get("metadata", {}).get("payment_id")
-            user_id = data.get("metadata", {}).get("user_id")
-            phone_number = data.get("metadata", {}).get("phone_number")
-            wallet_amount = float(data.get("metadata", {}).get("wallet_amount", 0))
-            processing_fee = float(data.get("metadata", {}).get("processing_fee", 0))
-            gateway_fee = float(data.get("metadata", {}).get("gateway_fee", 0))
-
-            if not payment_id or not user_id:
+            if not payment_id:
                 return {"status": "missing_data"}
 
+            async with pool.acquire() as conn:
+                txn = await conn.fetchrow(
+                    "SELECT id, status, amount, platform_fee, driver_net, receiver_id, "
+                    "(SELECT phone_number FROM users WHERE id=receiver_id) as phone_number "
+                    "FROM transactions WHERE id=$1 AND type='topup'",
+                    payment_id
+                )
+            if not txn:
+                print(f"[STITCH WEBHOOK] Unknown payment_id={payment_id} — ignoring")
+                return {"status": "unknown_payment"}
+
+            wallet_amount = float(txn["driver_net"] or txn["amount"])
+            processing_fee = float(txn["platform_fee"] or 0)
+            gateway_fee = round(float(txn["amount"]) * 0.015 + 0.50, 2)
+
             await _complete_topup(
-                payment_id, user_id, phone_number,
+                payment_id, txn["receiver_id"], txn["phone_number"],
                 wallet_amount, processing_fee, gateway_fee
             )
 
@@ -7887,10 +7931,13 @@ async def danger_pin_verify(body: DangerPinVerifyIn, admin: dict = Depends(requi
     """
     if not has_permission(admin, "danger_actions"):
         raise HTTPException(status_code=403, detail="Permission denied")
+    _danger_pin_limiter.check(admin["id"])
     async with pool.acquire() as conn:
         valid = await verify_danger_pin(conn, body.pin, admin)
     if not valid:
+        _danger_pin_limiter.record_failure(admin["id"])
         raise HTTPException(status_code=401, detail="Incorrect PIN")
+    _danger_pin_limiter.clear(admin["id"])
     # Issue a short-lived danger token (signed with admin id + timestamp)
     import time
     payload = {
@@ -11125,23 +11172,35 @@ class DbQueryIn(BaseModel):
     sql: str
 
 @api.post("/admin/db/query")
-async def admin_db_query(body: DbQueryIn, admin: dict = Depends(require_admin)):
+async def admin_db_query(body: DbQueryIn, request: Request, admin: dict = Depends(require_admin)):
     if not has_permission(admin, "edit_system"):
         raise HTTPException(status_code=403, detail="Permission denied")
     sql = body.sql.strip()
     if not sql:
         raise HTTPException(status_code=400, detail="Empty query")
-    # Block destructive DDL
-    upper = sql.upper()
-    blocked = ("DROP TABLE", "DROP DATABASE", "TRUNCATE", "ALTER TABLE", "DROP SCHEMA", "CREATE TABLE")
-    for b in blocked:
-        if b in upper:
-            raise HTTPException(status_code=400, detail=f"Statement not allowed: {b}")
+    import re
+    # Reject stacked statements — only a single trailing semicolon is allowed. Without this,
+    # a "SELECT ...; DROP TABLE ...;" payload would be classified as read-only below (it starts
+    # with SELECT) while asyncpg still executes every statement in the string.
+    body_sql = sql[:-1] if sql.endswith(";") else sql
+    if ";" in body_sql:
+        raise HTTPException(status_code=400, detail="Only a single SQL statement is allowed")
+    # Block destructive DDL outright, regardless of danger-token — irreversible schema changes
+    # have no place in a row-level data console. Word-boundary regex so "DROP  TABLE" (extra
+    # whitespace) or "droptable" inside an identifier can't slip past a naive substring check.
+    if re.search(r"\b(DROP\s+TABLE|DROP\s+DATABASE|DROP\s+SCHEMA|TRUNCATE(\s+TABLE)?|ALTER\s+TABLE|CREATE\s+TABLE)\b", sql, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Destructive DDL statements are not allowed in this console")
+    is_read = bool(re.match(r"^\s*(SELECT|WITH)\b", sql, re.IGNORECASE))
+    if not is_read:
+        # Any mutation (INSERT/UPDATE/DELETE/etc.) requires a freshly verified danger-PIN token —
+        # previously this endpoint had no server-side check at all, so a stolen/leaked admin JWT
+        # alone was enough to run arbitrary writes against the database.
+        require_danger_token(request)
     async with pool.acquire() as conn:
         try:
             import time
             start = time.time()
-            if upper.lstrip().startswith("SELECT") or upper.lstrip().startswith("WITH"):
+            if is_read:
                 records = await conn.fetch(sql)
                 duration_ms = int((time.time() - start) * 1000)
                 if not records:
@@ -14143,6 +14202,10 @@ async def saferide_search(plate: str, admin: dict = Depends(require_admin)):
 # ── POST /api/safety/panic ──
 @api.post("/safety/panic")
 async def panic_button(body: PanicIn, user: dict = Depends(get_current_user)):
+    # Cooldown — each trigger SMS-blasts the user's emergency contacts and opens an incident,
+    # so an uncapped loop here is both an SMS-cost abuse vector and contact-harassment vector.
+    _panic_limiter.check(user["id"])
+    _panic_limiter.record_failure(user["id"])
     now = datetime.now(timezone.utc)
     inc_id = str(uuid.uuid4())
     inc_ref = f"TNR-INC-{now.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
@@ -14423,6 +14486,7 @@ async def _trigger_dead_man(conn, user: dict, latitude=None, longitude=None, con
 # ── POST /api/saferide/trip/end-pin ── PIN-protected trip end (dead-man aware)
 @api.post("/saferide/trip/end-pin")
 async def end_trip_with_pin(body: TripEndPinIn, user: dict = Depends(get_current_user)):
+    _safety_pin_limiter.check(user["id"])
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
         profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
@@ -14431,7 +14495,9 @@ async def end_trip_with_pin(body: TripEndPinIn, user: dict = Depends(get_current
         real_ok     = verify_pin(body.pin, user_row["pin_hash"])
         dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
         if not real_ok and not dead_man_ok:
+            _safety_pin_limiter.record_failure(user["id"])
             raise HTTPException(401, "Incorrect PIN")
+        _safety_pin_limiter.clear(user["id"])
         if dead_man_ok:
             await _trigger_dead_man(conn, user, body.latitude, body.longitude, "trip_end")
             # return success illusion — caller sees a normal end
@@ -14457,6 +14523,7 @@ async def end_trip_with_pin(body: TripEndPinIn, user: dict = Depends(get_current
 # ── POST /api/saferide/sos/cancel-pin ── PIN-protected SOS cancel (dead-man aware)
 @api.post("/saferide/sos/cancel-pin")
 async def cancel_sos_with_pin(body: SosCancelPinIn, user: dict = Depends(get_current_user)):
+    _safety_pin_limiter.check(user["id"])
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
         profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
@@ -14465,7 +14532,9 @@ async def cancel_sos_with_pin(body: SosCancelPinIn, user: dict = Depends(get_cur
         real_ok     = verify_pin(body.pin, user_row["pin_hash"])
         dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
         if not real_ok and not dead_man_ok:
+            _safety_pin_limiter.record_failure(user["id"])
             raise HTTPException(401, "Incorrect PIN")
+        _safety_pin_limiter.clear(user["id"])
         if dead_man_ok:
             # Escalate existing SOS to dead man — don't actually cancel it
             sos = await conn.fetchrow("SELECT id,latitude,longitude FROM sos_requests WHERE id=$1 AND user_id=$2", body.sos_id, user["id"])
@@ -15019,6 +15088,7 @@ async def track_me_end(session_id: str, user: dict = Depends(get_current_user)):
 # ── POST /api/track-me/end-pin ── PIN-protected stop (dead-man aware)
 @api.post("/track-me/end-pin")
 async def track_me_end_pin(body: TripEndPinIn, user: dict = Depends(get_current_user)):
+    _safety_pin_limiter.check(user["id"])
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
         profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
@@ -15027,7 +15097,9 @@ async def track_me_end_pin(body: TripEndPinIn, user: dict = Depends(get_current_
         real_ok     = verify_pin(body.pin, user_row["pin_hash"])
         dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
         if not real_ok and not dead_man_ok:
+            _safety_pin_limiter.record_failure(user["id"])
             raise HTTPException(401, "Incorrect PIN")
+        _safety_pin_limiter.clear(user["id"])
         if dead_man_ok:
             await _trigger_dead_man(conn, user, body.latitude, body.longitude, "track_me_stop")
             return {"ok": True, "ended": True, "stealth": True}

@@ -12,9 +12,10 @@ import {
 import toast from "react-hot-toast";
 
 const BASE = "https://tag-n-ride-production.up.railway.app";
-const authHeaders = () => ({
+const authHeaders = (dangerToken?: string | null) => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
+  ...(dangerToken ? { "X-Danger-Token": dangerToken } : {}),
 });
 
 type TableInfo = { name: string; rows: number; size?: string };
@@ -187,9 +188,10 @@ export default function DatabasePage() {
 
   const runQuery = async () => {
     if (!query.trim()) return;
+    let dangerToken: string | null = null;
     if (isMutationSQL(query)) {
-      const token = await dangerPin.request();
-      if (!token) return;
+      dangerToken = await dangerPin.request();
+      if (!dangerToken) return;
     }
     setQueryRunning(true);
     setQueryResult(null);
@@ -197,7 +199,7 @@ export default function DatabasePage() {
     try {
       const res = await fetch(`${BASE}/api/admin/db/query`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: authHeaders(dangerToken),
         body: JSON.stringify({ sql: query.trim() }),
       });
       const d = await res.json();
@@ -213,10 +215,10 @@ export default function DatabasePage() {
     } finally { setQueryRunning(false); }
   };
 
-  const runMutation = async (sql: string): Promise<void> => {
+  const runMutation = async (sql: string, dangerToken: string): Promise<void> => {
     const res = await fetch(`${BASE}/api/admin/db/query`, {
       method: "POST",
-      headers: authHeaders(),
+      headers: authHeaders(dangerToken),
       body: JSON.stringify({ sql }),
     });
     const d = await res.json();
@@ -233,7 +235,7 @@ export default function DatabasePage() {
         const entries = Object.entries(editModal.obj).filter(([, v]) => v !== "" && v !== null);
         const cols = entries.map(([k]) => k).join(", ");
         const vals = entries.map(([, v]) => sqlLiteral(v)).join(", ");
-        await runMutation(`INSERT INTO ${selectedTable} (${cols}) VALUES (${vals})`);
+        await runMutation(`INSERT INTO ${selectedTable} (${cols}) VALUES (${vals})`, token);
         toast.success("Row inserted");
       } else {
         const pk = findPK(editModal.obj);
@@ -242,7 +244,7 @@ export default function DatabasePage() {
           .filter(([k]) => k !== pk.col)
           .map(([k, v]) => `${k} = ${sqlLiteral(v)}`)
           .join(", ");
-        await runMutation(`UPDATE ${selectedTable} SET ${setClauses} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`);
+        await runMutation(`UPDATE ${selectedTable} SET ${setClauses} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`, token);
         toast.success("Row updated");
       }
       setEditModal(null);
@@ -261,7 +263,7 @@ export default function DatabasePage() {
     if (!token) return;
     setMutating(true);
     try {
-      await runMutation(`DELETE FROM ${selectedTable} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`);
+      await runMutation(`DELETE FROM ${selectedTable} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`, token);
       toast.success("Row deleted");
       setDeleteConfirm(null);
       loadTableData(selectedTable, page);
@@ -280,7 +282,7 @@ export default function DatabasePage() {
       for (const ri of Array.from(selectedRows)) {
         const obj = rowToObj(tableData.columns, tableData.rows[ri]);
         const pk = findPK(obj);
-        if (pk) await runMutation(`DELETE FROM ${selectedTable} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`);
+        if (pk) await runMutation(`DELETE FROM ${selectedTable} WHERE ${pk.col} = ${sqlLiteral(pk.val)}`, token);
       }
       toast.success(`${selectedRows.size} rows deleted`);
       setSelectedRows(new Set());
