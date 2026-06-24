@@ -1,6 +1,7 @@
 "use client";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldAlert } from "lucide-react";
+import { hasPermission, isSuperAdmin } from "@/lib/api";
 import React from "react";
 
 type BtnVariant = "primary" | "secondary" | "danger" | "ghost";
@@ -176,6 +177,25 @@ export function Modal({
       </div>
     </div>
   );
+}
+
+export function PermissionGate({
+  permission, children,
+}: { permission: string; children: React.ReactNode }) {
+  if (!hasPermission(permission) && !isSuperAdmin()) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+        <div className="w-12 h-12 rounded-full bg-red/10 border border-red/20 flex items-center justify-center">
+          <ShieldAlert size={22} className="text-red" />
+        </div>
+        <div>
+          <p className="text-text font-bold text-sm">Access Denied</p>
+          <p className="text-textMuted text-xs mt-1">You don't have permission to view this page.</p>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
 }
 
 export function Alert({

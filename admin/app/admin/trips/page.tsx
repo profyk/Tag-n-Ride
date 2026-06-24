@@ -1,34 +1,24 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, Button, Card, Modal, Input } from "@/components/ui";
-import client from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { Badge, Spinner, Button, Card, Modal, Input, PermissionGate } from "@/components/ui";
+import client, { api, DriverLocation } from "@/lib/api";
+import { LiveMap, MapPin as LiveMapPin } from "@/components/saferide/LiveMap";
+import { formatDate, formatZAR } from "@/lib/utils";
 import {
   Car, Users, MapPin, RefreshCw, AlertTriangle, ExternalLink,
   Copy, Navigation, Clock, Zap, Shield, ChevronDown, ChevronUp,
   Radio, WifiOff, CheckCircle, X, Flag, Phone, Droplet,
-  Activity, Eye,
+  Activity, Eye, Search, ArrowUpDown,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
 
 const REFRESH_INTERVAL = 30;
+const STALE_MS = 5 * 60 * 1000;
 
-type Trip = {
-  driver_id: string;
-  driver_name: string;
-  vehicle_plate: string;
-  latitude: number | null;
-  longitude: number | null;
-  speed: number;
-  trip_id: string;
-  trip_reference: string;
-  passenger_count: number;
-  last_update: string | null;
-  _startedAt?: string;
-};
+type Trip = DriverLocation & { _startedAt?: string };
 
 type Passenger = {
   id: string;
@@ -46,10 +36,10 @@ type Passenger = {
 type IncidentType = "breakdown" | "accident" | "suspicious" | "emergency" | "flagged";
 
 const INCIDENT_TYPES: { value: IncidentType; label: string; color: string }[] = [
-  { value: "emergency",  label: "Emergency / SOS",      color: "text-red border-red/30 bg-red/10"       },
-  { value: "accident",   label: "Accident",             color: "text-red border-red/30 bg-red/5"        },
+  { value: "emergency",  label: "Emergency / SOS",      color: "text-red border-red/40 bg-red/15 font-black" },
+  { value: "accident",   label: "Accident",             color: "text-orange-400 border-orange-400/30 bg-orange-400/10" },
   { value: "suspicious", label: "Suspicious Behaviour", color: "text-yellow border-yellow/30 bg-yellow/5" },
-  { value: "breakdown",  label: "Vehicle Breakdown",    color: "text-orange-400 border-orange-400/30 bg-orange-400/5" },
+  { value: "breakdown",  label: "Vehicle Breakdown",    color: "text-blue-400 border-blue-400/30 bg-blue-400/5" },
   { value: "flagged",    label: "General Flag",         color: "text-textMuted border-border bg-bg3"    },
 ];
 
@@ -93,10 +83,12 @@ function TripCard({
   trip,
   onFlag,
   trackBase,
+  justFlagged,
 }: {
   trip: Trip;
   onFlag: (trip: Trip) => void;
   trackBase: string;
+  justFlagged: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [passengers, setPassengers] = useState<Passenger[] | null>(null);
@@ -110,7 +102,7 @@ function TripCard({
     : null;
 
   const staleMs = trip.last_update ? Date.now() - new Date(trip.last_update).getTime() : null;
-  const isStale = staleMs !== null && staleMs > 5 * 60 * 1000;
+  const isStale = staleMs !== null && staleMs > STALE_MS;
 
   const copyLink = () => {
     if (!trackingUrl) return;
@@ -151,6 +143,11 @@ function TripCard({
               STALE
             </span>
           )}
+          {justFlagged && (
+            <span className="flex items-center gap-1 text-[9px] font-bold text-red bg-red/10 border border-red/20 px-1.5 py-0.5 rounded">
+              <Flag size={9} /> FLAGGED
+            </span>
+          )}
         </div>
         <DurationBadge startedAt={trip._startedAt} />
       </div>
@@ -163,12 +160,15 @@ function TripCard({
           <span className="text-text font-semibold text-sm">{trip.driver_name || "—"}</span>
         </div>
 
-        {/* Passengers */}
+        {/* Passengers + revenue */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Users size={13} className="text-textMuted flex-shrink-0" />
             <span className="text-sm text-text font-semibold">{trip.passenger_count}</span>
             <span className="text-xs text-textMuted">passenger{trip.passenger_count !== 1 ? "s" : ""}</span>
+            {trip.total_revenue > 0 && (
+              <span className="text-xs font-bold text-green">{formatZAR(trip.total_revenue)}</span>
+            )}
           </div>
           <button
             onClick={loadPassengers}
@@ -295,6 +295,9 @@ export default function LiveTripsPage() {
   const [incidentDesc, setIncidentDesc] = useState("");
   const [flagging, setFlagging] = useState(false);
   const [trackBase, setTrackBase] = useState("https://tag-n-ride.vercel.app");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"duration" | "passengers" | "staleness">("duration");
+  const [flaggedTripIds, setFlaggedTripIds] = useState<Set<string>>(new Set());
   const countRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -304,7 +307,7 @@ export default function LiveTripsPage() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const res = await client.get("/api/trips/driver-locations");
+      const res = await api.driverLocations();
       setTrips((res.data || []).map((t: any) => ({
         ...t,
         _startedAt: t.started_at || t.last_update,
@@ -329,13 +332,15 @@ export default function LiveTripsPage() {
     if (!flagTrip) return;
     setFlagging(true);
     try {
-      await client.post("/api/admin/incidents", {
+      await api.createIncident({
         vehicle_plate: flagTrip.vehicle_plate,
-        trip_id: flagTrip.trip_id,
         incident_type: incidentType,
         description: incidentDesc || `Flagged from Live Trips — ${flagTrip.vehicle_plate}`,
+        latitude: flagTrip.latitude ?? undefined,
+        longitude: flagTrip.longitude ?? undefined,
       });
       toast.success("Incident logged");
+      setFlaggedTripIds(prev => new Set(prev).add(flagTrip.trip_id));
       setFlagTrip(null);
       setIncidentDesc("");
       setIncidentType("flagged");
@@ -346,21 +351,61 @@ export default function LiveTripsPage() {
     }
   };
 
-  const visible = trips.filter(t =>
-    filter === "gps" ? t.latitude != null :
-    filter === "no-gps" ? t.latitude == null :
-    true
-  );
+  const visible = useMemo(() => {
+    let list = trips.filter(t =>
+      filter === "gps" ? t.latitude != null :
+      filter === "no-gps" ? t.latitude == null :
+      true
+    );
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(t =>
+        (t.vehicle_plate || "").toLowerCase().includes(q) ||
+        (t.driver_name || "").toLowerCase().includes(q)
+      );
+    }
+    list = [...list].sort((a, b) => {
+      if (sortBy === "passengers") return (b.passenger_count || 0) - (a.passenger_count || 0);
+      if (sortBy === "staleness") {
+        const aMs = a.last_update ? Date.now() - new Date(a.last_update).getTime() : Infinity;
+        const bMs = b.last_update ? Date.now() - new Date(b.last_update).getTime() : Infinity;
+        return bMs - aMs;
+      }
+      // duration — longest-running first
+      const aStart = a._startedAt ? new Date(a._startedAt).getTime() : 0;
+      const bStart = b._startedAt ? new Date(b._startedAt).getTime() : 0;
+      return aStart - bStart;
+    });
+    return list;
+  }, [trips, filter, search, sortBy]);
+
+  const mapPins: LiveMapPin[] = useMemo(() => trips
+    .filter(t => t.latitude != null && t.longitude != null)
+    .map(t => ({
+      id: t.trip_id, lat: t.latitude as number, lng: t.longitude as number, kind: "trip" as const,
+      label: `${t.vehicle_plate || "—"} — ${t.driver_name || "Unknown"}`,
+      sublabel: `${t.passenger_count} passenger${t.passenger_count !== 1 ? "s" : ""}`,
+    })), [trips]);
 
   const totalPassengers = trips.reduce((s, t) => s + (t.passenger_count || 0), 0);
   const withGps = trips.filter(t => t.latitude != null).length;
   const staleCount = trips.filter(t => {
     if (!t.last_update) return false;
-    return Date.now() - new Date(t.last_update).getTime() > 5 * 60 * 1000;
+    return Date.now() - new Date(t.last_update).getTime() > STALE_MS;
   }).length;
 
   return (
     <AdminShell title="Live Trips" subtitle="Real-time view of all active driver trips">
+      <PermissionGate permission="view_analytics">
+
+      {/* Live map — overview of every active trip's location */}
+      <Card className="mb-6">
+        <div className="flex items-center gap-2 mb-4">
+          <MapPin size={15} className="text-cyan" />
+          <h2 className="font-extrabold text-sm uppercase tracking-wider text-text">Live Map</h2>
+        </div>
+        <LiveMap pins={mapPins} height={360} emptyMessage="No active trips with GPS right now" />
+      </Card>
 
       {/* Stats bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -416,6 +461,32 @@ export default function LiveTripsPage() {
         </div>
       </div>
 
+      {/* Search + sort */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-textDim" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by plate or driver…"
+            className="w-full bg-bg2 border border-border rounded-lg pl-8 pr-3 py-2 text-xs text-text placeholder:text-textDim focus:outline-none focus:border-cyan"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-textMuted">
+          <ArrowUpDown size={12} />
+          {(["duration", "passengers", "staleness"] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => setSortBy(s)}
+              className={`px-2.5 py-1.5 rounded-lg font-bold transition-all ${
+                sortBy === s ? "bg-cyanDim text-cyan border border-cyan/20" : "border border-border hover:text-text"
+              }`}>
+              {s === "duration" ? "Longest running" : s === "passengers" ? "Most passengers" : "Most stale"}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <p className="text-textDim text-xs mb-4">
         Last updated: {lastRefresh.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
       </p>
@@ -439,6 +510,7 @@ export default function LiveTripsPage() {
               trip={trip}
               onFlag={setFlagTrip}
               trackBase={trackBase}
+              justFlagged={flaggedTripIds.has(trip.trip_id)}
             />
           ))}
         </div>
@@ -500,6 +572,7 @@ export default function LiveTripsPage() {
           </div>
         )}
       </Modal>
+      </PermissionGate>
     </AdminShell>
   );
 }

@@ -1,41 +1,54 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner } from "@/components/ui";
-import client from "@/lib/api";
-import { AlertTriangle, Phone, CheckCircle, XCircle, MapPin, ArrowLeft, Check } from "lucide-react";
+import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import { api, IncidentDetail, AdminUser, getCurrentAdminId, isSuperAdmin } from "@/lib/api";
+import { AlertTriangle, Phone, CheckCircle, XCircle, MapPin, ArrowLeft, Check, UserCheck, UserX, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
+
+const SEVERITIES = ["low", "medium", "high", "critical"] as const;
+const SEVERITY_TONE: Record<string, "muted" | "yellow" | "orange" | "red"> = {
+  low: "muted", medium: "yellow", high: "orange", critical: "red",
+};
 
 export default function IncidentDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id as string;
 
-  const [incident, setIncident] = useState<any>(null);
+  const [incident, setIncident] = useState<IncidentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(false);
   const [resolveNotes, setResolveNotes] = useState("");
   const [showResolve, setShowResolve] = useState(false);
-  const [resendingIndex, setResendingIndex] = useState<number | null>(null);
+  const [resending, setResending] = useState(false);
+  const [settingSeverity, setSettingSeverity] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
+
+  const fetchIncident = useCallback(() => {
+    if (!id) return Promise.resolve();
+    return api.incident(id)
+      .then(res => setIncident(res.data))
+      .catch(e => toast.error(e.message || "Failed to load incident"));
+  }, [id]);
+
+  useEffect(() => { fetchIncident().finally(() => setLoading(false)); }, [fetchIncident]);
 
   useEffect(() => {
-    if (!id) return;
-    client.get(`/api/admin/incidents/${id}`)
-      .then(res => setIncident(res.data))
-      .catch(e => toast.error(e.message || "Failed to load incident"))
-      .finally(() => setLoading(false));
-  }, [id]);
+    if (!isSuperAdmin()) return;
+    api.listAdmins().then(res => setAdmins(res.data || [])).catch(() => {});
+  }, []);
 
   const handleResolve = async () => {
     setResolving(true);
     try {
-      await client.patch(`/api/admin/incidents/${id}/resolve`, { resolution_notes: resolveNotes });
+      await api.resolveIncident(id, resolveNotes);
       toast.success("Incident resolved");
       setShowResolve(false);
-      const res = await client.get(`/api/admin/incidents/${id}`);
-      setIncident(res.data);
+      await fetchIncident();
     } catch (e: any) {
       toast.error(e.message || "Failed to resolve");
     } finally { setResolving(false); }
@@ -43,9 +56,41 @@ export default function IncidentDetailPage() {
 
   const handleResendAll = async () => {
     if (!incident) return;
-    const failedContacts = incident.notifications?.filter((n: any) => n.sms_status !== "sent") || [];
+    const failedContacts = incident.notifications?.filter(n => n.sms_status !== "sent") || [];
     if (failedContacts.length === 0) { toast("All SMS were already sent successfully"); return; }
-    toast("Re-send feature: contact your SMS provider to retry failed messages.");
+    setResending(true);
+    try {
+      const res = await api.resendIncidentSms(id);
+      if (res.data.succeeded > 0) {
+        toast.success(`${res.data.succeeded}/${res.data.retried} SMS resent successfully`);
+      } else {
+        toast.error(`All ${res.data.retried} retries failed — check SMS provider credentials`);
+      }
+      await fetchIncident();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to resend SMS");
+    } finally { setResending(false); }
+  };
+
+  const handleSetSeverity = async (severity: typeof SEVERITIES[number]) => {
+    setSettingSeverity(true);
+    try {
+      await api.setIncidentSeverity(id, severity);
+      setIncident(prev => prev ? { ...prev, severity } : prev);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to set severity");
+    } finally { setSettingSeverity(false); }
+  };
+
+  const handleAssign = async (adminId: string | null) => {
+    setAssigning(true);
+    try {
+      const res = await api.assignIncident(id, adminId);
+      setIncident(prev => prev ? { ...prev, assigned_admin_id: res.data.assigned_admin_id, assigned_admin_name: res.data.assigned_admin_name } : prev);
+      toast.success(adminId ? `Assigned to ${res.data.assigned_admin_name}` : "Unassigned");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to assign");
+    } finally { setAssigning(false); }
   };
 
   const handleDownloadPDF = () => {
@@ -55,7 +100,7 @@ export default function IncidentDetailPage() {
     if (w) { w.document.write(html); w.document.close(); w.print(); }
   };
 
-  const formatTime = (iso: string) => {
+  const formatTime = (iso: string | null | undefined) => {
     if (!iso) return "—";
     return new Date(iso).toLocaleString("en-ZA", { dateStyle: "medium", timeStyle: "short" });
   };
@@ -74,6 +119,7 @@ export default function IncidentDetailPage() {
 
   return (
     <AdminShell title="Incident Detail">
+      <PermissionGate permission="view_audit">
       <div className="p-6 space-y-6 max-w-4xl">
         {/* Back + header */}
         <div>
@@ -99,8 +145,8 @@ export default function IncidentDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleResendAll} className="px-3 py-1.5 text-xs bg-bg border border-border text-textMuted hover:text-text rounded-lg transition-colors">
-                Resend Failed SMS
+              <button onClick={handleResendAll} disabled={resending} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-bg border border-border text-textMuted hover:text-text rounded-lg transition-colors disabled:opacity-50">
+                {resending ? <Spinner size={11} /> : <RefreshCw size={11} />} Resend Failed SMS
               </button>
               <button onClick={handleDownloadPDF} className="px-3 py-1.5 text-xs bg-bg border border-border text-cyan rounded-lg transition-colors">
                 Download Manifest PDF
@@ -114,6 +160,70 @@ export default function IncidentDetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Severity + assignment */}
+        <div className="bg-bg2 border border-border rounded-xl p-4 flex flex-wrap items-center gap-6">
+          <div>
+            <p className="text-[10px] font-extrabold text-textDim uppercase tracking-wider mb-2">Severity</p>
+            <div className="flex items-center gap-1.5">
+              {SEVERITIES.map(s => (
+                <button
+                  key={s}
+                  disabled={settingSeverity}
+                  onClick={() => handleSetSeverity(s)}
+                  className={`disabled:opacity-50 ${incident.severity === s ? "" : "opacity-50 hover:opacity-100"}`}>
+                  <Badge tone={SEVERITY_TONE[s]}>{s.toUpperCase()}</Badge>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <p className="text-[10px] font-extrabold text-textDim uppercase tracking-wider mb-2">Assigned To</p>
+            {isSuperAdmin() && admins.length > 0 ? (
+              <select
+                value={incident.assigned_admin_id || ""}
+                disabled={assigning}
+                onChange={e => handleAssign(e.target.value || null)}
+                className="bg-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-cyan disabled:opacity-50">
+                <option value="">Unassigned</option>
+                {admins.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+              </select>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-text font-semibold">{incident.assigned_admin_name || "Unassigned"}</span>
+                {incident.assigned_admin_id === getCurrentAdminId() ? (
+                  <button disabled={assigning} onClick={() => handleAssign(null)}
+                    className="flex items-center gap-1 text-[10px] text-textMuted hover:text-red-400 disabled:opacity-50">
+                    <UserX size={11} /> Unassign
+                  </button>
+                ) : (
+                  <button disabled={assigning} onClick={() => handleAssign(getCurrentAdminId())}
+                    className="flex items-center gap-1 text-[10px] text-cyan hover:underline disabled:opacity-50">
+                    <UserCheck size={11} /> Assign to me
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Driver */}
+        {(incident.driver_name || incident.driver_phone) && (
+          <div className="bg-bg2 border border-border rounded-xl p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-bg border border-border flex items-center justify-center text-textDim text-sm font-bold flex-shrink-0">
+              {(incident.driver_name || "?")[0].toUpperCase()}
+            </div>
+            <div className="flex-1">
+              <p className="text-[10px] font-extrabold text-textDim uppercase tracking-wider">Driver</p>
+              <p className="text-sm font-semibold text-text">{incident.driver_name || "Unknown"}</p>
+            </div>
+            {incident.driver_phone && (
+              <a href={`tel:${incident.driver_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1">
+                <Phone size={11} /> {incident.driver_phone}
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Resolve panel */}
         {showResolve && (
@@ -325,6 +435,7 @@ export default function IncidentDetailPage() {
           </div>
         )}
       </div>
+      </PermissionGate>
     </AdminShell>
   );
 }

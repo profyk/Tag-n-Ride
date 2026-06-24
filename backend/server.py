@@ -3881,6 +3881,10 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT FALSE")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vehicle_plate TEXT")
                 await conn.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT FALSE")
+                # Incident severity + assignment workflow
+                await conn.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS severity TEXT DEFAULT 'medium'")
+                await conn.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS assigned_admin_id TEXT")
+                await conn.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS assigned_admin_name TEXT")
                 # Owner auth columns — required for owner registration and login
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT")
                 await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL")
@@ -6235,14 +6239,14 @@ async def clear_all_notifications(user: dict = Depends(get_current_user)):
 BULKSMS_USERNAME = os.getenv("BULKSMS_USERNAME", "")
 BULKSMS_PASSWORD = os.getenv("BULKSMS_PASSWORD", "")
 
-async def send_sms(phone_number: str, message: str):
-    """Send SMS via BulkSMS. Silently skips if credentials not set."""
+async def send_sms(phone_number: str, message: str) -> bool:
+    """Send SMS via BulkSMS. Returns True only on confirmed delivery to the provider."""
     if not BULKSMS_USERNAME or not BULKSMS_PASSWORD:
         print(f"[SMS SKIP] {phone_number}: {message}")
-        return
+        return False
     if not httpx:
         print("[SMS SKIP] httpx not installed")
-        return
+        return False
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
@@ -6252,8 +6256,11 @@ async def send_sms(phone_number: str, message: str):
             )
             if resp.status_code not in (200, 201):
                 print(f"[SMS ERROR] {resp.status_code}: {resp.text}")
+                return False
+            return True
     except Exception as e:
         print(f"[SMS ERROR] {e}")
+        return False
 
 
 # ════════════════════════════════════════════════════════════════
@@ -13764,7 +13771,9 @@ async def trips_history(user: dict = Depends(get_current_user)):
 @api.get("/trips/driver-locations")
 async def driver_locations_map(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
-        active_trips = await conn.fetch("SELECT * FROM trips WHERE status='active'")
+        active_trips = await conn.fetch(
+            "SELECT * FROM trips WHERE status='active' AND trip_reference NOT LIKE 'TNR-TRACK-%'"
+        )
         result = []
         for trip in active_trips:
             # Prefer trip-specific GPS row (correct trip context)
@@ -13796,6 +13805,8 @@ async def driver_locations_map(admin: dict = Depends(require_admin)):
                 "trip_reference": trip["trip_reference"],
                 "passenger_count": int(pcount or 0),
                 "last_update": last_update,
+                "started_at": iso(trip.get("started_at")),
+                "total_revenue": float(trip["total_revenue"]) if trip.get("total_revenue") is not None else 0.0,
             })
     return result
 
@@ -13895,13 +13906,14 @@ async def create_incident(body: IncidentCreateIn, request: Request, admin: dict 
                        f"Please contact Tag n Ride Support immediately.\n"
                        f"Reference: {inc_ref}\n"
                        f"Helpline: 0800 000 000")
+                sent_ok = await send_sms(cphone, msg)
                 await conn.execute(
                     "INSERT INTO emergency_notifications (id,incident_id,passenger_id,contact_name,contact_phone,"
                     "contact_relationship,message_sent,sms_status,sent_at,created_at) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,'sent',NOW(),NOW())",
-                    str(uuid.uuid4()), inc_id, p["passenger_id"], cname, cphone, crel, msg
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW())",
+                    str(uuid.uuid4()), inc_id, p["passenger_id"], cname, cphone, crel, msg,
+                    "sent" if sent_ok else "failed"
                 )
-                await send_sms(cphone, msg)
                 notifications_sent += 1
         await conn.execute("UPDATE incidents SET notifications_sent=true, notifications_sent_at=NOW() WHERE id=$1", inc_id)
         await audit(conn, admin["id"], "CREATE_INCIDENT", inc_id, "incident",
@@ -13922,9 +13934,12 @@ async def list_incidents(admin: dict = Depends(require_admin)):
         rows = await conn.fetch(
             "SELECT i.id, i.incident_reference, i.vehicle_plate, i.driver_id, i.incident_type, "
             "i.description, i.flagged_at, i.notifications_sent, i.status, i.resolved_at, i.trip_id, "
+            "i.severity, i.assigned_admin_id, i.assigned_admin_name, "
+            "u.full_name as driver_name, u.phone_number as driver_phone, "
             "(SELECT COUNT(*) FROM emergency_notifications en WHERE en.incident_id=i.id) as notif_count, "
             "(SELECT COUNT(*) FROM trip_passengers tp WHERE tp.trip_id=i.trip_id) as passenger_count "
-            "FROM incidents i ORDER BY i.flagged_at DESC LIMIT 100"
+            "FROM incidents i LEFT JOIN users u ON u.id=i.driver_id "
+            "ORDER BY i.flagged_at DESC LIMIT 100"
         )
     result = []
     for row in rows:
@@ -13938,7 +13953,11 @@ async def list_incidents(admin: dict = Depends(require_admin)):
 @api.get("/admin/incidents/{incident_id}")
 async def get_incident(incident_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
-        inc = await conn.fetchrow("SELECT * FROM incidents WHERE id=$1", incident_id)
+        inc = await conn.fetchrow(
+            "SELECT i.*, u.full_name as driver_name, u.phone_number as driver_phone "
+            "FROM incidents i LEFT JOIN users u ON u.id=i.driver_id WHERE i.id=$1",
+            incident_id
+        )
         if not inc:
             raise HTTPException(status_code=404, detail="Incident not found")
         passengers = []
@@ -13999,6 +14018,72 @@ async def resolve_incident(incident_id: str, body: IncidentResolveIn, request: R
     result["flagged_at"] = iso(result.get("flagged_at"))
     result["resolved_at"] = iso(result.get("resolved_at"))
     return result
+
+# ── POST /api/admin/incidents/{incident_id}/resend-sms ── retry failed emergency-contact SMS
+@api.post("/admin/incidents/{incident_id}/resend-sms")
+async def resend_incident_sms(incident_id: str, request: Request, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        if not await conn.fetchrow("SELECT id FROM incidents WHERE id=$1", incident_id):
+            raise HTTPException(status_code=404, detail="Incident not found")
+        failed = await conn.fetch(
+            "SELECT id, contact_phone, message_sent FROM emergency_notifications "
+            "WHERE incident_id=$1 AND sms_status != 'sent'", incident_id
+        )
+        succeeded = 0
+        for row in failed:
+            sent_ok = await send_sms(row["contact_phone"], row["message_sent"])
+            if sent_ok:
+                await conn.execute(
+                    "UPDATE emergency_notifications SET sms_status='sent', sent_at=NOW() WHERE id=$1", row["id"]
+                )
+                succeeded += 1
+        await audit(conn, admin["id"], "RESEND_INCIDENT_SMS", incident_id, "incident",
+                    {"retried": len(failed), "succeeded": succeeded}, request.client.host if request.client else None)
+    return {"retried": len(failed), "succeeded": succeeded}
+
+class IncidentSeverityIn(BaseModel):
+    severity: str  # 'low', 'medium', 'high', 'critical'
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, v):
+        if v not in ("low", "medium", "high", "critical"):
+            raise ValueError("severity must be 'low', 'medium', 'high', or 'critical'")
+        return v
+
+# ── PATCH /api/admin/incidents/{incident_id}/severity ──
+@api.patch("/admin/incidents/{incident_id}/severity")
+async def set_incident_severity(incident_id: str, body: IncidentSeverityIn, request: Request, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        if not await conn.fetchrow("SELECT id FROM incidents WHERE id=$1", incident_id):
+            raise HTTPException(status_code=404, detail="Incident not found")
+        await conn.execute("UPDATE incidents SET severity=$1 WHERE id=$2", body.severity, incident_id)
+        await audit(conn, admin["id"], "SET_INCIDENT_SEVERITY", incident_id, "incident",
+                    {"severity": body.severity}, request.client.host if request.client else None)
+    return {"ok": True, "severity": body.severity}
+
+class IncidentAssignIn(BaseModel):
+    admin_id: Optional[str] = None  # None = unassign
+
+# ── PATCH /api/admin/incidents/{incident_id}/assign ──
+@api.patch("/admin/incidents/{incident_id}/assign")
+async def assign_incident(incident_id: str, body: IncidentAssignIn, request: Request, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        if not await conn.fetchrow("SELECT id FROM incidents WHERE id=$1", incident_id):
+            raise HTTPException(status_code=404, detail="Incident not found")
+        assignee_name = None
+        if body.admin_id:
+            assignee = await conn.fetchrow("SELECT full_name FROM users WHERE id=$1", body.admin_id)
+            if not assignee:
+                raise HTTPException(status_code=404, detail="Admin not found")
+            assignee_name = assignee["full_name"]
+        await conn.execute(
+            "UPDATE incidents SET assigned_admin_id=$1, assigned_admin_name=$2 WHERE id=$3",
+            body.admin_id, assignee_name, incident_id
+        )
+        await audit(conn, admin["id"], "ASSIGN_INCIDENT", incident_id, "incident",
+                    {"assigned_admin_id": body.admin_id}, request.client.host if request.client else None)
+    return {"ok": True, "assigned_admin_id": body.admin_id, "assigned_admin_name": assignee_name}
 
 # ── GET /api/admin/saferide/search ──
 @api.get("/admin/saferide/search")
@@ -14100,13 +14185,14 @@ async def panic_button(body: PanicIn, user: dict = Depends(get_current_user)):
                        f"Last known location: {maps_url}\n"
                        f"Time: {time_str}\n"
                        f"Please contact them immediately or call emergency services 10111")
+                sent_ok = await send_sms(cphone, msg)
                 await conn.execute(
                     "INSERT INTO emergency_notifications (id,incident_id,passenger_id,contact_name,contact_phone,"
                     "contact_relationship,message_sent,sms_status,sent_at,created_at) "
-                    "VALUES ($1,$2,$3,$4,$5,$6,$7,'sent',NOW(),NOW())",
-                    str(uuid.uuid4()), inc_id, user["id"], cname, cphone, crel, msg
+                    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW())",
+                    str(uuid.uuid4()), inc_id, user["id"], cname, cphone, crel, msg,
+                    "sent" if sent_ok else "failed"
                 )
-                await send_sms(cphone, msg)
                 notifications_sent += 1
         await conn.execute("UPDATE incidents SET notifications_sent=true, notifications_sent_at=NOW() WHERE id=$1", inc_id)
         admin_users = await conn.fetch(
@@ -14195,7 +14281,9 @@ async def admin_list_dead_man_resets(status: Optional[str] = None, admin: dict =
     if not has_permission(admin, "approve_deadman_reset"):
         raise HTTPException(403, "Permission denied")
     async with pool.acquire() as conn:
-        q = """SELECT r.*, u.full_name, u.phone_number, u.role as urole
+        q = """SELECT r.*, u.full_name, u.phone_number, u.role as urole,
+               EXISTS(SELECT 1 FROM sos_requests sr WHERE sr.user_id=r.user_id AND sr.is_dead_man=true
+                      AND sr.status IN ('active','help_coming','dispatched')) AS has_active_duress
                FROM dead_man_reset_requests r JOIN users u ON r.user_id=u.id"""
         if status:
             rows = await conn.fetch(q + " WHERE r.status=$1 ORDER BY r.created_at DESC", status)
@@ -14516,10 +14604,11 @@ async def sos_user_received(sos_id: str, user: dict = Depends(get_current_user))
 async def admin_list_sos(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT s.*, "
+            "SELECT s.*, u.email AS user_email, "
             "(SELECT latitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lat, "
             "(SELECT longitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lng "
-            "FROM sos_requests s WHERE COALESCE(s.is_dead_man, false)=false ORDER BY s.created_at DESC LIMIT 100"
+            "FROM sos_requests s LEFT JOIN users u ON u.id=s.user_id "
+            "WHERE COALESCE(s.is_dead_man, false)=false ORDER BY s.created_at DESC LIMIT 100"
         )
     result = []
     for r in rows:
@@ -14539,10 +14628,11 @@ async def admin_list_sos(admin: dict = Depends(require_admin)):
 async def admin_list_dead_man(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT s.*, "
+            "SELECT s.*, u.email AS user_email, "
             "(SELECT latitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lat, "
             "(SELECT longitude FROM sos_locations WHERE sos_id=s.id ORDER BY recorded_at DESC LIMIT 1) AS latest_lng "
-            "FROM sos_requests s WHERE s.is_dead_man=true ORDER BY s.created_at DESC LIMIT 100"
+            "FROM sos_requests s LEFT JOIN users u ON u.id=s.user_id "
+            "WHERE s.is_dead_man=true ORDER BY s.created_at DESC LIMIT 100"
         )
     result = []
     for r in rows:
@@ -14555,6 +14645,18 @@ async def admin_list_dead_man(admin: dict = Depends(require_admin)):
                 d[k] = float(d[k])
         result.append(d)
     return result
+
+
+def _format_sos_note(admin: dict, status: str, notes: Optional[str], when: datetime) -> Optional[str]:
+    """Build an admin_notes entry shown directly to the affected user's app — only when the
+    admin actually wrote something. Returns None if there's nothing worth appending, so a bare
+    status change (no note) never touches admin_notes."""
+    if not notes or not notes.strip():
+        return None
+    label = {"help_coming": "Help coming", "dispatched": "Dispatched", "resolved": "Resolved"}.get(status, status)
+    admin_name = admin.get("full_name") or admin.get("id")
+    when_str = when.strftime("%H:%M")
+    return f"[{when_str}] {label} — {admin_name}: {notes.strip()}"
 
 
 # ── PATCH /api/admin/saferide/sos/bulk ── bulk-update multiple SOS (group incident)
@@ -14570,16 +14672,21 @@ async def admin_bulk_update_sos(body: SosBulkUpdateIn, admin: dict = Depends(req
     if not body.sos_ids:
         raise HTTPException(400, "sos_ids must not be empty")
     now = datetime.now(timezone.utc)
+    note_entry = _format_sos_note(admin, body.status, body.notes, now)
     async with pool.acquire() as conn:
         if body.status in ("help_coming", "dispatched"):
             await conn.execute(
-                "UPDATE sos_requests SET status=$1,admin_id=$2,admin_notes=$3,dispatched_at=$4 WHERE id=ANY($5::text[])",
-                body.status, admin["id"], body.notes, now, body.sos_ids
+                "UPDATE sos_requests SET status=$1,admin_id=$2,"
+                "admin_notes=CASE WHEN $3::text IS NOT NULL THEN COALESCE(admin_notes||' | ','')||$3 ELSE admin_notes END,"
+                "dispatched_at=$4 WHERE id=ANY($5::text[])",
+                body.status, admin["id"], note_entry, now, body.sos_ids
             )
         else:
             await conn.execute(
-                "UPDATE sos_requests SET status='resolved',admin_id=$1,admin_notes=$2,resolved_at=$3 WHERE id=ANY($4::text[])",
-                admin["id"], body.notes, now, body.sos_ids
+                "UPDATE sos_requests SET status='resolved',admin_id=$1,"
+                "admin_notes=CASE WHEN $2::text IS NOT NULL THEN COALESCE(admin_notes||' | ','')||$2 ELSE admin_notes END,"
+                "resolved_at=$3 WHERE id=ANY($4::text[])",
+                admin["id"], note_entry, now, body.sos_ids
             )
     return {"ok": True, "updated": len(body.sos_ids)}
 
@@ -14590,16 +14697,21 @@ async def admin_update_sos(sos_id: str, body: SosUpdateIn, admin: dict = Depends
     now = datetime.now(timezone.utc)
     if body.status not in ("help_coming", "dispatched", "resolved"):
         raise HTTPException(400, "status must be 'help_coming', 'dispatched', or 'resolved'")
+    note_entry = _format_sos_note(admin, body.status, body.notes, now)
     async with pool.acquire() as conn:
         if body.status in ("help_coming", "dispatched"):
             await conn.execute(
-                "UPDATE sos_requests SET status=$1,admin_id=$2,admin_notes=$3,dispatched_at=$4 WHERE id=$5",
-                body.status, admin["id"], body.notes, now, sos_id
+                "UPDATE sos_requests SET status=$1,admin_id=$2,"
+                "admin_notes=CASE WHEN $3::text IS NOT NULL THEN COALESCE(admin_notes||' | ','')||$3 ELSE admin_notes END,"
+                "dispatched_at=$4 WHERE id=$5",
+                body.status, admin["id"], note_entry, now, sos_id
             )
         else:
             await conn.execute(
-                "UPDATE sos_requests SET status='resolved',admin_id=$1,admin_notes=$2,resolved_at=$3 WHERE id=$4",
-                admin["id"], body.notes, now, sos_id
+                "UPDATE sos_requests SET status='resolved',admin_id=$1,"
+                "admin_notes=CASE WHEN $2::text IS NOT NULL THEN COALESCE(admin_notes||' | ','')||$2 ELSE admin_notes END,"
+                "resolved_at=$3 WHERE id=$4",
+                admin["id"], note_entry, now, sos_id
             )
     return {"ok": True}
 

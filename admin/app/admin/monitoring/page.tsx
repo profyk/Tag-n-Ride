@@ -1,13 +1,15 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner } from "@/components/ui";
-import client from "@/lib/api";
+import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import client, { api } from "@/lib/api";
+import { LiveMap, MapPin as LiveMapPin } from "@/components/saferide/LiveMap";
+import { useAlertEscalation, notifyNewAlert } from "@/lib/useAlertEscalation";
 import {
   Shield, Radio, Navigation, Car, Users, Phone, MapPin,
   RefreshCw, Clock, AlertTriangle, Activity, CheckCircle,
-  XCircle, Zap, Eye,
+  XCircle, Zap, Eye, AlertCircle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -18,7 +20,7 @@ function elapsedLabel(isoStr: string | null) {
   const ms = Date.now() - new Date(isoStr).getTime();
   const m = Math.floor(ms / 60000);
   const h = Math.floor(m / 60);
-  if (h > 0) return `${h}h ${m % 60}m`;
+  if (h > 0) return `${h}h ${m % 60}m ago`;
   return `${m}m ago`;
 }
 
@@ -63,6 +65,8 @@ export default function MonitoringPage() {
   const [sosActionId, setSosActionId]         = useState<string | null>(null);
 
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [fetchErrors, setFetchErrors] = useState<string[]>([]);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const knownSosRef = useRef<Set<string> | null>(null);
   const knownDmRef  = useRef<Set<string> | null>(null);
@@ -87,21 +91,29 @@ export default function MonitoringPage() {
       gain.gain.linearRampToValueAtTime(0, t + 1.5);
       osc.start(t);
       osc.stop(t + 1.5);
+      osc.onended = () => { ctx.close().catch(() => {}); };
+      setTimeout(() => { ctx.close().catch(() => {}); }, 2000);
     } catch {}
   };
 
   // ── fetchers ──
   const fetchAll = useCallback(async () => {
     const [sosRes, dmRes, tmRes, drRes] = await Promise.allSettled([
-      client.get("/api/admin/saferide/sos"),
-      client.get("/api/admin/saferide/deadman"),
+      api.sosList(),
+      api.deadManList(),
       client.get("/api/admin/track-me"),
-      client.get("/api/trips/driver-locations"),
+      api.driverLocations(),
     ]);
+    const errors: string[] = [];
     if (sosRes.status === "fulfilled") { setSosList(sosRes.value.data || []); setSosLoading(false); }
+    else errors.push("SOS");
     if (dmRes.status  === "fulfilled") { setDeadManList(dmRes.value.data || []); setDeadManLoading(false); }
+    else errors.push("Dead Man");
     if (tmRes.status  === "fulfilled") { setTrackMeList(tmRes.value.data || []); setTrackMeLoading(false); }
+    else errors.push("Track Me");
     if (drRes.status  === "fulfilled") { setDriverList(drRes.value.data || []); setDriversLoading(false); }
+    else errors.push("Driver Locations");
+    setFetchErrors(errors);
     setLastRefresh(new Date());
   }, []);
 
@@ -117,7 +129,10 @@ export default function MonitoringPage() {
       sosList.filter(s => s.status === "active" || s.status === "help_coming" || s.status === "dispatched").map((s: any) => s.id as string)
     );
     if (knownSosRef.current === null) { knownSosRef.current = activeIds; return; }
-    if (Array.from(activeIds).some(id => !knownSosRef.current!.has(id))) playSiren();
+    if (Array.from(activeIds).some(id => !knownSosRef.current!.has(id))) {
+      playSiren();
+      notifyNewAlert("🚨 New SOS Alert", "A new SOS distress signal just came in.");
+    }
     knownSosRef.current = activeIds;
   }, [sosList]);
 
@@ -126,7 +141,10 @@ export default function MonitoringPage() {
       deadManList.filter(d => d.status === "active" || d.status === "help_coming").map((d: any) => d.id as string)
     );
     if (knownDmRef.current === null) { knownDmRef.current = activeIds; return; }
-    if (Array.from(activeIds).some(id => !knownDmRef.current!.has(id))) playSiren();
+    if (Array.from(activeIds).some(id => !knownDmRef.current!.has(id))) {
+      playSiren();
+      notifyNewAlert("🚨 New Dead Man Alert", "A new dead man duress alert just triggered.");
+    }
     knownDmRef.current = activeIds;
   }, [deadManList]);
 
@@ -134,8 +152,9 @@ export default function MonitoringPage() {
   const handleSosAction = async (sosId: string, status: "help_coming" | "resolved") => {
     setSosActionId(sosId + status);
     try {
-      await client.patch(`/api/admin/saferide/sos/${sosId}`, { status });
+      await api.updateSos(sosId, status, noteDrafts[sosId]?.trim() || undefined);
       toast.success(status === "resolved" ? "SOS resolved" : "User notified — Help Coming");
+      setNoteDrafts(prev => { const next = { ...prev }; delete next[sosId]; return next; });
       fetchAll();
     } catch (e: any) { toast.error(e.message || "Failed"); }
     finally { setSosActionId(null); }
@@ -154,8 +173,9 @@ export default function MonitoringPage() {
   const handleDeadManAction = async (id: string, status: "help_coming" | "resolved") => {
     setSosActionId(id + status);
     try {
-      await client.patch(`/api/admin/saferide/sos/${id}`, { status });
+      await api.updateSos(id, status, noteDrafts[id]?.trim() || undefined);
       toast.success(status === "resolved" ? "Resolved" : "Marked — help coming");
+      setNoteDrafts(prev => { const next = { ...prev }; delete next[id]; return next; });
       fetchAll();
     } catch (e: any) { toast.error(e.message || "Failed"); }
     finally { setSosActionId(null); }
@@ -167,8 +187,27 @@ export default function MonitoringPage() {
   const activeDeadMen = deadManList.filter(d => ["active", "help_coming"].includes(d.status));
   const anyEmergency = activeSos.length > 0 || activeDeadMen.length > 0;
 
+  const mapPins: LiveMapPin[] = useMemo(() => {
+    const pins: LiveMapPin[] = [];
+    for (const s of activeSos) {
+      const lat = s.latest_lat ?? s.latitude, lng = s.latest_lng ?? s.longitude;
+      if (lat != null && lng != null) pins.push({ id: `sos-${s.id}`, lat, lng, kind: "sos", label: `${s.user_name || "Unknown"} — ${s.emergency_type}`, sublabel: s.status });
+    }
+    for (const d of activeDeadMen) {
+      const lat = d.latest_lat ?? d.latitude, lng = d.latest_lng ?? d.longitude;
+      if (lat != null && lng != null) pins.push({ id: `dm-${d.id}`, lat, lng, kind: "deadman", label: `${d.user_name || "Unknown"} — Dead Man`, sublabel: d.status });
+    }
+    for (const tm of trackMeList) {
+      if (tm.last_lat != null && tm.last_lng != null) pins.push({ id: `tm-${tm.id}`, lat: tm.last_lat, lng: tm.last_lng, kind: "trackme", label: `${tm.user_name || "Unknown"} — Track Me` });
+    }
+    return pins;
+  }, [activeSos, activeDeadMen, trackMeList]);
+
+  useAlertEscalation(anyEmergency);
+
   return (
     <AdminShell title="Live Monitor">
+      <PermissionGate permission="view_audit">
       <div className="p-6 space-y-6">
 
         {/* Header */}
@@ -189,6 +228,24 @@ export default function MonitoringPage() {
               <Shield size={13} /> Command Centre
             </Link>
           </div>
+        </div>
+
+        {/* Stale-data warning — a background poll failed silently otherwise */}
+        {fetchErrors.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold">
+            <AlertCircle size={14} className="flex-shrink-0" />
+            Failed to refresh: {fetchErrors.join(", ")} — showing last known data from {lastRefresh.toLocaleTimeString("en-ZA")}.
+          </div>
+        )}
+
+        {/* Live map — all active SOS / Dead Man / Track Me pins together */}
+        <div className="bg-bg2 border border-border rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <MapPin size={15} className="text-cyan" />
+            <h2 className="font-extrabold text-sm uppercase tracking-wider text-text">Live Map</h2>
+            <span className="text-[10px] text-textDim">SOS (red) · Dead Man (purple) · Track Me (blue)</span>
+          </div>
+          <LiveMap pins={mapPins} height={360} emptyMessage="No active SOS, Dead Man, or Track Me locations right now" />
         </div>
 
         {/* Emergency banner */}
@@ -240,15 +297,32 @@ export default function MonitoringPage() {
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div>
                           <p className="font-extrabold text-text text-sm">{sos.user_name || "Unknown"}</p>
-                          <a href={`tel:${sos.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1">
-                            <Phone size={9} /> {sos.user_phone}
-                          </a>
+                          {sos.user_phone ? (
+                            <a href={`tel:${sos.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1">
+                              <Phone size={9} /> {sos.user_phone}
+                            </a>
+                          ) : sos.user_email ? (
+                            <a href={`mailto:${sos.user_email}`} className="text-cyan text-xs hover:underline">{sos.user_email}</a>
+                          ) : (
+                            <span className="text-textDim text-xs">No phone or email</span>
+                          )}
                         </div>
                         <div className="text-right flex-shrink-0">
                           <Badge tone={sos.status === "help_coming" ? "yellow" : "red"}>{sos.status === "help_coming" ? "HELP COMING" : sos.status.toUpperCase()}</Badge>
                           <p className="text-[10px] text-red-400 font-bold mt-1">{elapsedLabel(sos.created_at)}</p>
                         </div>
                       </div>
+                      {sos.admin_notes && (
+                        <p className="text-[10px] text-textMuted bg-bg2 rounded px-2 py-1.5 mb-2 border border-border">
+                          {sos.admin_notes.split(" | ").map((line: string, i: number) => <span key={i} className="block">{line}</span>)}
+                        </p>
+                      )}
+                      <input
+                        value={noteDrafts[sos.id] || ""}
+                        onChange={e => setNoteDrafts(prev => ({ ...prev, [sos.id]: e.target.value }))}
+                        placeholder="Add a note for the user (optional)…"
+                        className="w-full bg-bg2 border border-border rounded px-2 py-1 text-[10px] text-text placeholder:text-textDim mb-2 focus:outline-none focus:border-red-400"
+                      />
                       <div className="flex items-center gap-2 flex-wrap">
                         {mapsUrl && (
                           <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
@@ -258,7 +332,7 @@ export default function MonitoringPage() {
                         )}
                         {sos.status === "active" && (
                           <button
-                            disabled={!!sosActionId}
+                            disabled={!!sosActionId && sosActionId.startsWith(sos.id)}
                             onClick={() => handleSosAction(sos.id, "help_coming")}
                             className="flex items-center gap-1 text-[10px] text-yellow-400 border border-yellow-500/30 bg-yellow-500/10 rounded px-2 py-1 hover:bg-yellow-500/20 disabled:opacity-50">
                             {sosActionId === sos.id + "help_coming" ? <Spinner size={8} /> : <Phone size={9} />}
@@ -266,7 +340,7 @@ export default function MonitoringPage() {
                           </button>
                         )}
                         <button
-                          disabled={!!sosActionId}
+                          disabled={!!sosActionId && sosActionId.startsWith(sos.id)}
                           onClick={() => handleSosAction(sos.id, "resolved")}
                           className="flex items-center gap-1 text-[10px] text-green border border-green/30 bg-green/10 rounded px-2 py-1 hover:bg-green/20 disabled:opacity-50">
                           {sosActionId === sos.id + "resolved" ? <Spinner size={8} /> : null}
@@ -280,7 +354,7 @@ export default function MonitoringPage() {
             )}
 
             {resolvedSos.length > 0 && (
-              <p className="text-[10px] text-textDim mt-3 text-center">{resolvedSos.length} resolved today</p>
+              <p className="text-[10px] text-textDim mt-3 text-center">{resolvedSos.length} recently resolved</p>
             )}
           </div>
 
@@ -314,12 +388,29 @@ export default function MonitoringPage() {
                             <p className="font-extrabold text-text text-sm">{dm.user_name || "Unknown"}</p>
                             <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">DEAD MAN</span>
                           </div>
-                          <a href={`tel:${dm.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1">
-                            <Phone size={9} /> {dm.user_phone}
-                          </a>
+                          {dm.user_phone ? (
+                            <a href={`tel:${dm.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1">
+                              <Phone size={9} /> {dm.user_phone}
+                            </a>
+                          ) : dm.user_email ? (
+                            <a href={`mailto:${dm.user_email}`} className="text-cyan text-xs hover:underline">{dm.user_email}</a>
+                          ) : (
+                            <span className="text-textDim text-xs">No phone or email</span>
+                          )}
                         </div>
                         <p className="text-[10px] text-purple-400 font-bold flex-shrink-0">{elapsedLabel(dm.dead_man_triggered_at || dm.created_at)}</p>
                       </div>
+                      {dm.admin_notes && (
+                        <p className="text-[10px] text-textMuted bg-bg2 rounded px-2 py-1.5 mb-2 border border-border">
+                          {dm.admin_notes.split(" | ").map((line: string, i: number) => <span key={i} className="block">{line}</span>)}
+                        </p>
+                      )}
+                      <input
+                        value={noteDrafts[dm.id] || ""}
+                        onChange={e => setNoteDrafts(prev => ({ ...prev, [dm.id]: e.target.value }))}
+                        placeholder="Add a note (optional)…"
+                        className="w-full bg-bg2 border border-border rounded px-2 py-1 text-[10px] text-text placeholder:text-textDim mb-2 focus:outline-none focus:border-purple-400"
+                      />
                       <div className="flex items-center gap-2 flex-wrap">
                         {mapsUrl && (
                           <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
@@ -328,14 +419,14 @@ export default function MonitoringPage() {
                           </a>
                         )}
                         <button
-                          disabled={!!sosActionId}
+                          disabled={!!sosActionId && sosActionId.startsWith(dm.id)}
                           onClick={() => handleDeadManAction(dm.id, "help_coming")}
                           className="flex items-center gap-1 text-[10px] text-yellow-400 border border-yellow-500/30 bg-yellow-500/10 rounded px-2 py-1 hover:bg-yellow-500/20 disabled:opacity-50">
                           {sosActionId === dm.id + "help_coming" ? <Spinner size={8} /> : null}
                           Help Coming
                         </button>
                         <button
-                          disabled={!!sosActionId}
+                          disabled={!!sosActionId && sosActionId.startsWith(dm.id)}
                           onClick={() => handleDeadManAction(dm.id, "resolved")}
                           className="flex items-center gap-1 text-[10px] text-green border border-green/30 bg-green/10 rounded px-2 py-1 hover:bg-green/20 disabled:opacity-50">
                           {sosActionId === dm.id + "resolved" ? <Spinner size={8} /> : null}
@@ -481,6 +572,7 @@ export default function MonitoringPage() {
         </div>
 
       </div>
+      </PermissionGate>
     </AdminShell>
   );
 }

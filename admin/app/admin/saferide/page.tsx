@@ -1,10 +1,13 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner } from "@/components/ui";
-import client from "@/lib/api";
-import { Shield, AlertTriangle, Search, Phone, MapPin, RefreshCw, Users, Car, Radio, Navigation, Activity, Clock, XCircle } from "lucide-react";
+import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import client, { api, SosRequest, DriverLocation } from "@/lib/api";
+import { LiveMap, MapPin as LiveMapPin } from "@/components/saferide/LiveMap";
+import { useAlertEscalation, notifyNewAlert } from "@/lib/useAlertEscalation";
+import { timeAgo } from "@/lib/utils";
+import { Shield, AlertTriangle, Search, Phone, MapPin, RefreshCw, Users, Car, Radio, Navigation, Activity, Clock, XCircle, Volume2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function SafeRidePage() {
@@ -42,6 +45,15 @@ export default function SafeRidePage() {
   const deadManRefTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const knownDeadManIdsRef = useRef<Set<string> | null>(null);
 
+  // Per-row note drafts (shown to the user — only sent if the admin actually types one)
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  // Which section is being manually refreshed (for the refresh-icon spinner)
+  const [manualRefreshing, setManualRefreshing] = useState<string | null>(null);
+  const refresh = async (key: string, fn: () => Promise<void>) => {
+    setManualRefreshing(key);
+    try { await fn(); } finally { setManualRefreshing(null); }
+  };
+
   const playSosSiren = () => {
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -62,12 +74,15 @@ export default function SafeRidePage() {
       gain.gain.linearRampToValueAtTime(0, t + 1.5);
       osc.start(t);
       osc.stop(t + 1.5);
+      osc.onended = () => { ctx.close().catch(() => {}); };
+      // Belt-and-braces: force-close even if onended never fires (e.g. tab backgrounded)
+      setTimeout(() => { ctx.close().catch(() => {}); }, 2000);
     } catch {}
   };
 
   const fetchDriverLocations = useCallback(async () => {
     try {
-      const res = await client.get("/api/trips/driver-locations");
+      const res = await api.driverLocations();
       setDriverLocations(res.data || []);
     } catch {}
     finally { setLoadingDrivers(false); }
@@ -75,7 +90,7 @@ export default function SafeRidePage() {
 
   const fetchSos = useCallback(async () => {
     try {
-      const res = await client.get("/api/admin/saferide/sos");
+      const res = await api.sosList();
       setSosList(res.data || []);
     } catch {}
     finally { setSosLoading(false); }
@@ -83,7 +98,7 @@ export default function SafeRidePage() {
 
   const fetchDeadMan = useCallback(async () => {
     try {
-      const res = await client.get("/api/admin/saferide/deadman");
+      const res = await api.deadManList();
       setDeadManList(res.data || []);
     } catch {}
     finally { setDeadManLoading(false); }
@@ -107,11 +122,12 @@ export default function SafeRidePage() {
     finally { setTrackMeEndingId(null); }
   };
 
-  const handleSosAction = async (sosId: string, status: "help_coming" | "dispatched" | "resolved", notes?: string) => {
+  const handleSosAction = async (sosId: string, status: "help_coming" | "dispatched" | "resolved") => {
     setSosActionLoading(sosId + status);
     try {
-      await client.patch(`/api/admin/saferide/sos/${sosId}`, { status, notes });
+      await api.updateSos(sosId, status, noteDrafts[sosId]?.trim() || undefined);
       toast.success(status === "help_coming" ? "User notified — Help Coming" : status === "dispatched" ? "Marked as dispatched" : "SOS resolved");
+      setNoteDrafts(prev => { const next = { ...prev }; delete next[sosId]; return next; });
       fetchSos();
     } catch (e: any) { toast.error(e.message || "Failed"); }
     finally { setSosActionLoading(null); }
@@ -120,7 +136,7 @@ export default function SafeRidePage() {
   const handleBulkSosAction = async (sosIds: string[], status: "help_coming" | "resolved", clusterKey: string, notes?: string) => {
     setBulkActionLoading(clusterKey + status);
     try {
-      await client.patch("/api/admin/saferide/sos/bulk", { sos_ids: sosIds, status, notes });
+      await api.bulkUpdateSos(sosIds, status, notes);
       toast.success(status === "help_coming"
         ? `Help Coming sent to all ${sosIds.length} passengers`
         : `${sosIds.length} SOS resolved`);
@@ -134,8 +150,8 @@ export default function SafeRidePage() {
     if (!price || price <= 0) { toast.error("Enter a valid price"); return; }
     setSosActionLoading(sosId + "charge");
     try {
-      const res = await client.post(`/api/admin/saferide/sos/${sosId}/charge`, { price });
-      toast.success(res.data.deducted_from_wallet ? `R${price.toFixed(2)} deducted from wallet` : `R${price.toFixed(2)} recorded — wallet insufficient, follow up manually`);
+      const res = await api.chargeSos(sosId, price);
+      toast.success((res.data as any).deducted_from_wallet ? `R${price.toFixed(2)} deducted from wallet` : `R${price.toFixed(2)} recorded — wallet insufficient, follow up manually`);
       setSosChargeId(null);
       setSosChargePrice("");
       fetchSos();
@@ -146,8 +162,9 @@ export default function SafeRidePage() {
   const handleDeadManAction = async (id: string, status: "help_coming" | "resolved") => {
     setSosActionLoading(id + status);
     try {
-      await client.patch(`/api/admin/saferide/sos/${id}`, { status });
+      await api.updateSos(id, status, noteDrafts[id]?.trim() || undefined);
       toast.success(status === "resolved" ? "Dead Man alert resolved" : "Marked — help coming");
+      setNoteDrafts(prev => { const next = { ...prev }; delete next[id]; return next; });
       fetchDeadMan();
     } catch (e: any) { toast.error(e.message || "Failed"); }
     finally { setSosActionLoading(null); }
@@ -158,8 +175,8 @@ export default function SafeRidePage() {
     if (!price || price <= 0) { toast.error("Enter a valid price"); return; }
     setSosActionLoading(id + "dmcharge");
     try {
-      const res = await client.post(`/api/admin/saferide/sos/${id}/charge`, { price });
-      toast.success(res.data.deducted_from_wallet ? `R${price.toFixed(2)} deducted from wallet` : `R${price.toFixed(2)} recorded — follow up manually`);
+      const res = await api.chargeSos(id, price);
+      toast.success((res.data as any).deducted_from_wallet ? `R${price.toFixed(2)} deducted from wallet` : `R${price.toFixed(2)} recorded — follow up manually`);
       setDeadManChargeId(null);
       setDeadManChargePrice("");
       fetchDeadMan();
@@ -169,7 +186,7 @@ export default function SafeRidePage() {
 
   const fetchIncidents = useCallback(async () => {
     try {
-      const res = await client.get("/api/admin/incidents");
+      const res = await api.incidents();
       const data = res.data || [];
       setIncidents(data);
       const now = new Date();
@@ -215,7 +232,10 @@ export default function SafeRidePage() {
       return;
     }
     const hasNew = Array.from(activeIds).some(id => !knownSosIdsRef.current!.has(id));
-    if (hasNew) playSosSiren();
+    if (hasNew) {
+      playSosSiren();
+      notifyNewAlert("🚨 New SOS Alert", "A new SOS distress signal just came in.");
+    }
     knownSosIdsRef.current = activeIds;
   }, [sosList]);
 
@@ -228,7 +248,10 @@ export default function SafeRidePage() {
       return;
     }
     const hasNew = Array.from(activeIds).some(id => !knownDeadManIdsRef.current!.has(id));
-    if (hasNew) playSosSiren();
+    if (hasNew) {
+      playSosSiren();
+      notifyNewAlert("🚨 New Dead Man Alert", "A new dead man duress alert just triggered.");
+    }
     knownDeadManIdsRef.current = activeIds;
   }, [deadManList]);
 
@@ -248,12 +271,16 @@ export default function SafeRidePage() {
     const description = prompt(`Flag incident for ${plate}. Enter description:`);
     if (!description) return;
     try {
-      await client.post("/api/admin/incidents", {
+      const res = await api.createIncident({
         vehicle_plate: plate,
         incident_type: "accident",
         description,
       });
-      toast.success("Incident created — SMS notifications sent");
+      toast.success(
+        res.data.trip_id
+          ? "Incident created — SMS notifications sent"
+          : "Incident created — no active trip matched this plate, no passengers notified"
+      );
       fetchIncidents();
     } catch (e: any) {
       toast.error(e.message || "Failed");
@@ -265,7 +292,15 @@ export default function SafeRidePage() {
     return new Date(iso).toLocaleString("en-ZA", { dateStyle: "short", timeStyle: "short" });
   };
 
-  const activeSos = sosList.filter(s => s.status === "active" || s.status === "help_coming" || s.status === "dispatched");
+  const activeSos = useMemo(
+    () => sosList.filter(s => s.status === "active" || s.status === "help_coming" || s.status === "dispatched"),
+    [sosList]
+  );
+
+  const activeDeadMan = useMemo(
+    () => deadManList.filter(d => d.status === "active" || d.status === "help_coming"),
+    [deadManList]
+  );
 
   // ── Cluster detection: group active SOS within 300 m and 10 min of each other ──
   const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
@@ -275,7 +310,7 @@ export default function SafeRidePage() {
     return R * 2 * Math.asin(Math.sqrt(a));
   };
 
-  const sosClusters: any[][] = (() => {
+  const sosClusters: any[][] = useMemo(() => {
     const candidates = activeSos.filter(s => s.status === "active");
     const visited = new Set<string>();
     const clusters: any[][] = [];
@@ -298,12 +333,43 @@ export default function SafeRidePage() {
       }
     }
     return clusters;
-  })();
+  }, [activeSos]);
 
-  const clusteredIds = new Set(sosClusters.flatMap(c => c.map((s: any) => s.id)));
+  const clusteredIds = useMemo(
+    () => new Set(sosClusters.flatMap(c => c.map((s: any) => s.id))),
+    [sosClusters]
+  );
+
+  // ── Live map pins: SOS + Dead Man + Track Me, all on one map ──
+  const mapPins: LiveMapPin[] = useMemo(() => {
+    const pins: LiveMapPin[] = [];
+    for (const s of activeSos) {
+      const lat = s.latest_lat ?? s.latitude;
+      const lng = s.latest_lng ?? s.longitude;
+      if (lat != null && lng != null) {
+        pins.push({ id: `sos-${s.id}`, lat, lng, kind: "sos", label: `${s.user_name || "Unknown"} — ${s.emergency_type}`, sublabel: s.status });
+      }
+    }
+    for (const d of activeDeadMan) {
+      const lat = d.latest_lat ?? d.latitude;
+      const lng = d.latest_lng ?? d.longitude;
+      if (lat != null && lng != null) {
+        pins.push({ id: `dm-${d.id}`, lat, lng, kind: "deadman", label: `${d.user_name || "Unknown"} — Dead Man`, sublabel: d.status });
+      }
+    }
+    for (const tm of trackMeList) {
+      if (tm.last_lat != null && tm.last_lng != null) {
+        pins.push({ id: `tm-${tm.id}`, lat: tm.last_lat, lng: tm.last_lng, kind: "trackme", label: `${tm.user_name || "Unknown"} — Track Me` });
+      }
+    }
+    return pins;
+  }, [activeSos, activeDeadMan, trackMeList]);
+
+  useAlertEscalation(activeSos.length > 0 || activeDeadMan.length > 0);
 
   return (
     <AdminShell title="SafeRide Command Centre">
+      <PermissionGate permission="view_audit">
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">
@@ -314,10 +380,27 @@ export default function SafeRidePage() {
             <h1 className="text-xl font-black text-text">SafeRide Command Centre</h1>
             <p className="text-xs text-textMuted">Real-time passenger safety and incident management</p>
           </div>
-          <Link href="/admin/saferide/incidents" className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg bg-red/10 border border-red/20 text-red-400 text-xs font-bold hover:bg-red/20 transition-colors">
+          <button
+            onClick={playSosSiren}
+            title="Test the SOS siren sound"
+            className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg bg-bg2 border border-border text-textMuted text-xs font-bold hover:border-cyan hover:text-cyan transition-colors">
+            <Volume2 size={14} />
+            Test Siren
+          </button>
+          <Link href="/admin/saferide/incidents" className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red/10 border border-red/20 text-red-400 text-xs font-bold hover:bg-red/20 transition-colors">
             <AlertTriangle size={14} />
             Incidents
           </Link>
+        </div>
+
+        {/* LIVE MAP — all active SOS / Dead Man / Track Me pins together */}
+        <div className="bg-bg2 border border-border rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <MapPin size={16} className="text-cyan" />
+            <h2 className="font-extrabold text-text text-sm uppercase tracking-wider">Live Map</h2>
+            <span className="text-[10px] text-textDim">SOS (red) · Dead Man (purple) · Track Me (blue)</span>
+          </div>
+          <LiveMap pins={mapPins} emptyMessage="No active SOS, Dead Man, or Track Me locations right now" />
         </div>
 
         {/* SOS ALERTS */}
@@ -333,8 +416,8 @@ export default function SafeRidePage() {
               )}
               <span className="text-[10px] text-textDim">(refreshes every 10s)</span>
             </div>
-            <button onClick={fetchSos} className="text-textMuted hover:text-red-400 transition-colors">
-              <RefreshCw size={14} />
+            <button onClick={() => refresh("sos", fetchSos)} className="text-textMuted hover:text-red-400 transition-colors">
+              <RefreshCw size={14} className={manualRefreshing === "sos" ? "animate-spin" : ""} />
             </button>
           </div>
 
@@ -410,14 +493,14 @@ export default function SafeRidePage() {
                     {/* Bulk actions */}
                     <div className="flex flex-wrap gap-2">
                       <button
-                        disabled={!!bulkActionLoading}
+                        disabled={!!bulkActionLoading && bulkActionLoading.startsWith(clusterKey)}
                         onClick={() => handleBulkSosAction(ids, "help_coming", clusterKey, "Group incident — help dispatched to scene")}
                         className="flex items-center gap-1.5 px-4 py-2 bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-black rounded-lg hover:bg-orange-500/30 transition-colors disabled:opacity-50">
                         {bulkActionLoading === clusterKey + "help_coming" ? <Spinner size={10} /> : <Phone size={12} />}
                         Help Coming — All {cluster.length} People
                       </button>
                       <button
-                        disabled={!!bulkActionLoading}
+                        disabled={!!bulkActionLoading && bulkActionLoading.startsWith(clusterKey)}
                         onClick={() => handleBulkSosAction(ids, "resolved", clusterKey, "Group incident resolved")}
                         className="flex items-center gap-1.5 px-3 py-2 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
                         {bulkActionLoading === clusterKey + "resolved" ? <Spinner size={10} /> : null}
@@ -458,15 +541,23 @@ export default function SafeRidePage() {
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-orange-500/10 text-orange-400 border-orange-500/20">GROUP</span>
                             )}
                           </div>
-                          <a href={`tel:${sos.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
-                            <Phone size={10} /> {sos.user_phone || "No phone"}
-                          </a>
+                          {sos.user_phone ? (
+                            <a href={`tel:${sos.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                              <Phone size={10} /> {sos.user_phone}
+                            </a>
+                          ) : sos.user_email ? (
+                            <a href={`mailto:${sos.user_email}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                              {sos.user_email}
+                            </a>
+                          ) : (
+                            <span className="text-textDim text-xs flex items-center gap-1 mt-0.5">No phone or email</span>
+                          )}
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <p className="text-[10px] text-textDim">{formatTime(sos.created_at)}</p>
                         {isActive && <p className="text-[10px] text-red-400 font-bold">{elapsed}m ago</p>}
-                        {sos.charged && <p className="text-[10px] text-green font-bold">R{sos.price?.toFixed(2)} charged</p>}
+                        {sos.charged && sos.price != null && <p className="text-[10px] text-green font-bold">R{sos.price.toFixed(2)} charged</p>}
                       </div>
                     </div>
 
@@ -479,11 +570,22 @@ export default function SafeRidePage() {
                       </a>
                     )}
 
-                    {/* Admin notes */}
+                    {/* Admin notes history — accumulated entries, most recent last */}
                     {sos.admin_notes && (
-                      <p className="text-xs text-textMuted bg-bg2 rounded px-3 py-2 mb-3 border border-border">
-                        Notes: {sos.admin_notes}
-                      </p>
+                      <div className="text-xs text-textMuted bg-bg2 rounded px-3 py-2 mb-3 border border-border space-y-0.5">
+                        <p className="text-[10px] font-bold text-textDim uppercase tracking-wide mb-1">Note history (visible to user)</p>
+                        {sos.admin_notes.split(" | ").map((line: string, i: number) => <p key={i}>{line}</p>)}
+                      </div>
+                    )}
+
+                    {/* Note draft — optional message sent to the user with the next action */}
+                    {isActive && (
+                      <input
+                        value={noteDrafts[sos.id] || ""}
+                        onChange={e => setNoteDrafts(prev => ({ ...prev, [sos.id]: e.target.value }))}
+                        placeholder="Add a note for the user (optional)…"
+                        className="w-full bg-bg border border-border rounded-lg px-3 py-1.5 text-xs text-text placeholder:text-textDim mb-2 focus:outline-none focus:border-red-400"
+                      />
                     )}
 
                     {/* Actions */}
@@ -491,8 +593,8 @@ export default function SafeRidePage() {
                       <div className="flex flex-wrap gap-2">
                         {sos.status === "active" && (
                           <button
-                            disabled={!!sosActionLoading}
-                            onClick={() => handleSosAction(sos.id, "help_coming", "Help is on the way")}
+                            disabled={!!sosActionLoading && sosActionLoading.startsWith(sos.id)}
+                            onClick={() => handleSosAction(sos.id, "help_coming")}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold rounded-lg hover:bg-yellow-500/20 transition-colors disabled:opacity-50">
                             {sosActionLoading === sos.id + "help_coming" ? <Spinner size={10} /> : <Phone size={11} />}
                             Help Coming
@@ -504,7 +606,7 @@ export default function SafeRidePage() {
                           </span>
                         )}
                         <button
-                          disabled={!!sosActionLoading}
+                          disabled={!!sosActionLoading && sosActionLoading.startsWith(sos.id)}
                           onClick={() => handleSosAction(sos.id, "resolved")}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
                           {sosActionLoading === sos.id + "resolved" ? <Spinner size={10} /> : null}
@@ -549,7 +651,6 @@ export default function SafeRidePage() {
 
         {/* DEAD MAN ALERTS */}
         {(() => {
-          const activeDeadMan = deadManList.filter(d => d.status === "active" || d.status === "help_coming");
           return (
             <div className={`rounded-xl border p-5 ${activeDeadMan.length > 0 ? "bg-purple-950/30 border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.2)]" : "bg-bg2 border-border"}`}>
               <div className="flex items-center justify-between mb-4">
@@ -563,8 +664,8 @@ export default function SafeRidePage() {
                   )}
                   <span className="text-[10px] text-textDim">(refreshes every 10s)</span>
                 </div>
-                <button onClick={fetchDeadMan} className="text-textMuted hover:text-purple-400 transition-colors">
-                  <RefreshCw size={14} />
+                <button onClick={() => refresh("deadman", fetchDeadMan)} className="text-textMuted hover:text-purple-400 transition-colors">
+                  <RefreshCw size={14} className={manualRefreshing === "deadman" ? "animate-spin" : ""} />
                 </button>
               </div>
 
@@ -595,15 +696,23 @@ export default function SafeRidePage() {
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-purple-500/10 text-purple-400 border-purple-500/20">DEAD MAN</span>
                                 <Badge tone={dm.status === "resolved" ? "green" : "red"}>{dm.status?.toUpperCase()}</Badge>
                               </div>
-                              <a href={`tel:${dm.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
-                                <Phone size={10} /> {dm.user_phone || "No phone"}
-                              </a>
+                              {dm.user_phone ? (
+                                <a href={`tel:${dm.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                                  <Phone size={10} /> {dm.user_phone}
+                                </a>
+                              ) : dm.user_email ? (
+                                <a href={`mailto:${dm.user_email}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
+                                  {dm.user_email}
+                                </a>
+                              ) : (
+                                <span className="text-textDim text-xs flex items-center gap-1 mt-0.5">No phone or email</span>
+                              )}
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
                             <p className="text-[10px] text-textDim">{formatTime(dm.dead_man_triggered_at || dm.created_at)}</p>
                             {isActive && <p className="text-[10px] text-purple-400 font-bold">{elapsed}m ago</p>}
-                            {dm.charged && <p className="text-[10px] text-green font-bold">R{dm.price?.toFixed(2)} charged</p>}
+                            {dm.charged && dm.price != null && <p className="text-[10px] text-green font-bold">R{dm.price.toFixed(2)} charged</p>}
                           </div>
                         </div>
 
@@ -615,16 +724,37 @@ export default function SafeRidePage() {
                           </a>
                         )}
 
-                        {isActive && (
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            <button
-                              disabled={!!sosActionLoading}
-                              onClick={() => handleDeadManAction(dm.id, "resolved")}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
-                              {sosActionLoading === dm.id + "resolved" ? <Spinner size={10} /> : null}
-                              Mark Resolved
-                            </button>
+                        {dm.admin_notes && (
+                          <div className="text-xs text-textMuted bg-bg2 rounded px-3 py-2 mb-3 border border-border space-y-0.5">
+                            <p className="text-[10px] font-bold text-textDim uppercase tracking-wide mb-1">Note history</p>
+                            {dm.admin_notes.split(" | ").map((line: string, i: number) => <p key={i}>{line}</p>)}
                           </div>
+                        )}
+
+                        {isActive && (
+                          <>
+                            <p className="text-[10px] text-textDim mb-2">
+                              Note: these actions don't notify the user's device — dead man sessions run silently by design, so neither status change tips off anyone with the user.
+                            </p>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              {dm.status === "active" && (
+                                <button
+                                  disabled={!!sosActionLoading && sosActionLoading.startsWith(dm.id)}
+                                  onClick={() => handleDeadManAction(dm.id, "help_coming")}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold rounded-lg hover:bg-yellow-500/20 transition-colors disabled:opacity-50">
+                                  {sosActionLoading === dm.id + "help_coming" ? <Spinner size={10} /> : <Phone size={11} />}
+                                  Help Coming
+                                </button>
+                              )}
+                              <button
+                                disabled={!!sosActionLoading && sosActionLoading.startsWith(dm.id)}
+                                onClick={() => handleDeadManAction(dm.id, "resolved")}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/30 text-green text-xs font-bold rounded-lg hover:bg-green/20 transition-colors disabled:opacity-50">
+                                {sosActionLoading === dm.id + "resolved" ? <Spinner size={10} /> : null}
+                                Mark Resolved
+                              </button>
+                            </div>
+                          </>
                         )}
 
                         {dm.status === "resolved" && !dm.charged && (
@@ -677,8 +807,8 @@ export default function SafeRidePage() {
             </div>
             <div className="flex items-center gap-2">
               <Link href="/admin/monitoring" className="text-[10px] text-cyan hover:underline font-bold">Live Monitor →</Link>
-              <button onClick={fetchTrackMe} className="text-textMuted hover:text-cyan transition-colors">
-                <RefreshCw size={14} />
+              <button onClick={() => refresh("trackme", fetchTrackMe)} className="text-textMuted hover:text-cyan transition-colors">
+                <RefreshCw size={14} className={manualRefreshing === "trackme" ? "animate-spin" : ""} />
               </button>
             </div>
           </div>
@@ -923,8 +1053,8 @@ export default function SafeRidePage() {
               <h2 className="font-extrabold text-text text-sm uppercase tracking-wider">Live Driver Locations</h2>
               <span className="text-[10px] text-textDim">(refreshes every 30s)</span>
             </div>
-            <button onClick={fetchDriverLocations} className="text-textMuted hover:text-cyan transition-colors">
-              <RefreshCw size={14} />
+            <button onClick={() => refresh("drivers", fetchDriverLocations)} className="text-textMuted hover:text-cyan transition-colors">
+              <RefreshCw size={14} className={manualRefreshing === "drivers" ? "animate-spin" : ""} />
             </button>
           </div>
           {loadingDrivers ? (
@@ -1007,6 +1137,7 @@ export default function SafeRidePage() {
           )}
         </div>
       </div>
+      </PermissionGate>
     </AdminShell>
   );
 }

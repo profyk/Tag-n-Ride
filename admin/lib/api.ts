@@ -29,6 +29,13 @@ export function getRole(): string | null {
     return JSON.parse(atob(token.split(".")[1])).role || null;
   } catch { return null; }
 }
+export function getCurrentAdminId(): string | null {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    return JSON.parse(atob(token.split(".")[1])).sub || null;
+  } catch { return null; }
+}
 export function isSuperAdmin(): boolean {
   return ["superadmin", "ceo"].includes(getRole() || "");
 }
@@ -874,6 +881,131 @@ export const api = {
     ),
   processAutoPayments: () =>
     client.post<{ ok: boolean; processed: number; results: any[] }>("/api/admin/taxi-associations/process-auto-payments", {}),
+
+  // ── SAFERIDE: SOS / Dead Man ──
+  sosList: () => client.get<SosRequest[]>("/api/admin/saferide/sos"),
+  deadManList: () => client.get<SosRequest[]>("/api/admin/saferide/deadman"),
+  updateSos: (id: string, status: "help_coming" | "dispatched" | "resolved", notes?: string) =>
+    client.patch<{ ok: boolean }>(`/api/admin/saferide/sos/${id}`, { status, notes }),
+  bulkUpdateSos: (sos_ids: string[], status: "help_coming" | "dispatched" | "resolved", notes?: string) =>
+    client.patch<{ ok: boolean; updated: number }>("/api/admin/saferide/sos/bulk", { sos_ids, status, notes }),
+  chargeSos: (id: string, price: number) =>
+    client.post<{ ok: boolean }>(`/api/admin/saferide/sos/${id}/charge`, { price }),
+  driverLocations: () => client.get<DriverLocation[]>("/api/trips/driver-locations"),
+
+  // ── SAFERIDE: Incidents ──
+  incidents: () => client.get<Incident[]>("/api/admin/incidents"),
+  incident: (id: string) => client.get<IncidentDetail>(`/api/admin/incidents/${id}`),
+  createIncident: (body: { vehicle_plate: string; incident_type: string; description?: string; latitude?: number; longitude?: number }) =>
+    client.post<Incident & { notifications_sent_count: number }>("/api/admin/incidents", body),
+  resolveIncident: (id: string, resolution_notes: string) =>
+    client.patch<Incident>(`/api/admin/incidents/${id}/resolve`, { resolution_notes }),
+  resendIncidentSms: (id: string) =>
+    client.post<{ retried: number; succeeded: number }>(`/api/admin/incidents/${id}/resend-sms`, {}),
+  setIncidentSeverity: (id: string, severity: "low" | "medium" | "high" | "critical") =>
+    client.patch<{ ok: boolean; severity: string }>(`/api/admin/incidents/${id}/severity`, { severity }),
+  assignIncident: (id: string, admin_id: string | null) =>
+    client.patch<{ ok: boolean; assigned_admin_id: string | null; assigned_admin_name: string | null }>(
+      `/api/admin/incidents/${id}/assign`, { admin_id }
+    ),
+};
+
+// ── SAFERIDE types ──
+export type SosRequest = {
+  id: string;
+  user_id: string;
+  user_name: string;
+  user_phone: string | null;
+  user_email: string | null;
+  emergency_type: string;
+  latitude: number | null;
+  longitude: number | null;
+  latest_lat: number | null;
+  latest_lng: number | null;
+  status: string;
+  admin_id: string | null;
+  admin_notes: string | null;
+  price: number | null;
+  charged: boolean;
+  is_dead_man?: boolean;
+  dead_man_triggered_at?: string | null;
+  created_at: string;
+  dispatched_at: string | null;
+  resolved_at: string | null;
+};
+
+export type DriverLocation = {
+  driver_id: string;
+  driver_name: string;
+  vehicle_plate: string;
+  latitude: number | null;
+  longitude: number | null;
+  speed: number;
+  trip_id: string;
+  trip_reference: string;
+  passenger_count: number;
+  last_update: string | null;
+  started_at: string | null;
+  total_revenue: number;
+};
+
+export type Incident = {
+  id: string;
+  incident_reference: string;
+  vehicle_plate: string;
+  driver_id: string | null;
+  driver_name: string | null;
+  driver_phone: string | null;
+  incident_type: string;
+  description: string | null;
+  flagged_at: string;
+  notifications_sent: boolean;
+  status: string;
+  resolved_at: string | null;
+  trip_id: string | null;
+  severity: "low" | "medium" | "high" | "critical";
+  assigned_admin_id: string | null;
+  assigned_admin_name: string | null;
+  notif_count: number;
+  passenger_count: number;
+};
+
+export type IncidentDetail = Incident & {
+  latitude: number | null;
+  longitude: number | null;
+  flagged_by: string | null;
+  notifications_sent_at: string | null;
+  resolved_by: string | null;
+  resolution_notes: string | null;
+  passengers: {
+    passenger_id: string;
+    passenger_name: string;
+    passenger_phone: string | null;
+    payment_amount: number | null;
+    blood_type: string | null;
+    medical_conditions: string | null;
+    allergies: string | null;
+    profile_complete: boolean;
+    emergency_contact_1_name: string | null;
+    emergency_contact_1_phone: string | null;
+    emergency_contact_1_relationship: string | null;
+    emergency_contact_2_name: string | null;
+    emergency_contact_2_phone: string | null;
+    emergency_contact_2_relationship: string | null;
+    next_of_kin_name: string | null;
+    next_of_kin_phone: string | null;
+    next_of_kin_relationship: string | null;
+  }[];
+  notifications: {
+    id: string;
+    contact_name: string | null;
+    contact_phone: string | null;
+    contact_relationship: string | null;
+    sms_status: string;
+    sent_at: string | null;
+    passenger_id: string | null;
+  }[];
+  gps_route: { latitude: number | null; longitude: number | null; speed: number; recorded_at: string }[];
 };
 
 export type DriverTransfer = {

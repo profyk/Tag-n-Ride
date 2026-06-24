@@ -1,17 +1,23 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, Button } from "@/components/ui";
-import client from "@/lib/api";
-import { AlertTriangle, Plus, Eye, CheckCircle } from "lucide-react";
+import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import { api, Incident } from "@/lib/api";
+import { timeAgo } from "@/lib/utils";
+import { AlertTriangle, Plus, Eye, CheckCircle, Search, AlertCircle } from "lucide-react";
 import toast from "react-hot-toast";
 
 const INCIDENT_TYPES = ["accident", "breakdown", "suspicious_activity", "medical_emergency", "panic", "other"];
 
+const SEVERITY_TONE: Record<string, "muted" | "yellow" | "orange" | "red"> = {
+  low: "muted", medium: "yellow", high: "orange", critical: "red",
+};
+
 export default function IncidentsPage() {
-  const [incidents, setIncidents] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
   const [createPlate, setCreatePlate] = useState("");
@@ -19,27 +25,37 @@ export default function IncidentsPage() {
   const [createDesc, setCreateDesc] = useState("");
   const [creating, setCreating] = useState(false);
 
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "resolved">("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+
   const fetchIncidents = useCallback(async () => {
+    setLoadError(false);
     try {
-      const res = await client.get("/api/admin/incidents");
+      const res = await api.incidents();
       setIncidents(res.data || []);
     } catch (e: any) {
+      setLoadError(true);
       toast.error(e.message || "Failed to load incidents");
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchIncidents(); }, []);
+  useEffect(() => { fetchIncidents(); }, [fetchIncidents]);
 
   const handleCreate = async () => {
     if (!createPlate.trim()) { toast.error("Vehicle plate is required"); return; }
     setCreating(true);
     try {
-      const res = await client.post("/api/admin/incidents", {
+      const res = await api.createIncident({
         vehicle_plate: createPlate.trim().toUpperCase(),
         incident_type: createType,
         description: createDesc.trim() || undefined,
       });
-      toast.success(`Incident ${res.data.incident_reference} created — ${res.data.notifications_sent_count || 0} SMS sent`);
+      if (res.data.trip_id) {
+        toast.success(`Incident ${res.data.incident_reference} created — ${res.data.notifications_sent_count || 0} SMS sent`);
+      } else {
+        toast(`Incident ${res.data.incident_reference} created — no active trip matched this plate, no passengers notified`, { icon: "⚠️" });
+      }
       setShowCreate(false);
       setCreatePlate(""); setCreateType("accident"); setCreateDesc("");
       fetchIncidents();
@@ -53,8 +69,20 @@ export default function IncidentsPage() {
     return new Date(iso).toLocaleString("en-ZA", { dateStyle: "short", timeStyle: "short" });
   };
 
+  const visible = useMemo(() => {
+    let list = incidents;
+    if (statusFilter !== "all") {
+      list = list.filter(i => statusFilter === "resolved" ? i.status === "resolved" : i.status !== "resolved");
+    }
+    if (typeFilter !== "all") list = list.filter(i => i.incident_type === typeFilter);
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter(i => (i.vehicle_plate || "").toLowerCase().includes(q) || (i.incident_reference || "").toLowerCase().includes(q));
+    return list;
+  }, [incidents, statusFilter, typeFilter, search]);
+
   return (
     <AdminShell title="Incident Management">
+      <PermissionGate permission="view_audit">
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -144,27 +172,68 @@ export default function IncidentsPage() {
           </div>
         )}
 
+        {/* Filters */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-textDim" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by plate or reference…"
+              className="w-full bg-bg2 border border-border rounded-lg pl-8 pr-3 py-2 text-xs text-text placeholder:text-textDim focus:outline-none focus:border-cyan"
+            />
+          </div>
+          {(["all", "active", "resolved"] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                statusFilter === f ? "bg-cyanDim text-cyan border border-cyan/20" : "text-textMuted border border-border hover:text-text"
+              }`}>
+              {f === "all" ? "All" : f === "active" ? "Active" : "Resolved"}
+            </button>
+          ))}
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-cyan">
+            <option value="all">All types</option>
+            {INCIDENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+          </select>
+        </div>
+
         {/* Incidents table */}
         <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16"><Spinner size={24} /></div>
-          ) : incidents.length === 0 ? (
-            <div className="text-center py-16 text-textMuted text-sm">No incidents recorded</div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-textMuted text-sm">
+              <AlertCircle size={20} className="text-yellow-400" />
+              Failed to load incidents — try refreshing.
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="text-center py-16 text-textMuted text-sm">
+              {incidents.length === 0 ? "No incidents recorded" : "No incidents match this filter"}
+            </div>
           ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-bg3">
-                  {["Reference", "Plate", "Type", "Passengers", "SMS Sent", "Time", "Status", ""].map(h => (
+                  {["Reference", "Plate", "Type", "Severity", "Assigned", "Passengers", "SMS Sent", "Age", "Status", ""].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-textDim font-extrabold uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {incidents.map(inc => (
+                {visible.map(inc => (
                   <tr key={inc.id} className="border-b border-border/50 hover:bg-bg3 transition-colors">
                     <td className="px-4 py-3 font-mono font-bold text-text">{inc.incident_reference}</td>
                     <td className="px-4 py-3 font-bold text-cyan">{inc.vehicle_plate}</td>
                     <td className="px-4 py-3 text-textMuted capitalize">{(inc.incident_type || "").replace(/_/g, " ")}</td>
+                    <td className="px-4 py-3">
+                      <Badge tone={SEVERITY_TONE[inc.severity] || "muted"}>{(inc.severity || "medium").toUpperCase()}</Badge>
+                    </td>
+                    <td className="px-4 py-3 text-textMuted">{inc.assigned_admin_name || "—"}</td>
                     <td className="px-4 py-3">
                       <span className="font-bold text-text">{inc.passenger_count || 0}</span>
                     </td>
@@ -177,7 +246,11 @@ export default function IncidentsPage() {
                         <span className="text-textDim">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-textMuted">{formatTime(inc.flagged_at)}</td>
+                    <td className="px-4 py-3 text-textMuted">
+                      <span title={formatTime(inc.flagged_at)}>
+                        {inc.status !== "resolved" ? timeAgo(inc.flagged_at) : formatTime(inc.flagged_at)}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <Badge tone={inc.status === "resolved" ? "green" : "red"}>
                         {inc.status === "resolved" ? "Resolved" : "Active"}
@@ -196,6 +269,7 @@ export default function IncidentsPage() {
           )}
         </div>
       </div>
+      </PermissionGate>
     </AdminShell>
   );
 }
