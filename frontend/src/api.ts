@@ -64,11 +64,17 @@ export const api = {
     password?: string;
     driver_mode?: boolean;
     province: string;
+    taxi_association_id?: string;
   }) =>
     request<{ token: string; user: User }>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  getPublicTaxiAssociations: () =>
+    request<{ id: string; name: string; city?: string; province?: string }[]>(
+      "/api/public/taxi-associations"
+    ),
 
   login: (body: { phone_number: string; pin: string }) =>
     request<{ token: string; user: User }>("/api/auth/login", {

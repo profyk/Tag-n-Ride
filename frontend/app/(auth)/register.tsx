@@ -349,8 +349,15 @@ export default function Register() {
   const [plate, setPlate] = useState("");
   const [province, setProvince] = useState("");
   const [provinceModal, setProvinceModal] = useState(false);
+  const [associations, setAssociations] = useState<{ id: string; name: string; city?: string; province?: string }[]>([]);
+  const [assocId, setAssocId] = useState("");
+  const [assocModal, setAssocModal] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    api.getPublicTaxiAssociations().then(setAssociations).catch(() => {});
+  }, []);
 
   // T&C acceptance
   const [tcAccepted, setTcAccepted] = useState(false);
@@ -449,6 +456,7 @@ export default function Register() {
         id_number: idNumber.trim() || undefined,
         email: email.trim() || undefined,
         province,
+        taxi_association_id: role === "driver" ? (assocId || undefined) : undefined,
       });
       router.replace("/(app)");
     } catch (e: any) {
@@ -475,6 +483,7 @@ export default function Register() {
         id_number: idNumber.trim() || undefined,
         email: email.trim() || undefined,
         province,
+        taxi_association_id: assocId || undefined,
       });
       try {
         await api.submitKyc(selfie.base64, licence.base64);
@@ -792,6 +801,15 @@ export default function Register() {
                   autoCapitalize="characters"
                 />
               )}
+              {role === "driver" && (
+                <SelectField
+                  label="Taxi association (optional)"
+                  value={associations.find(a => a.id === assocId)?.name || ""}
+                  placeholder="Select your taxi association"
+                  onPress={() => setAssocModal(true)}
+                  testID="register-association-select"
+                />
+              )}
               <Field
                 label="Create 4-digit PIN"
                 placeholder="••••"
@@ -861,6 +879,51 @@ export default function Register() {
                 onSelect={(p) => { setProvince(p); setProvinceModal(false); }}
                 onClose={() => setProvinceModal(false)}
               />
+              <Modal visible={assocModal} transparent animationType="slide" onRequestClose={() => setAssocModal(false)}>
+                <View style={assocStyles.overlay}>
+                  <View style={assocStyles.sheet}>
+                    <View style={assocStyles.handle} />
+                    <Text style={assocStyles.title}>Select Taxi Association</Text>
+                    <Text style={assocStyles.subtitle}>
+                      Optional — your fleet owner or admin can link this later too.
+                    </Text>
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                      <TouchableOpacity
+                        style={assocStyles.option}
+                        onPress={() => { setAssocId(""); setAssocModal(false); }}>
+                        <Text style={[assocStyles.optionText, !assocId && { color: colors.cyan }]}>
+                          — No association —
+                        </Text>
+                        {!assocId && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+                      </TouchableOpacity>
+                      {associations.map(a => (
+                        <TouchableOpacity
+                          key={a.id}
+                          style={assocStyles.option}
+                          onPress={() => { setAssocId(a.id); setAssocModal(false); }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[assocStyles.optionText, assocId === a.id && { color: colors.cyan }]}>
+                              {a.name}
+                            </Text>
+                            {(a.city || a.province) && (
+                              <Text style={assocStyles.optionSub}>
+                                {[a.city, a.province].filter(Boolean).join(", ")}
+                              </Text>
+                            )}
+                          </View>
+                          {assocId === a.id && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+                        </TouchableOpacity>
+                      ))}
+                      {associations.length === 0 && (
+                        <Text style={assocStyles.empty}>No associations available yet</Text>
+                      )}
+                    </ScrollView>
+                    <TouchableOpacity onPress={() => setAssocModal(false)} style={assocStyles.cancelBtn}>
+                      <Text style={assocStyles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Modal>
               <View style={{ height: 12 }} />
 
               <Button
@@ -1031,6 +1094,30 @@ const styles = StyleSheet.create({
     justifyContent: "center", padding: 16,
   },
   loadingText: { color: colors.textMuted, fontSize: 13 },
+});
+
+// ── Taxi Association Modal Styles ─────────────────────────────
+const assocStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.bg2, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28, maxHeight: "75%",
+  },
+  handle: {
+    width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border,
+    alignSelf: "center", marginBottom: 16,
+  },
+  title: { color: colors.text, fontSize: 18, fontWeight: "800", textAlign: "center" },
+  subtitle: { color: colors.textMuted, fontSize: 12, textAlign: "center", marginTop: 4, marginBottom: 12, lineHeight: 18 },
+  option: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  optionText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  optionSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  empty: { color: colors.textMuted, textAlign: "center", padding: 20, fontSize: 13 },
+  cancelBtn: { alignItems: "center", paddingVertical: 14 },
+  cancelText: { color: colors.textMuted, fontSize: 13 },
 });
 
 // ── T&C Modal Styles ─────────────────────────────────────────

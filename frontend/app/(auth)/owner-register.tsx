@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Keyboard, KeyboardAvoidingView, Platform,
-  ActivityIndicator,
+  ActivityIndicator, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -11,7 +11,7 @@ import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { radius } from "../../src/theme";
 import { ListPickerModal } from "../../src/ui";
-import { SA_PROVINCES } from "../../src/api";
+import { api, SA_PROVINCES } from "../../src/api";
 
 // ── Step bar ──────────────────────────────────────────────────
 function StepBar({ step, total, colors }: { step: number; total: number; colors: any }) {
@@ -88,6 +88,13 @@ export default function OwnerRegister() {
   const [businessName, setBusinessName] = useState("");
   const [province, setProvince] = useState("");
   const [provinceModal, setProvinceModal] = useState(false);
+  const [associations, setAssociations] = useState<{ id: string; name: string; city?: string; province?: string }[]>([]);
+  const [assocId, setAssocId] = useState("");
+  const [assocModal, setAssocModal] = useState(false);
+
+  useEffect(() => {
+    api.getPublicTaxiAssociations().then(setAssociations).catch(() => {});
+  }, []);
 
   // Step 2 — Credentials
   const [password, setPassword] = useState("");
@@ -169,6 +176,7 @@ export default function OwnerRegister() {
         business_name: businessName.trim() || undefined,
         id_number: idNumber.trim() || undefined,
         province,
+        taxi_association_id: assocId || undefined,
       });
       router.replace("/owner/dashboard");
     } catch (e: any) {
@@ -244,6 +252,14 @@ export default function OwnerRegister() {
               <TouchableOpacity style={[s.input, s.selectRow]} onPress={() => setProvinceModal(true)}>
                 <Text style={{ color: province ? colors.text : colors.textDim, fontSize: 15 }}>
                   {province || "Select your province"}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              <Text style={s.label}>TAXI ASSOCIATION <Text style={{ color: colors.textDim }}>— optional</Text></Text>
+              <TouchableOpacity style={[s.input, s.selectRow]} onPress={() => setAssocModal(true)}>
+                <Text style={{ color: assocId ? colors.text : colors.textDim, fontSize: 15 }}>
+                  {associations.find(a => a.id === assocId)?.name || "Select your taxi association"}
                 </Text>
                 <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
               </TouchableOpacity>
@@ -374,6 +390,39 @@ export default function OwnerRegister() {
         onSelect={(p) => { setProvince(p); setProvinceModal(false); }}
         onClose={() => setProvinceModal(false)}
       />
+
+      <Modal visible={assocModal} transparent animationType="slide" onRequestClose={() => setAssocModal(false)}>
+        <View style={s.assocOverlay}>
+          <View style={s.assocSheet}>
+            <View style={s.assocHandle} />
+            <Text style={s.assocTitle}>Select Taxi Association</Text>
+            <Text style={s.assocSub}>Optional — your admin can link this later too.</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TouchableOpacity style={s.assocOption} onPress={() => { setAssocId(""); setAssocModal(false); }}>
+                <Text style={[s.assocOptionText, !assocId && { color: colors.cyan }]}>— No association —</Text>
+                {!assocId && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+              </TouchableOpacity>
+              {associations.map(a => (
+                <TouchableOpacity key={a.id} style={s.assocOption} onPress={() => { setAssocId(a.id); setAssocModal(false); }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.assocOptionText, assocId === a.id && { color: colors.cyan }]}>{a.name}</Text>
+                    {(a.city || a.province) && (
+                      <Text style={s.assocOptionSub}>{[a.city, a.province].filter(Boolean).join(", ")}</Text>
+                    )}
+                  </View>
+                  {assocId === a.id && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+                </TouchableOpacity>
+              ))}
+              {associations.length === 0 && (
+                <Text style={s.assocEmpty}>No associations available yet</Text>
+              )}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setAssocModal(false)} style={s.assocCancelBtn}>
+              <Text style={s.assocCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -393,4 +442,15 @@ const makeStyles = (colors: any) => StyleSheet.create({
   primaryBtn: { backgroundColor: colors.cyan, borderRadius: radius.md, paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 },
   primaryBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
   infoCard: { flexDirection: "row", gap: 10, alignItems: "flex-start", backgroundColor: colors.cyanDim, borderRadius: radius.md, borderWidth: 1, borderColor: colors.cyan + "50", padding: 14, marginBottom: 16 },
+  assocOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  assocSheet: { backgroundColor: colors.bg2, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28, maxHeight: "75%" },
+  assocHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 16 },
+  assocTitle: { color: colors.text, fontSize: 18, fontWeight: "800", textAlign: "center" },
+  assocSub: { color: colors.textMuted, fontSize: 12, textAlign: "center", marginTop: 4, marginBottom: 12, lineHeight: 18 },
+  assocOption: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  assocOptionText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  assocOptionSub: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  assocEmpty: { color: colors.textMuted, textAlign: "center", padding: 20, fontSize: 13 },
+  assocCancelBtn: { alignItems: "center", paddingVertical: 14 },
+  assocCancelText: { color: colors.textMuted, fontSize: 13 },
 });

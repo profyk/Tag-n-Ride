@@ -866,6 +866,8 @@ class RegisterIn(BaseModel):
     driver_mode: Optional[bool] = None
     # Where the user is based — used for adoption/sales analytics by region
     province: str = Field(min_length=2, max_length=30)
+    # Optional taxi association link — drivers/owners only
+    taxi_association_id: Optional[str] = None
 
     @field_validator("province")
     @classmethod
@@ -1031,6 +1033,15 @@ class LinkDriverIn(BaseModel):
 async def health():
     return {"ok": True, "name": "Tag n Ride"}
 
+@api.get("/public/taxi-associations")
+async def public_taxi_associations():
+    """Unauthenticated list of active associations, for the registration forms."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, city, province FROM taxi_associations WHERE is_active = TRUE ORDER BY name"
+        )
+    return [dict(r) for r in rows]
+
 # ── Auth ─────────────────────────────────────────────────────
 @api.post("/auth/register")
 async def register(body: RegisterIn):
@@ -1044,6 +1055,9 @@ async def register(body: RegisterIn):
         if not body.phone_number:
             raise HTTPException(status_code=400, detail="Phone number is required")
 
+    # Only drivers/owners can link a taxi association
+    assoc_id = body.taxi_association_id if body.role in ("driver", "owner") else None
+
     async with pool.acquire() as conn:
         # Duplicate check
         if body.phone_number:
@@ -1054,6 +1068,10 @@ async def register(body: RegisterIn):
             existing = await conn.fetchrow("SELECT id FROM users WHERE email=$1", body.email.strip().lower())
             if existing:
                 raise HTTPException(status_code=400, detail="Email already registered")
+        if assoc_id:
+            assoc = await conn.fetchrow("SELECT id FROM taxi_associations WHERE id=$1 AND is_active=TRUE", assoc_id)
+            if not assoc:
+                raise HTTPException(status_code=404, detail="Taxi association not found")
 
         user_id = str(uuid.uuid4())
         email_stored = body.email.strip().lower() if body.email else None
@@ -1067,10 +1085,10 @@ async def register(body: RegisterIn):
 
         async with conn.transaction():
             await conn.execute(
-                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash,password_hash,province) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash,password_hash,province,taxi_association_id) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
                 user_id, phone_stored, body.full_name, body.surname,
-                body.id_number, email_stored, body.role, pin_hash_val, pw_hash, body.province
+                body.id_number, email_stored, body.role, pin_hash_val, pw_hash, body.province, assoc_id
             )
             await conn.execute("INSERT INTO wallets (id,user_id) VALUES ($1,$2)", str(uuid.uuid4()), user_id)
             if body.role == "driver":
@@ -1111,6 +1129,7 @@ async def register(body: RegisterIn):
             "email": email_stored,
             "role": body.role,
             "province": body.province,
+            "taxi_association_id": assoc_id,
         }
     }
 
