@@ -135,6 +135,7 @@ export type Owner = {
   driver_count: number;
   total_cashup: number;
   province?: string | null;
+  taxi_association_id?: string | null;
   created_at: string;
 };
 
@@ -872,6 +873,8 @@ export const api = {
     client.delete<{ ok: boolean }>(`/api/admin/taxi-associations/${id}`),
   associationDrivers: (id: string) =>
     client.get<any[]>(`/api/admin/taxi-associations/${id}/drivers`),
+  associationOwners: (id: string) =>
+    client.get<any[]>(`/api/admin/taxi-associations/${id}/owners`),
   associationRevenue: (id: string, months?: number) =>
     client.get<{ monthly: any[]; totals: any }>(`/api/admin/taxi-associations/${id}/revenue`, {
       params: months ? { months } : {},
@@ -1073,6 +1076,7 @@ export type TaxiAssociation = {
   is_active: boolean;
   notes: string | null;
   driver_count: number;
+  owner_count: number;
   created_at: string;
   updated_at: string;
 };

@@ -29,7 +29,7 @@ const AGREEMENT_LABELS: Record<string, string> = {
   percentage: "% of Revenue",
 };
 
-type Tab = "overview" | "drivers" | "revenue" | "payouts";
+type Tab = "overview" | "drivers" | "owners" | "revenue" | "payouts";
 
 export default function TaxiAssociationsPage() {
   const router = useRouter();
@@ -41,6 +41,7 @@ export default function TaxiAssociationsPage() {
 
   // Detail data
   const [drivers, setDrivers] = useState<any[]>([]);
+  const [owners, setOwners] = useState<any[]>([]);
   const [revenue, setRevenue] = useState<{ monthly: any[]; totals: any } | null>(null);
   const [payouts, setPayouts] = useState<AssociationPayout[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -101,6 +102,9 @@ export default function TaxiAssociationsPage() {
       if (activeTab === "drivers") {
         const r = await api.associationDrivers(assoc.id);
         setDrivers(r.data);
+      } else if (activeTab === "owners") {
+        const r = await api.associationOwners(assoc.id);
+        setOwners(r.data);
       } else if (activeTab === "revenue") {
         const r = await api.associationRevenue(assoc.id, 12);
         setRevenue(r.data);
@@ -116,6 +120,7 @@ export default function TaxiAssociationsPage() {
     setSelected(assoc);
     setTab("overview");
     setDrivers([]);
+    setOwners([]);
     setRevenue(null);
     setPayouts([]);
   };
@@ -457,6 +462,10 @@ export default function TaxiAssociationsPage() {
                       <Users size={11} className="text-yellow" />
                       <span className="font-semibold text-text">{assoc.driver_count || 0}</span>
                     </div>
+                    <div className="flex items-center gap-1 text-xs text-textMuted">
+                      <Building2 size={11} className="text-purple" />
+                      <span className="font-semibold text-text">{assoc.owner_count || 0}</span>
+                    </div>
                     {assoc.auto_pay_enabled ? (
                       <div className="flex items-center gap-1 text-xs text-green font-semibold">
                         <Zap size={10} fill="currentColor" />
@@ -545,6 +554,7 @@ export default function TaxiAssociationsPage() {
                     <div>
                       <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Drivers</p>
                       <p className="text-2xl font-extrabold text-yellow">{selected.driver_count || 0}</p>
+                      <p className="text-textDim text-[10px] mt-0.5">{selected.owner_count || 0} owner{selected.owner_count === 1 ? "" : "s"} linked</p>
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-1">Agreement</p>
@@ -569,7 +579,7 @@ export default function TaxiAssociationsPage() {
 
                 {/* Tabs */}
                 <div className="flex gap-1 bg-bg2 border border-border rounded-xl p-1">
-                  {(["overview","drivers","revenue","payouts"] as Tab[]).map(t => (
+                  {(["overview","drivers","owners","revenue","payouts"] as Tab[]).map(t => (
                     <button key={t} onClick={() => switchTab(t)}
                       className={`flex-1 py-2 rounded-lg text-xs font-bold capitalize transition-all ${
                         tab === t ? "bg-cyan text-bg" : "text-textMuted hover:text-text"
@@ -730,6 +740,47 @@ export default function TaxiAssociationsPage() {
                                 <Badge
                                   label={d.is_active ? "Active" : "Inactive"}
                                   tone={d.is_active ? "green" : "muted"}
+                                />
+                              </Td>
+                            </Tr>
+                          ))}
+                        </Table>
+                      )
+                    )}
+                  </Card>
+                )}
+
+                {tab === "owners" && (
+                  <Card>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-text font-bold">
+                        Fleet Owners ({owners.length || selected.owner_count || 0})
+                      </h3>
+                      <Button variant="secondary" onClick={() => loadDetail(selected, "owners")}>
+                        <RefreshCw size={12} /> Refresh
+                      </Button>
+                    </div>
+                    {detailLoading ? <Spinner /> : (
+                      owners.length === 0 ? (
+                        <div className="text-center py-10">
+                          <Building2 size={32} className="text-textDim mx-auto mb-3" />
+                          <p className="text-textMuted text-sm">No fleet owners linked to this association yet.</p>
+                          <p className="text-textDim text-xs mt-1">Link an owner from their profile page in Fleet Owners.</p>
+                        </div>
+                      ) : (
+                        <Table
+                          headers={["Owner", "Business", "Phone", "Fleet Size", "Status"]}
+                          empty={false}>
+                          {owners.map((o: any) => (
+                            <Tr key={o.id}>
+                              <Td className="font-semibold text-text">{o.full_name}</Td>
+                              <Td className="text-textMuted">{o.business_name || "—"}</Td>
+                              <Td className="font-mono text-textMuted text-xs">{o.phone_number}</Td>
+                              <Td className="text-cyan font-bold">{o.fleet_size}</Td>
+                              <Td>
+                                <Badge
+                                  label={o.is_active ? "Active" : "Inactive"}
+                                  tone={o.is_active ? "green" : "muted"}
                                 />
                               </Td>
                             </Tr>

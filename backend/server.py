@@ -1300,8 +1300,8 @@ async def driver_update_association(
     body: dict,
     user: dict = Depends(get_current_user),
 ):
-    if user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Driver only")
+    if user["role"] not in ("driver", "owner"):
+        raise HTTPException(status_code=403, detail="Driver or owner only")
     assoc_id = body.get("association_id") or None
     async with pool.acquire() as conn:
         if assoc_id:
@@ -1959,7 +1959,7 @@ async def admin_verify_driver(user_id: str, request: Request, admin: dict = Depe
 async def admin_owners(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT u.id as user_id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.province, u.created_at,
+            SELECT u.id as user_id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.province, u.taxi_association_id, u.created_at,
                    fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
                    d.qr_code,
                    w.balance,
@@ -1972,7 +1972,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
             LEFT JOIN owner_drivers od ON od.owner_id = fo.id
             LEFT JOIN cashup_records cr ON cr.owner_user_id = u.id
             WHERE u.role = 'owner'
-            GROUP BY u.id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.province, u.created_at,
+            GROUP BY u.id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.province, u.taxi_association_id, u.created_at,
                      fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
                      d.qr_code, w.balance
             ORDER BY u.created_at DESC
@@ -1982,6 +1982,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
         "full_name": r["full_name"],
         "phone_number": r["phone_number"],
         "province": r["province"],
+        "taxi_association_id": r["taxi_association_id"],
         "business_name": r["business_name"],
         "bank_name": r["bank_name"],
         "account_number": r["account_number"],
@@ -1997,7 +1998,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
 async def admin_owner_detail(owner_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         owner = await conn.fetchrow("""
-            SELECT u.id as user_id, u.full_name, u.phone_number, u.province, u.created_at,
+            SELECT u.id as user_id, u.full_name, u.phone_number, u.province, u.taxi_association_id, u.created_at,
                    fo.business_name, fo.bank_name, fo.account_number, fo.account_name, fo.cashup_method,
                    d.qr_code,
                    w.balance
@@ -2036,6 +2037,8 @@ async def admin_owner_detail(owner_id: str, admin: dict = Depends(require_admin)
             "user_id": owner["user_id"],
             "full_name": owner["full_name"],
             "phone_number": owner["phone_number"],
+            "province": owner["province"],
+            "taxi_association_id": owner["taxi_association_id"],
             "business_name": owner["business_name"],
             "bank_name": owner["bank_name"],
             "account_number": owner["account_number"],
@@ -16066,7 +16069,8 @@ async def list_taxi_associations(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT ta.*,
-                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'driver' AND u.is_active = TRUE) AS driver_count
+                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'driver' AND u.is_active = TRUE) AS driver_count,
+                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'owner' AND u.is_active = TRUE) AS owner_count
             FROM taxi_associations ta
             LEFT JOIN users u ON u.taxi_association_id = ta.id
             GROUP BY ta.id
@@ -16098,7 +16102,8 @@ async def get_taxi_association(assoc_id: str, admin: dict = Depends(require_admi
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT ta.*,
-                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'driver' AND u.is_active = TRUE) AS driver_count
+                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'driver' AND u.is_active = TRUE) AS driver_count,
+                COUNT(DISTINCT u.id) FILTER (WHERE u.role = 'owner' AND u.is_active = TRUE) AS owner_count
             FROM taxi_associations ta
             LEFT JOIN users u ON u.taxi_association_id = ta.id
             WHERE ta.id = $1
@@ -16149,6 +16154,22 @@ async def get_association_drivers(assoc_id: str, admin: dict = Depends(require_a
             LEFT JOIN transactions t ON t.receiver_id = u.id
             WHERE u.taxi_association_id = $1 AND u.role = 'driver'
             GROUP BY u.id, u.full_name, u.phone_number, u.is_active, u.created_at
+            ORDER BY u.full_name
+        """, assoc_id)
+        return [dict(r) for r in rows]
+
+@api.get("/admin/taxi-associations/{assoc_id}/owners")
+async def get_association_owners(assoc_id: str, admin: dict = Depends(require_admin)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.id, u.full_name, u.phone_number, u.email, u.is_active, u.created_at,
+                fo.business_name,
+                COUNT(DISTINCT od.driver_user_id) AS fleet_size
+            FROM users u
+            JOIN fleet_owners fo ON fo.user_id = u.id
+            LEFT JOIN owner_drivers od ON od.owner_id = fo.id
+            WHERE u.taxi_association_id = $1 AND u.role = 'owner'
+            GROUP BY u.id, u.full_name, u.phone_number, u.email, u.is_active, u.created_at, fo.business_name
             ORDER BY u.full_name
         """, assoc_id)
         return [dict(r) for r in rows]
