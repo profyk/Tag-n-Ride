@@ -8,10 +8,10 @@ import { Link, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { Field, Button, CountryChip, PoweredBy } from "../../src/ui";
+import { Field, Button, CountryChip, PoweredBy, SelectField, ListPickerModal } from "../../src/ui";
 import { colors, radius } from "../../src/theme";
 import { useAuth } from "../../src/AuthContext";
-import { api } from "../../src/api";
+import { api, SA_PROVINCES } from "../../src/api";
 
 type Role = "passenger" | "driver" | "owner";
 type Step = "form" | "kyc";
@@ -347,6 +347,8 @@ export default function Register() {
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
   const [plate, setPlate] = useState("");
+  const [province, setProvince] = useState("");
+  const [provinceModal, setProvinceModal] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -371,6 +373,7 @@ export default function Register() {
     if (localDigits.length < 9) { setErr("Enter a valid SA phone number (9 digits)"); return false; }
     if (pin.length !== 4) { setErr("PIN must be 4 digits"); return false; }
     if (pin !== pin2) { setErr("PINs don't match"); return false; }
+    if (!province) { setErr("Select your province"); return false; }
     if (role === "driver" && plate.trim().length < 2) { setErr("Enter your vehicle plate number"); return false; }
     if (email.trim() && !/\S+@\S+\.\S+/.test(email.trim())) { setErr("Enter a valid email address"); return false; }
     if (!tcAccepted) { setErr("You must accept the Terms of Service and Privacy Policy to continue"); return false; }
@@ -445,6 +448,7 @@ export default function Register() {
         vehicle_plate: role === "driver" ? plate.trim().toUpperCase() : undefined,
         id_number: idNumber.trim() || undefined,
         email: email.trim() || undefined,
+        province,
       });
       router.replace("/(app)");
     } catch (e: any) {
@@ -470,6 +474,7 @@ export default function Register() {
         vehicle_plate: plate.trim().toUpperCase(),
         id_number: idNumber.trim() || undefined,
         email: email.trim() || undefined,
+        province,
       });
       try {
         await api.submitKyc(selfie.base64, licence.base64);
@@ -770,6 +775,13 @@ export default function Register() {
                 testID="register-phone-input"
                 leftAddon={<CountryChip testID="register-country-chip" />}
               />
+              <SelectField
+                label="Province"
+                value={province}
+                placeholder="Select your province"
+                onPress={() => setProvinceModal(true)}
+                testID="register-province-select"
+              />
               {role === "driver" && (
                 <Field
                   label="Vehicle plate number"
@@ -840,6 +852,15 @@ export default function Register() {
                   onClose={() => setTcModal(null)}
                 />
               )}
+              <ListPickerModal
+                visible={provinceModal}
+                title="Select Province"
+                subtitle="Where are you based? Used to improve service in your area."
+                options={SA_PROVINCES}
+                selected={province}
+                onSelect={(p) => { setProvince(p); setProvinceModal(false); }}
+                onClose={() => setProvinceModal(false)}
+              />
               <View style={{ height: 12 }} />
 
               <Button

@@ -10,6 +10,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { radius } from "../../src/theme";
+import { ListPickerModal } from "../../src/ui";
+import { SA_PROVINCES } from "../../src/api";
 
 // ── Step bar ──────────────────────────────────────────────────
 function StepBar({ step, total, colors }: { step: number; total: number; colors: any }) {
@@ -84,6 +86,8 @@ export default function OwnerRegister() {
   const [email, setEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [businessName, setBusinessName] = useState("");
+  const [province, setProvince] = useState("");
+  const [provinceModal, setProvinceModal] = useState(false);
 
   // Step 2 — Credentials
   const [password, setPassword] = useState("");
@@ -117,6 +121,7 @@ export default function OwnerRegister() {
     if (idNumber.trim() && idNumber.trim().length < 5) {
       Alert.alert("Invalid", "ID / passport number must be at least 5 characters."); return;
     }
+    if (!province) { Alert.alert("Required", "Please select your province."); return; }
     setStep(2);
   };
 
@@ -163,6 +168,7 @@ export default function OwnerRegister() {
         phone_number: phoneNumber.trim() || undefined,
         business_name: businessName.trim() || undefined,
         id_number: idNumber.trim() || undefined,
+        province,
       });
       router.replace("/owner/dashboard");
     } catch (e: any) {
@@ -233,6 +239,14 @@ export default function OwnerRegister() {
               <Text style={s.label}>ID / PASSPORT NUMBER <Text style={{ color: colors.textDim }}>— optional</Text></Text>
               <TextInput style={s.input} value={idNumber} onChangeText={setIdNumber}
                 placeholder="8001015009087" placeholderTextColor={colors.textDim} autoCapitalize="characters" />
+
+              <Text style={s.label}>PROVINCE</Text>
+              <TouchableOpacity style={[s.input, s.selectRow]} onPress={() => setProvinceModal(true)}>
+                <Text style={{ color: province ? colors.text : colors.textDim, fontSize: 15 }}>
+                  {province || "Select your province"}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
 
               <TouchableOpacity style={s.primaryBtn} onPress={submitStep1}>
                 <Text style={s.primaryBtnText}>Continue</Text>
@@ -350,6 +364,16 @@ export default function OwnerRegister() {
 
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <ListPickerModal
+        visible={provinceModal}
+        title="Select Province"
+        subtitle="Where is your fleet based? Used to improve service in your area."
+        options={SA_PROVINCES}
+        selected={province}
+        onSelect={(p) => { setProvince(p); setProvinceModal(false); }}
+        onClose={() => setProvinceModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -363,6 +387,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
   stepSub: { color: colors.textMuted, fontSize: 15, lineHeight: 22, marginBottom: 28 },
   label: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8 },
   input: { backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 15, marginBottom: 16 },
+  selectRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   passwordRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
   eyeBtn: { width: 48, height: 50, backgroundColor: colors.bg2, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   primaryBtn: { backgroundColor: colors.cyan, borderRadius: radius.md, paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 },

@@ -6,14 +6,14 @@ import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
-import { api } from "../../src/api";
+import { api, SA_PROVINCES } from "../../src/api";
 import { formatZAR, radius } from "../../src/theme";
-import { Button } from "../../src/ui";
+import { Button, ListPickerModal } from "../../src/ui";
 
 const BANKS = ["Capitec", "FNB", "Absa", "Nedbank", "Standard Bank", "TymeBank", "African Bank", "Investec", "Other"];
 
 export default function OwnerProfile() {
-  const { state, signOut } = useAuth();
+  const { state, signOut, refresh } = useAuth();
   const router = useRouter();
   const navigation = useNavigation();
   const { colors } = useTheme();
@@ -62,6 +62,9 @@ export default function OwnerProfile() {
   const [confirmPin, setConfirmPin] = useState("");
   const [changingPin, setChangingPin] = useState(false);
 
+  const [provinceModal, setProvinceModal] = useState(false);
+  const [savingProvince, setSavingProvince] = useState(false);
+
   // Dead man code
   const [deadManCodeSet, setDeadManCodeSet] = useState(false);
   const [deadManModal, setDeadManModal] = useState(false);
@@ -103,6 +106,19 @@ export default function OwnerProfile() {
 
   if (state.status !== "authed") return null;
   const user = state.user;
+
+  const saveProvince = async (p: string) => {
+    setProvinceModal(false);
+    setSavingProvince(true);
+    try {
+      await api.updateProvince(p);
+      await refresh();
+    } catch (e: any) {
+      Alert.alert("Could not save", e?.message || "");
+    } finally {
+      setSavingProvince(false);
+    }
+  };
 
   const fetchPayOutFee = useCallback(async (amountStr: string) => {
     const amount = parseFloat(amountStr);
@@ -438,6 +454,20 @@ export default function OwnerProfile() {
             <Text style={styles.menuSub}>Update your 4-digit in-app PIN</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        {/* Province */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => setProvinceModal(true)}>
+          <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
+            <Ionicons name="location-outline" size={20} color={colors.cyan} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>My Province</Text>
+            <Text style={styles.menuSub}>{user.province || "Not set — tap to select"}</Text>
+          </View>
+          {savingProvince
+            ? <ActivityIndicator color={colors.cyan} size="small" />
+            : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
         </TouchableOpacity>
 
         {/* Driver Mode */}
@@ -826,6 +856,16 @@ export default function OwnerProfile() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ListPickerModal
+        visible={provinceModal}
+        title="My Province"
+        subtitle="Where is your fleet based? Used to improve service in your area."
+        options={SA_PROVINCES}
+        selected={user.province || ""}
+        onSelect={saveProvince}
+        onClose={() => setProvinceModal(false)}
+      />
     </SafeAreaView>
   );
 }

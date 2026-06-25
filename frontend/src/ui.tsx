@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, TextInput, TouchableOpacity, View, StyleSheet, ActivityIndicator, ViewStyle, TextStyle } from "react-native";
+import { Text, TextInput, TouchableOpacity, View, StyleSheet, ActivityIndicator, ViewStyle, TextStyle, Modal, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, radius, space } from "./theme";
 
@@ -106,6 +106,25 @@ export const Field: React.FC<FieldProps> = ({ label, value, onChangeText, placeh
   );
 };
 
+type SelectFieldProps = {
+  label?: string;
+  value: string;
+  placeholder?: string;
+  onPress: () => void;
+  testID?: string;
+  style?: ViewStyle;
+};
+
+export const SelectField: React.FC<SelectFieldProps> = ({ label, value, placeholder, onPress, testID, style }) => (
+  <View style={[{ marginBottom: space.md }, style]}>
+    {label ? <Text style={styles.label}>{label}</Text> : null}
+    <TouchableOpacity testID={testID} onPress={onPress} activeOpacity={0.8} style={[styles.input, styles.selectInput]}>
+      <Text style={value ? styles.selectValue : styles.selectPlaceholder}>{value || placeholder}</Text>
+      <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+    </TouchableOpacity>
+  </View>
+);
+
 export const CountryChip: React.FC<{ testID?: string }> = ({ testID }) => (
   <View testID={testID} style={styles.country}>
     <Text style={styles.countryFlag}>🇿🇦</Text>
@@ -146,6 +165,62 @@ export const ScreenHeader: React.FC<{ title: string; subtitle?: string; right?: 
   </View>
 );
 
+// react-native-web's Alert.alert() is a no-op stub — modal-based pickers
+// like this one work everywhere (web + native).
+export const ListPickerModal: React.FC<{
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  options: readonly string[];
+  selected: string;
+  onSelect: (value: string) => void;
+  onClose: () => void;
+}> = ({ visible, title, subtitle, options, selected, onSelect, onClose }) => (
+  <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <View style={pickerStyles.overlay}>
+      <View style={pickerStyles.sheet}>
+        <View style={pickerStyles.handle} />
+        <Text style={pickerStyles.title}>{title}</Text>
+        {subtitle ? <Text style={pickerStyles.subtitle}>{subtitle}</Text> : null}
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {options.map((opt) => (
+            <TouchableOpacity
+              key={opt}
+              onPress={() => onSelect(opt)}
+              style={[pickerStyles.option, selected === opt && pickerStyles.optionActive]}>
+              <Text style={[pickerStyles.optionText, selected === opt && pickerStyles.optionTextActive]}>{opt}</Text>
+              {selected === opt && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+        <TouchableOpacity onPress={onClose} style={pickerStyles.cancelBtn}>
+          <Text style={pickerStyles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+);
+
+const pickerStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.bg2, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28, maxHeight: "75%",
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 16 },
+  title: { color: colors.text, fontSize: 18, fontWeight: "800", marginBottom: 4 },
+  subtitle: { color: colors.textMuted, fontSize: 13, marginBottom: 14 },
+  option: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  optionActive: {},
+  optionText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  optionTextActive: { color: colors.cyan, fontWeight: "800" },
+  cancelBtn: { alignItems: "center", paddingVertical: 14, marginTop: 4 },
+  cancelText: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
+});
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.bg2,
@@ -179,6 +254,9 @@ const styles = StyleSheet.create({
   },
   inputWithAddon: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeftWidth: 0 },
   inputWithRight: { paddingRight: 44 },
+  selectInput: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  selectValue: { color: colors.text, fontSize: 16 },
+  selectPlaceholder: { color: colors.textDim, fontSize: 16 },
   eyeBtn: { position: "absolute", right: 0, top: 0, bottom: 0, width: 44, alignItems: "center", justifyContent: "center" },
   country: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, backgroundColor: colors.bg2, borderTopLeftRadius: radius.sm + 4, borderBottomLeftRadius: radius.sm + 4, borderWidth: 1, borderColor: colors.borderStrong, gap: 6 },
   countryFlag: { fontSize: 18 },

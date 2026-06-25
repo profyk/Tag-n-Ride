@@ -9,7 +9,7 @@ type AuthState =
 type Ctx = {
   state: AuthState;
   signIn: (phone_number: string, pin: string) => Promise<User>;
-  signUp: (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string; business_name?: string; driver_mode?: boolean }) => Promise<User>;
+  signUp: (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string; business_name?: string; driver_mode?: boolean; province: string }) => Promise<User>;
   signInOwner: (email: string, password: string) => Promise<User>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -52,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = useCallback(
-    async (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string; business_name?: string; driver_mode?: boolean }) => {
+    async (body: { phone_number?: string; full_name: string; surname: string; pin: string; role: "passenger" | "driver" | "owner"; vehicle_plate?: string; id_number?: string; email?: string; password?: string; business_name?: string; driver_mode?: boolean; province: string }) => {
       const r = await api.register(body);
       await tokenStore.set(r.token);
       setState({ status: "authed", user: r.user });

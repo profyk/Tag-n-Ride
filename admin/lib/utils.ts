@@ -1,3 +1,8 @@
+export const SA_PROVINCES = [
+  "Gauteng", "Western Cape", "KwaZulu-Natal", "Eastern Cape",
+  "Limpopo", "Mpumalanga", "North West", "Free State", "Northern Cape",
+] as const;
+
 export function formatZAR(amount: number | string | undefined | null): string {
   const v = typeof amount === "string" ? parseFloat(amount) : (amount ?? 0);
   if (!isFinite(v) || isNaN(v)) return "R 0.00";

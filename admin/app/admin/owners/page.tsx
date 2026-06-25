@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Table, Tr, Td, Badge, Button, Spinner, Input } from "@/components/ui";
 import { api, Owner } from "@/lib/api";
-import { formatZAR, formatDate } from "@/lib/utils";
+import { formatZAR, formatDate, SA_PROVINCES } from "@/lib/utils";
 import { ExternalLink, X, Download, Printer, QrCode, ImageOff, RefreshCw, Wallet, Banknote } from "lucide-react";
 import toast from "react-hot-toast";
 import QRCode from "qrcode";
@@ -146,6 +146,7 @@ export default function OwnersPage() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [provinceFilter, setProvinceFilter] = useState("all");
   const [qrOwner, setQrOwner] = useState<Owner | null>(null);
 
   useEffect(() => {
@@ -153,10 +154,11 @@ export default function OwnersPage() {
   }, []);
 
   const filtered = owners.filter(o =>
-    !search ||
-    o.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    o.phone_number.includes(search) ||
-    (o.business_name || "").toLowerCase().includes(search.toLowerCase())
+    (!search ||
+      o.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      o.phone_number.includes(search) ||
+      (o.business_name || "").toLowerCase().includes(search.toLowerCase())) &&
+    (provinceFilter === "all" || (o.province || "Unset") === provinceFilter)
   );
 
   const totalDrivers = owners.reduce((s, o) => s + o.driver_count, 0);
@@ -165,9 +167,9 @@ export default function OwnersPage() {
 
   const exportCsv = () => {
     const rows = [
-      ["Name", "Phone", "Business", "Drivers", "Total Cashup", "Balance", "Cashup Method", "Bank", "Joined"],
+      ["Name", "Phone", "Business", "Province", "Drivers", "Total Cashup", "Balance", "Cashup Method", "Bank", "Joined"],
       ...filtered.map(o => [
-        o.full_name, o.phone_number, o.business_name || "",
+        o.full_name, o.phone_number, o.business_name || "", o.province || "",
         o.driver_count.toString(), formatZAR(o.total_cashup), formatZAR(o.balance),
         o.cashup_method, o.bank_name || "", formatDate(o.created_at),
       ]),
@@ -209,6 +211,12 @@ export default function OwnersPage() {
             />
             {search && <Button variant="ghost" onClick={() => setSearch("")}><X size={13} /></Button>}
           </div>
+          <select value={provinceFilter} onChange={e => setProvinceFilter(e.target.value)}
+            className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-textMuted focus:outline-none focus:border-cyan/50 font-bold">
+            <option value="all">All Provinces</option>
+            {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+            <option value="Unset">Unset</option>
+          </select>
           <Button variant="secondary" onClick={exportCsv} disabled={loading || filtered.length === 0}>
             <Download size={13} /> Export CSV
           </Button>
@@ -220,7 +228,7 @@ export default function OwnersPage() {
 
         {loading ? <Spinner /> : (
           <Table
-            headers={["Owner", "Phone", "Business", "Drivers", "Total Cashup", "Balance", "Cashup Method", "Bank", "Joined", "Actions"]}
+            headers={["Owner", "Phone", "Business", "Province", "Drivers", "Total Cashup", "Balance", "Cashup Method", "Bank", "Joined", "Actions"]}
             empty={!filtered.length}>
             {filtered.map(o => (
               <Tr key={o.user_id}>
@@ -230,6 +238,7 @@ export default function OwnersPage() {
                   ? <span className="text-sm">{o.business_name}</span>
                   : <span className="text-textDim text-xs italic">—</span>}
                 </Td>
+                <Td className="text-xs text-textMuted">{o.province || "—"}</Td>
                 <Td>
                   <span className="font-bold text-purple">{o.driver_count}</span>
                   <span className="text-textMuted text-xs ml-1">driver{o.driver_count !== 1 ? "s" : ""}</span>

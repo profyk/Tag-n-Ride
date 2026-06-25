@@ -11,8 +11,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/AuthContext";
 import { useTheme } from "../../src/ThemeContext";
 import { ThemeToggle } from "../../src/ThemeToggle";
-import { api } from "../../src/api";
-import { Button, PoweredBy } from "../../src/ui";
+import { api, SA_PROVINCES } from "../../src/api";
+import { Button, PoweredBy, ListPickerModal } from "../../src/ui";
 import { radius } from "../../src/theme";
 
 type PayoutAccount = {
@@ -80,6 +80,9 @@ const APP_VERSION = "1.0.0";export default function Profile() {
   const [assocId, setAssocId] = useState<string | null>(null);
   const [assocModal, setAssocModal] = useState(false);
   const [savingAssoc, setSavingAssoc] = useState(false);
+
+  const [provinceModal, setProvinceModal] = useState(false);
+  const [savingProvince, setSavingProvince] = useState(false);
 
   useEffect(() => {
     if (state.status === "authed") {
@@ -160,6 +163,19 @@ const APP_VERSION = "1.0.0";export default function Profile() {
       }
     } finally {
       setSharingLocation(false);
+    }
+  };
+
+  const saveProvince = async (p: string) => {
+    setProvinceModal(false);
+    setSavingProvince(true);
+    try {
+      await api.updateProvince(p);
+      await refresh();
+    } catch (e: any) {
+      Alert.alert("Could not save", e?.message || "");
+    } finally {
+      setSavingProvince(false);
     }
   };
 
@@ -443,6 +459,31 @@ const APP_VERSION = "1.0.0";export default function Profile() {
             )}
           </View>
         )}
+
+        {/* Province */}
+        <Text style={s.section}>PROVINCE</Text>
+        <TouchableOpacity
+          style={[s.payoutRow, {
+            borderColor: u.province ? colors.cyan + "60" : colors.border,
+            borderWidth: u.province ? 1.5 : 1,
+          }]}
+          onPress={() => setProvinceModal(true)}
+          activeOpacity={0.7}
+          testID="province-btn">
+          <View style={[s.payoutIcon, { backgroundColor: u.province ? colors.cyanDim : colors.bg2 }]}>
+            <Ionicons name="location-outline" size={18} color={u.province ? colors.cyan : colors.textMuted} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.payoutLabel}>My Province</Text>
+            {u.province
+              ? <Text style={s.payoutSub}>{u.province}</Text>
+              : <Text style={s.payoutEmpty}>Not set — tap to select</Text>}
+          </View>
+          {savingProvince
+            ? <ActivityIndicator color={colors.cyan} size="small" />
+            : <Ionicons name={u.province ? "checkmark-circle" : "add-circle-outline"} size={20}
+                color={u.province ? colors.cyan : colors.textMuted} />}
+        </TouchableOpacity>
 
         {/* Taxi Association */}
         {isDriver && (
@@ -906,6 +947,17 @@ const APP_VERSION = "1.0.0";export default function Profile() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Province picker */}
+      <ListPickerModal
+        visible={provinceModal}
+        title="My Province"
+        subtitle="Where are you based? Used to improve service in your area."
+        options={SA_PROVINCES}
+        selected={u.province || ""}
+        onSelect={saveProvince}
+        onClose={() => setProvinceModal(false)}
+      />
 
       {/* Taxi association picker */}
       <Modal visible={assocModal} transparent animationType="slide" onRequestClose={() => setAssocModal(false)}>

@@ -99,6 +99,7 @@ export type User = {
   role: string;
   is_active: boolean;
   flagged: boolean;
+  province?: string | null;
   created_at: string;
 };
 
@@ -117,6 +118,7 @@ export type Driver = {
   qr_code: string;
   kyc_status: string;
   taxi_association_id?: string | null;
+  province?: string | null;
   created_at: string;
 };
 
@@ -132,6 +134,7 @@ export type Owner = {
   balance: number;
   driver_count: number;
   total_cashup: number;
+  province?: string | null;
   created_at: string;
 };
 
@@ -672,6 +675,17 @@ export const api = {
       inactive_passengers: { full_name: string; phone_number: string; created_at: string; last_transaction: string | null }[];
       topup_patterns: { week: string; topups: number; total: number }[];
     }>("/api/admin/passengers/analytics"),
+
+  provincesOverview: (period: "7d" | "30d" | "90d" | "all" = "30d") =>
+    client.get<{
+      provinces: {
+        province: string; passengers: number; drivers: number; owners: number;
+        rides: number; gross_revenue: number; platform_fees: number; driver_net: number;
+      }[];
+      signup_trend: Record<string, number | string>[];
+      total_users: number;
+      unset_count: number;
+    }>(`/api/admin/provinces/overview?period=${period}`),
 
   auditLogs: () => client.get<AuditLog[]>("/api/admin/audit-logs"),
 

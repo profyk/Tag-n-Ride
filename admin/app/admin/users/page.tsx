@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Badge, Button, Spinner, Input, Modal } from "@/components/ui";
 import { api, User, hasPermission, isSuperAdmin } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { formatDate, SA_PROVINCES } from "@/lib/utils";
 import {
   Search, Flag, ShieldOff, ShieldCheck, Key, Trash2, Copy,
   Download, X, AlertTriangle, RefreshCw, Users, UserCheck,
@@ -93,7 +93,7 @@ function SkeletonRow() {
           <div className="space-y-1"><div className="h-3 w-28 bg-bg3 rounded" /><div className="h-2 w-16 bg-bg3 rounded" /></div>
         </div>
       </td>
-      {[60, 55, 50, 70, 60, 80].map((w, i) => (
+      {[60, 55, 50, 55, 70, 60, 80].map((w, i) => (
         <td key={i} className="py-3 px-4"><div className="h-3 bg-bg3 rounded" style={{ width: w }} /></td>
       ))}
     </tr>
@@ -295,6 +295,7 @@ function UsersPageInner() {
   const [query,       setQuery]       = useState(initialSearch);
   const [roleTab,     setRoleTab]     = useState(initialRole);
   const [statusTab,   setStatusTab]   = useState("all");
+  const [provinceTab, setProvinceTab] = useState("all");
   const [countdown,   setCountdown]   = useState(60);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBlocking, setBulkBlocking] = useState(false);
@@ -347,8 +348,9 @@ function UsersPageInner() {
     if (statusTab === "active"  && !u.is_active)  return false;
     if (statusTab === "blocked" && u.is_active)   return false;
     if (statusTab === "flagged" && !u.flagged)    return false;
+    if (provinceTab !== "all" && (u.province || "Unset") !== provinceTab) return false;
     return true;
-  }), [users, roleTab, statusTab]);
+  }), [users, roleTab, statusTab, provinceTab]);
 
   const stats = useMemo(() => ({
     total:      users.length,
@@ -374,7 +376,7 @@ function UsersPageInner() {
   const doSearch = () => { setQuery(search); load(search); };
 
   const clearAll = () => {
-    setSearch(""); setQuery(""); setRoleTab("all"); setStatusTab("all");
+    setSearch(""); setQuery(""); setRoleTab("all"); setStatusTab("all"); setProvinceTab("all");
     load("");
   };
 
@@ -534,7 +536,15 @@ function UsersPageInner() {
             />
           </div>
           <Button onClick={doSearch}><Search size={13} /> Search</Button>
-          {(query || roleTab !== "all" || statusTab !== "all") && (
+          <select
+            value={provinceTab}
+            onChange={e => setProvinceTab(e.target.value)}
+            className="px-3 py-2 bg-bg2 border border-border rounded-lg text-xs font-bold text-textMuted focus:outline-none focus:border-cyan/50">
+            <option value="all">All Provinces</option>
+            {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+            <option value="Unset">Unset</option>
+          </select>
+          {(query || roleTab !== "all" || statusTab !== "all" || provinceTab !== "all") && (
             <button onClick={clearAll}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red border border-red/20 rounded-lg hover:bg-red/5 transition-all">
               <X size={12} /> Clear
@@ -596,7 +606,7 @@ function UsersPageInner() {
                     <input type="checkbox" className="w-3.5 h-3.5 accent-cyan"
                       checked={allSelected} onChange={toggleAll} />
                   </th>
-                  {["User", "Phone", "Role", "Status", "Risk", "Joined", ""].map(h => (
+                  {["User", "Phone", "Role", "Province", "Status", "Risk", "Joined", ""].map(h => (
                     <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -607,7 +617,7 @@ function UsersPageInner() {
                   : filtered.length === 0
                   ? (
                     <tr>
-                      <td colSpan={8} className="py-16 text-center text-textMuted text-sm">
+                      <td colSpan={9} className="py-16 text-center text-textMuted text-sm">
                         No users match current filters
                       </td>
                     </tr>
@@ -643,6 +653,9 @@ function UsersPageInner() {
 
                       {/* Role */}
                       <td className="py-3 px-4"><RolePill role={u.role} /></td>
+
+                      {/* Province */}
+                      <td className="py-3 px-4 text-textMuted text-[11px]">{u.province || "—"}</td>
 
                       {/* Status */}
                       <td className="py-3 px-4">

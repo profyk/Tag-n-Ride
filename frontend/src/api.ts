@@ -63,6 +63,7 @@ export const api = {
     email?: string;
     password?: string;
     driver_mode?: boolean;
+    province: string;
   }) =>
     request<{ token: string; user: User }>("/api/auth/register", {
       method: "POST",
@@ -110,6 +111,15 @@ export const api = {
     request<{ ok: boolean }>("/api/driver/association", {
       method: "PATCH",
       body: JSON.stringify({ association_id }),
+    }),
+
+  getProvinces: () =>
+    request<{ provinces: string[] }>("/api/profile/provinces"),
+
+  updateProvince: (province: string) =>
+    request<{ ok: boolean; province: string }>("/api/profile/province", {
+      method: "PATCH",
+      body: JSON.stringify({ province }),
     }),
 
   // ── Wallet ──
@@ -853,7 +863,13 @@ export type User = {
   vehicle_plate?: string;
   is_verified?: boolean;
   driver_mode_active?: boolean;
+  province?: string;
 };
+
+export const SA_PROVINCES = [
+  "Gauteng", "Western Cape", "KwaZulu-Natal", "Eastern Cape",
+  "Limpopo", "Mpumalanga", "North West", "Free State", "Northern Cape",
+] as const;
 
 export type Wallet = {
   balance: number;

@@ -5,11 +5,7 @@ import { Card, Table, Tr, Td, Badge, Button, Modal, Input, StatCard, Spinner } f
 import { MapPin, Plus, ToggleLeft, ToggleRight, Trash2, Edit2, Save, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, CoverageZone } from "@/lib/api";
-
-const SA_PROVINCES = [
-  "Gauteng", "Western Cape", "KwaZulu-Natal", "Eastern Cape",
-  "Limpopo", "Mpumalanga", "North West", "Free State", "Northern Cape",
-];
+import { SA_PROVINCES } from "@/lib/utils";
 
 const emptyForm = () => ({ name: "", city: "", province: "", lat: "", lng: "", radius_km: "" });
 

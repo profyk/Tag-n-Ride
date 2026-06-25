@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Button, Input, Modal } from "@/components/ui";
 import { api, Driver } from "@/lib/api";
-import { formatZAR, formatDate } from "@/lib/utils";
+import { formatZAR, formatDate, SA_PROVINCES } from "@/lib/utils";
 import {
   ExternalLink, CheckCircle, Star, X, Download, Printer,
   QrCode, ImageOff, RefreshCw, FileText, AlertTriangle,
@@ -105,14 +105,14 @@ function EarningsBar({ amount, max }: { amount: number; max: number }) {
 function SkeletonRow() {
   return (
     <tr className="border-b border-border animate-pulse">
-      {[0, 1, 2, 3, 4, 5, 6, 7].map(i => (
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => (
         <td key={i} className="py-3 px-4">
           {i === 0 ? (
             <div className="flex items-center gap-2">
               <div className="w-9 h-9 rounded-full bg-bg3" />
               <div className="space-y-1"><div className="h-3 w-28 bg-bg3 rounded" /><div className="h-2 w-20 bg-bg3 rounded" /></div>
             </div>
-          ) : <div className="h-3 bg-bg3 rounded" style={{ width: [60, 55, 50, 70, 60, 70, 80][i - 1] }} />}
+          ) : <div className="h-3 bg-bg3 rounded" style={{ width: [60, 55, 50, 70, 60, 70, 80, 40][i - 1] }} />}
         </td>
       ))}
     </tr>
@@ -434,6 +434,7 @@ export default function DriversPage() {
   const [search,    setSearch]    = useState("");
   const [verFilter, setVerFilter] = useState<"all" | "pending" | "verified">("all");
   const [kycFilter, setKycFilter] = useState<"all" | "approved" | "pending" | "rejected" | "none">("all");
+  const [provinceFilter, setProvinceFilter] = useState("all");
   const [sortBy,    setSortBy]    = useState<"default" | "earnings" | "rating" | "newest">("default");
   const [countdown, setCountdown] = useState(60);
 
@@ -505,19 +506,20 @@ export default function DriversPage() {
       d.phone_number.includes(search) ||
       (d.vehicle_plate || "").toLowerCase().includes(search.toLowerCase())
     )
+    .filter(d => provinceFilter === "all" || (d.province || "Unset") === provinceFilter)
     .sort((a, b) => {
       if (sortBy === "earnings") return b.total_earnings - a.total_earnings;
       if (sortBy === "rating")   return (b.rating_avg || 0) - (a.rating_avg || 0);
       if (sortBy === "newest")   return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
       return 0;
     }),
-  [drivers, verFilter, kycFilter, search, sortBy]);
+  [drivers, verFilter, kycFilter, search, sortBy, provinceFilter]);
 
   const exportCsv = () => {
     const rows = [
-      ["Name", "Phone", "Plate", "Earnings", "Rating", "Reviews", "KYC", "Status", "Joined"],
+      ["Name", "Phone", "Plate", "Province", "Earnings", "Rating", "Reviews", "KYC", "Status", "Joined"],
       ...filtered.map(d => [
-        d.full_name, d.phone_number, d.vehicle_plate || "",
+        d.full_name, d.phone_number, d.vehicle_plate || "", d.province || "",
         formatZAR(d.total_earnings),
         d.rating_count > 0 ? d.rating_avg.toFixed(1) : "—",
         d.rating_count.toString(), d.kyc_status || "none",
@@ -533,7 +535,7 @@ export default function DriversPage() {
     toast.success(`Exported ${filtered.length} drivers`);
   };
 
-  const hasFilters = verFilter !== "all" || kycFilter !== "all" || !!search || sortBy !== "default";
+  const hasFilters = verFilter !== "all" || kycFilter !== "all" || !!search || sortBy !== "default" || provinceFilter !== "all";
 
   return (
     <AdminShell title="Driver Management">
@@ -614,8 +616,14 @@ export default function DriversPage() {
               <option value="rating">Sort: Best Rated</option>
               <option value="newest">Sort: Newest</option>
             </select>
+            <select value={provinceFilter} onChange={e => setProvinceFilter(e.target.value)}
+              className="bg-bg2 border border-border rounded-lg px-3 py-2 text-xs text-textMuted focus:outline-none focus:border-cyan/50 font-bold">
+              <option value="all">All Provinces</option>
+              {SA_PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+              <option value="Unset">Unset</option>
+            </select>
             {hasFilters && (
-              <button onClick={() => { setVerFilter("all"); setKycFilter("all"); setSearch(""); setSortBy("default"); }}
+              <button onClick={() => { setVerFilter("all"); setKycFilter("all"); setSearch(""); setSortBy("default"); setProvinceFilter("all"); }}
                 className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-red border border-red/20 rounded-lg hover:bg-red/5 transition-all">
                 <X size={12} /> Clear
               </button>
@@ -668,7 +676,7 @@ export default function DriversPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-bg3">
-                  {["Driver", "Plate", "Verification", "KYC", "Earnings", "Rating", "Joined", ""].map(h => (
+                  {["Driver", "Plate", "Province", "Verification", "KYC", "Earnings", "Rating", "Joined", ""].map(h => (
                     <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -678,7 +686,7 @@ export default function DriversPage() {
                   ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
                   : filtered.length === 0
                   ? (
-                    <tr><td colSpan={8} className="py-16 text-center text-textMuted text-sm">No drivers match current filters</td></tr>
+                    <tr><td colSpan={9} className="py-16 text-center text-textMuted text-sm">No drivers match current filters</td></tr>
                   )
                   : filtered.map((d, idx) => {
                       const isTop3 = sortBy === "earnings" && idx < 3;
@@ -710,6 +718,9 @@ export default function DriversPage() {
                               ? <span className="font-mono text-xs bg-yellow/10 text-yellow px-2 py-0.5 rounded border border-yellow/20 font-bold">{d.vehicle_plate}</span>
                               : <span className="text-textDim text-[10px] italic">No plate</span>}
                           </td>
+
+                          {/* Province */}
+                          <td className="py-3 px-4 text-textMuted text-[11px]">{d.province || "—"}</td>
 
                           {/* Verification */}
                           <td className="py-3 px-4">

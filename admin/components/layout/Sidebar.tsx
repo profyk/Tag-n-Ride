@@ -16,7 +16,7 @@ import {
   ChevronDown, ChevronRight, Search, X, Mail,
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
   Landmark, ClipboardList, Download, Zap,
-  FileWarning, MinusCircle, Building2,
+  FileWarning, MinusCircle, Building2, Map,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -125,6 +125,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Overview",        href: "/admin/analytics",      icon: BarChart3, permission: "view_analytics" },
       { label: "Data Analytics",  href: "/admin/data-analytics", icon: Cpu,       permission: "view_analytics" },
       { label: "Growth",          href: "/admin/growth",         icon: Rocket,    permission: "view_analytics" },
+      { label: "Provinces",       href: "/admin/provinces",      icon: Map,       permission: "view_analytics" },
       { label: "Routes & Trips",  href: "/admin/routes",         icon: MapPin,    permission: "view_analytics" },
       { label: "Intelligence",    href: "/admin/intelligence",   icon: Brain,     permission: null, superadminOnly: true },
     ],

@@ -17,9 +17,10 @@ import secrets
 import hashlib
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta, date as date_type
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 import asyncio
 import asyncpg
@@ -86,6 +87,11 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("tagnride")
 
 ADMIN_ROLES = ("superadmin", "ceo", "cto", "cfo", "admin", "finance", "support", "hr")
+
+SA_PROVINCES = (
+    "Gauteng", "Western Cape", "KwaZulu-Natal", "Eastern Cape",
+    "Limpopo", "Mpumalanga", "North West", "Free State", "Northern Cape",
+)
 
 ROLE_PERMISSIONS = {
     "superadmin": [
@@ -381,7 +387,13 @@ async def lifespan(app: FastAPI):
         async def _init_conn(conn):
             await conn.set_type_codec("jsonb", encoder=_json_codec.dumps, decoder=_json_codec.loads, schema="pg_catalog")
             await conn.set_type_codec("json",  encoder=_json_codec.dumps, decoder=_json_codec.loads, schema="pg_catalog")
-        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, init=_init_conn)
+        # max_size=5 was the original setting — far too small for production concurrency; any
+        # burst past 5 simultaneous DB-bound requests queued behind it, which is the single
+        # biggest cause of the app feeling "frozen" under real multi-user load. command_timeout
+        # caps how long one runaway/slow query can hold a connection out of the pool.
+        pool = await asyncpg.create_pool(
+            DATABASE_URL, min_size=2, max_size=20, command_timeout=30, init=_init_conn
+        )
         async with pool.acquire() as conn:
             await conn.execute(CREATE_TABLES_SQL)
         print("DB pool created, tables ready")
@@ -551,12 +563,40 @@ async def health():
     return {"status": "ok", "db": pool is not None}
 
 # ── Helpers ──────────────────────────────────────────────────
-def hash_pin(pin: str) -> str:
-    return bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+# bcrypt is deliberately CPU-slow (~200-300ms per call at the default cost factor). Calling it
+# synchronously inside an `async def` route handler blocks the single-threaded event loop for
+# that whole duration — freezing every other concurrent request on the server, not just the
+# caller's. Every bcrypt call in this file goes through these helpers so it runs in a thread
+# pool executor instead.
+_bcrypt_executor = ThreadPoolExecutor(max_workers=8)
 
-def verify_pin(pin: str, hashed: str) -> bool:
+async def hash_pin(pin: str) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _bcrypt_executor, lambda: bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    )
+
+async def verify_pin(pin: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(pin.encode("utf-8"), hashed.encode("utf-8"))
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _bcrypt_executor, lambda: bcrypt.checkpw(pin.encode("utf-8"), hashed.encode("utf-8"))
+        )
+    except Exception:
+        return False
+
+async def hash_password(password: str) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _bcrypt_executor, lambda: bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    )
+
+async def verify_password(password: str, hashed: str) -> bool:
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            _bcrypt_executor, lambda: bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+        )
     except Exception:
         return False
 
@@ -617,7 +657,7 @@ async def get_current_user(request: Request) -> dict:
     th = token_hash_fn(token)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id,phone_number,full_name,role,is_active,email,extra_roles FROM users WHERE id=$1",
+            "SELECT id,phone_number,full_name,role,is_active,email,extra_roles,province FROM users WHERE id=$1",
             payload["sub"]
         )
         session = await conn.fetchrow(
@@ -824,6 +864,15 @@ class RegisterIn(BaseModel):
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     # Whether owner also drives (stored in fleet_owners.registered_as_driver)
     driver_mode: Optional[bool] = None
+    # Where the user is based — used for adoption/sales analytics by region
+    province: str = Field(min_length=2, max_length=30)
+
+    @field_validator("province")
+    @classmethod
+    def validate_province(cls, v):
+        if v not in SA_PROVINCES:
+            raise ValueError(f"Province must be one of: {', '.join(SA_PROVINCES)}")
+        return v
 
     @field_validator("pin")
     @classmethod
@@ -1008,7 +1057,8 @@ async def register(body: RegisterIn):
 
         user_id = str(uuid.uuid4())
         email_stored = body.email.strip().lower() if body.email else None
-        pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode() if body.password else None
+        pw_hash = await hash_password(body.password) if body.password else None
+        pin_hash_val = await hash_pin(body.pin)
         # Owners identify by email, not phone. Use a unique placeholder so the
         # insert works regardless of whether the DROP NOT NULL migration has run.
         phone_stored = body.phone_number if body.phone_number else (
@@ -1017,10 +1067,10 @@ async def register(body: RegisterIn):
 
         async with conn.transaction():
             await conn.execute(
-                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash,password_hash) "
-                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+                "INSERT INTO users (id,phone_number,full_name,surname,id_number,email,role,pin_hash,password_hash,province) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
                 user_id, phone_stored, body.full_name, body.surname,
-                body.id_number, email_stored, body.role, hash_pin(body.pin), pw_hash
+                body.id_number, email_stored, body.role, pin_hash_val, pw_hash, body.province
             )
             await conn.execute("INSERT INTO wallets (id,user_id) VALUES ($1,$2)", str(uuid.uuid4()), user_id)
             if body.role == "driver":
@@ -1060,6 +1110,7 @@ async def register(body: RegisterIn):
             "surname": body.surname,
             "email": email_stored,
             "role": body.role,
+            "province": body.province,
         }
     }
 
@@ -1072,7 +1123,7 @@ async def login(body: LoginIn, request: Request):
             "SELECT id,phone_number,full_name,role,pin_hash,is_active FROM users WHERE phone_number=$1",
             key
         )
-    if not user or not verify_pin(body.pin, user["pin_hash"]):
+    if not user or not await verify_pin(body.pin, user["pin_hash"]):
         _login_limiter.record_failure(key)
         raise HTTPException(status_code=401, detail="Invalid phone number or PIN")
     if not user["is_active"]:
@@ -1106,10 +1157,7 @@ async def owner_login(body: OwnerLoginIn, request: Request):
     if not pw_hash:
         _login_limiter.record_failure(key)
         raise HTTPException(status_code=401, detail="Password not set — contact support to reset your account")
-    try:
-        valid = bcrypt.checkpw(body.password.encode(), pw_hash.encode())
-    except Exception:
-        valid = False
+    valid = await verify_password(body.password, pw_hash)
     if not valid:
         _login_limiter.record_failure(key)
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -1144,8 +1192,8 @@ async def admin_login(body: AdminLoginIn, request: Request):
         if not user["is_active"]:
             await audit(conn, user["id"], "LOGIN_SUSPENDED", ip=ip, success=False)
             raise HTTPException(status_code=403, detail="Account suspended")
-        if not user["password_hash"] or not bcrypt.checkpw(
-            body.password.encode(), user["password_hash"].encode()
+        if not user["password_hash"] or not await verify_password(
+            body.password, user["password_hash"]
         ):
             _admin_login_limiter.record_failure(ip)
             _admin_login_limiter.record_failure(email_key)
@@ -1195,10 +1243,30 @@ async def me(user: dict = Depends(get_current_user)):
 async def change_pin(body: ChangePinIn, user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
-        if not verify_pin(body.current_pin, row["pin_hash"]):
+        if not await verify_pin(body.current_pin, row["pin_hash"]):
             raise HTTPException(status_code=400, detail="Current PIN is incorrect")
-        await conn.execute("UPDATE users SET pin_hash=$1 WHERE id=$2", hash_pin(body.new_pin), user["id"])
+        await conn.execute("UPDATE users SET pin_hash=$1 WHERE id=$2", await hash_pin(body.new_pin), user["id"])
     return {"ok": True}
+
+class ProvinceIn(BaseModel):
+    province: str = Field(min_length=2, max_length=30)
+
+    @field_validator("province")
+    @classmethod
+    def validate_province(cls, v):
+        if v not in SA_PROVINCES:
+            raise ValueError(f"Province must be one of: {', '.join(SA_PROVINCES)}")
+        return v
+
+@api.get("/profile/provinces")
+async def list_provinces():
+    return {"provinces": list(SA_PROVINCES)}
+
+@api.patch("/profile/province")
+async def update_province(body: ProvinceIn, user: dict = Depends(get_current_user)):
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET province=$1 WHERE id=$2", body.province, user["id"])
+    return {"ok": True, "province": body.province}
 
 # ── Driver profile ───────────────────────────────────────────
 @api.patch("/driver/profile")
@@ -1763,7 +1831,7 @@ async def admin_users(search: Optional[str] = None, admin: dict = Depends(requir
     is_super = has_permission(admin, "manage_admins")
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT id,phone_number,full_name,surname,id_number,email,role,is_active,flagged,created_at FROM users
+            """SELECT id,phone_number,full_name,surname,id_number,email,role,is_active,flagged,province,created_at FROM users
                WHERE ($1 OR role NOT IN ('admin','superadmin','finance','support','ceo','cto','cfo','hr'))
                AND ($2::text IS NULL OR phone_number ILIKE $2 OR full_name ILIKE $2 OR surname ILIKE $2)
                ORDER BY created_at DESC""",
@@ -1810,7 +1878,7 @@ async def admin_reset_pin(user_id: str, request: Request, admin: dict = Depends(
         if target["role"] in ADMIN_ROLES:
             raise HTTPException(status_code=403, detail="Cannot reset admin PIN")
         temp_pin = str(random.randint(1000, 9999))
-        await conn.execute("UPDATE users SET pin_hash=$1 WHERE id=$2", hash_pin(temp_pin), user_id)
+        await conn.execute("UPDATE users SET pin_hash=$1 WHERE id=$2", await hash_pin(temp_pin), user_id)
         await audit(conn, admin["id"], "RESET_PIN", user_id, "user", {"name": target["full_name"]}, request.client.host)
     return {"ok": True, "temporary_pin": temp_pin}
 
@@ -1851,13 +1919,13 @@ async def admin_flagged(admin: dict = Depends(require_admin)):
 async def admin_drivers(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT d.*,u.full_name,u.phone_number,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id ORDER BY d.created_at DESC"
+            "SELECT d.*,u.full_name,u.phone_number,u.province,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id ORDER BY d.created_at DESC"
         )
     return [{
         "user_id": r["user_id"], "full_name": r["full_name"], "phone_number": r["phone_number"],
         "vehicle_plate": r["vehicle_plate"], "total_earnings": float(r["total_earnings"]),
         "is_verified": r["is_verified"], "rating_avg": float(r["rating_avg"]),
-        "rating_count": r["rating_count"], "qr_code": r["qr_code"],
+        "rating_count": r["rating_count"], "qr_code": r["qr_code"], "province": r["province"],
         "kyc_status": r["kyc_status"] or "not_submitted", "created_at": iso(r["created_at"])
     } for r in rows]
 
@@ -1865,13 +1933,13 @@ async def admin_drivers(admin: dict = Depends(require_admin)):
 async def admin_driver_detail(user_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT d.*,u.full_name,u.surname,u.id_number,u.email,u.phone_number,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id WHERE d.user_id=$1",
+            "SELECT d.*,u.full_name,u.surname,u.id_number,u.email,u.phone_number,u.province,k.status as kyc_status FROM drivers d JOIN users u ON u.id=d.user_id LEFT JOIN kyc_documents k ON k.user_id=d.user_id WHERE d.user_id=$1",
             user_id
         )
     if not row: raise HTTPException(status_code=404, detail="Driver not found")
     return {"user_id": row["user_id"], "full_name": row["full_name"], "surname": row["surname"],
             "id_number": row["id_number"], "email": row["email"],
-            "phone_number": row["phone_number"],
+            "phone_number": row["phone_number"], "province": row["province"],
             "vehicle_plate": row["vehicle_plate"], "total_earnings": float(row["total_earnings"]),
             "is_verified": row["is_verified"], "rating_avg": float(row["rating_avg"]),
             "rating_count": row["rating_count"], "qr_code": row["qr_code"],
@@ -1891,7 +1959,7 @@ async def admin_verify_driver(user_id: str, request: Request, admin: dict = Depe
 async def admin_owners(admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT u.id as user_id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.created_at,
+            SELECT u.id as user_id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.province, u.created_at,
                    fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
                    d.qr_code,
                    w.balance,
@@ -1904,7 +1972,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
             LEFT JOIN owner_drivers od ON od.owner_id = fo.id
             LEFT JOIN cashup_records cr ON cr.owner_user_id = u.id
             WHERE u.role = 'owner'
-            GROUP BY u.id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.created_at,
+            GROUP BY u.id, u.full_name, u.surname, u.id_number, u.email, u.phone_number, u.province, u.created_at,
                      fo.business_name, fo.bank_name, fo.account_number, fo.cashup_method,
                      d.qr_code, w.balance
             ORDER BY u.created_at DESC
@@ -1913,6 +1981,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
         "user_id": r["user_id"],
         "full_name": r["full_name"],
         "phone_number": r["phone_number"],
+        "province": r["province"],
         "business_name": r["business_name"],
         "bank_name": r["bank_name"],
         "account_number": r["account_number"],
@@ -1928,7 +1997,7 @@ async def admin_owners(admin: dict = Depends(require_admin)):
 async def admin_owner_detail(owner_id: str, admin: dict = Depends(require_admin)):
     async with pool.acquire() as conn:
         owner = await conn.fetchrow("""
-            SELECT u.id as user_id, u.full_name, u.phone_number, u.created_at,
+            SELECT u.id as user_id, u.full_name, u.phone_number, u.province, u.created_at,
                    fo.business_name, fo.bank_name, fo.account_number, fo.account_name, fo.cashup_method,
                    d.qr_code,
                    w.balance
@@ -2345,6 +2414,80 @@ async def admin_analytics(period: Optional[str] = "30d", admin: dict = Depends(r
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analytics error: {type(e).__name__}: {e}")
 
+# ── Admin: Province adoption & sales analytics ────────────────
+@api.get("/admin/provinces/overview")
+async def admin_provinces_overview(period: str = "30d", admin: dict = Depends(require_admin)):
+    if not has_permission(admin, "view_analytics"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    days_map = {"7d": 7, "30d": 30, "90d": 90, "all": 36500}
+    days = days_map.get(period, 30)
+    def _f(v): return float(v) if v is not None else 0.0
+    async with pool.acquire() as conn:
+        # Lifetime user mix per province — the adoption snapshot
+        user_counts = await conn.fetch(
+            """SELECT COALESCE(province,'Unknown') as province, role, COUNT(*) as count
+               FROM users WHERE role IN ('passenger','driver','owner')
+               GROUP BY province, role"""
+        )
+        # Sales/rides per province — attributed to the driver's province (where the ride happened)
+        sales = await conn.fetch(
+            """SELECT COALESCE(u.province,'Unknown') as province,
+                      COUNT(t.id) as rides,
+                      COALESCE(SUM(t.amount),0) as gross_revenue,
+                      COALESCE(SUM(t.platform_fee),0) as platform_fees,
+                      COALESCE(SUM(t.driver_net),0) as driver_net
+               FROM transactions t
+               JOIN users u ON u.id = t.receiver_id
+               WHERE t.type='payment' AND t.status='completed' AND t.is_test IS NOT TRUE
+                 AND t.created_at >= NOW() - INTERVAL '%s days'
+               GROUP BY u.province""" % days
+        )
+        # New signups per day per province — adoption trend over time
+        signups = await conn.fetch(
+            """SELECT DATE(created_at) as date, COALESCE(province,'Unknown') as province, COUNT(*) as count
+               FROM users
+               WHERE role IN ('passenger','driver','owner') AND created_at >= NOW() - INTERVAL '%s days'
+               GROUP BY DATE(created_at), province ORDER BY date ASC""" % days
+        )
+
+    by_province: Dict[str, Dict[str, Any]] = {}
+    for p in SA_PROVINCES:
+        by_province[p] = {"province": p, "passengers": 0, "drivers": 0, "owners": 0,
+                           "rides": 0, "gross_revenue": 0.0, "platform_fees": 0.0, "driver_net": 0.0}
+    unknown = {"province": "Unknown", "passengers": 0, "drivers": 0, "owners": 0,
+               "rides": 0, "gross_revenue": 0.0, "platform_fees": 0.0, "driver_net": 0.0}
+
+    role_key = {"passenger": "passengers", "driver": "drivers", "owner": "owners"}
+    for r in user_counts:
+        bucket = by_province.get(r["province"], unknown)
+        bucket[role_key[r["role"]]] = r["count"]
+
+    for r in sales:
+        bucket = by_province.get(r["province"], unknown)
+        bucket["rides"] = r["rides"]
+        bucket["gross_revenue"] = _f(r["gross_revenue"])
+        bucket["platform_fees"] = _f(r["platform_fees"])
+        bucket["driver_net"] = _f(r["driver_net"])
+
+    provinces_out = list(by_province.values())
+    if unknown["passengers"] or unknown["drivers"] or unknown["owners"] or unknown["rides"]:
+        provinces_out.append(unknown)
+    provinces_out.sort(key=lambda p: p["passengers"] + p["drivers"] + p["owners"], reverse=True)
+
+    trend_map: Dict[str, Dict[str, Any]] = {}
+    for r in signups:
+        date_str = str(r["date"])
+        row = trend_map.setdefault(date_str, {"date": date_str})
+        row[r["province"]] = r["count"]
+    signup_trend = [trend_map[k] for k in sorted(trend_map.keys())]
+
+    return {
+        "provinces": provinces_out,
+        "signup_trend": signup_trend,
+        "total_users": sum(p["passengers"] + p["drivers"] + p["owners"] for p in provinces_out),
+        "unset_count": unknown["passengers"] + unknown["drivers"] + unknown["owners"],
+    }
+
 # ── Admin: Revenue breakdown by stream ───────────────────────
 @api.get("/admin/revenue/summary")
 async def admin_revenue_summary(range: str = "30d", offset: int = 0, admin: dict = Depends(require_admin)):
@@ -2591,14 +2734,15 @@ async def superadmin_list_admins(admin: dict = Depends(require_superadmin)):
 
 @api.post("/superadmin/create-admin")
 async def superadmin_create_admin(body: CreateAdminIn, request: Request, admin: dict = Depends(require_superadmin)):
-    hashed = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+    hashed = await hash_password(body.password)
+    pin_hash_val = await hash_pin("0000")
     async with pool.acquire() as conn:
         existing = await conn.fetchrow("SELECT id FROM users WHERE email=$1", body.email.lower())
         if existing: raise HTTPException(status_code=400, detail="Email already exists")
         user_id = str(uuid.uuid4())
         await conn.execute(
             "INSERT INTO users (id,phone_number,full_name,role,pin_hash,email,password_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-            user_id, f"admin_{user_id[:8]}", body.full_name, body.role, hash_pin("0000"), body.email.lower(), hashed, admin["id"]
+            user_id, f"admin_{user_id[:8]}", body.full_name, body.role, pin_hash_val, body.email.lower(), hashed, admin["id"]
         )
         await audit(conn, admin["id"], "CREATE_ADMIN", user_id, "admin", {"email": body.email, "role": body.role}, request.client.host)
     return {"ok": True, "id": user_id}
@@ -2672,7 +2816,7 @@ async def superadmin_reset_admin_password(user_id: str, body: ResetAdminPassword
         target = await conn.fetchrow("SELECT role,full_name FROM users WHERE id=$1", user_id)
         if not target: raise HTTPException(status_code=404, detail="Admin not found")
         if target["role"] == "superadmin": raise HTTPException(status_code=403, detail="Cannot reset superadmin password")
-        hashed = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
+        hashed = await hash_password(body.new_password)
         await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", hashed, user_id)
         await conn.execute("UPDATE admin_sessions SET revoked=TRUE,revoked_at=NOW() WHERE admin_id=$1", user_id)
         await audit(conn, admin["id"], "RESET_ADMIN_PASSWORD", user_id, "admin", {"name": target["full_name"]}, request.client.host)
@@ -3281,13 +3425,10 @@ async def owner_change_password(body: OwnerChangePasswordIn, user: dict = Depend
         row = await conn.fetchrow("SELECT password_hash FROM users WHERE id=$1", user["id"])
     if not row or not row["password_hash"]:
         raise HTTPException(status_code=400, detail="No password set on this account")
-    try:
-        valid = bcrypt.checkpw(body.current_password.encode(), row["password_hash"].encode())
-    except Exception:
-        valid = False
+    valid = await verify_password(body.current_password, row["password_hash"])
     if not valid:
         raise HTTPException(status_code=401, detail="Current password is incorrect")
-    new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
+    new_hash = await hash_password(body.new_password)
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", new_hash, user["id"])
     return {"ok": True}
@@ -3924,6 +4065,9 @@ async def create_new_tables():
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by TEXT")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS flagged BOOLEAN DEFAULT FALSE")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS flag_reason TEXT")
+                # Province of residence/operation — adoption + sales analytics by region
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS province TEXT")
+                await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_province ON users(province)")
                 # New tables
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS support_notes (
@@ -8217,11 +8361,12 @@ async def create_test_user(body: CreateTestUserIn, request: Request, admin: dict
         if existing:
             phone = f"+27TEST{secrets.token_hex(4)}"
 
+        pin_hash_val = await hash_pin(pin)
         async with conn.transaction():
             await conn.execute(
                 """INSERT INTO users (id,phone_number,full_name,role,pin_hash,is_test,created_by)
                    VALUES ($1,$2,$3,$4,$5,TRUE,$6)""",
-                user_id, phone, body.full_name, body.role, hash_pin(pin), admin["id"]
+                user_id, phone, body.full_name, body.role, pin_hash_val, admin["id"]
             )
             wallet_id = str(uuid.uuid4())
             await conn.execute(
@@ -13829,18 +13974,31 @@ async def trips_history(user: dict = Depends(get_current_user)):
 # ── GET /api/trips/driver-locations (admin) ──
 @api.get("/trips/driver-locations")
 async def driver_locations_map(admin: dict = Depends(require_admin)):
+    # This is polled every 10-30s by every connected admin session — previously issued 2 extra
+    # queries per active trip (N+1). Now a fixed 3 queries total regardless of trip count.
     async with pool.acquire() as conn:
         active_trips = await conn.fetch(
             "SELECT * FROM trips WHERE status='active' AND trip_reference NOT LIKE 'TNR-TRACK-%'"
         )
+        trip_ids = [t["id"] for t in active_trips]
+        locs_by_trip: dict = {}
+        pcounts_by_trip: dict = {}
+        if trip_ids:
+            loc_rows = await conn.fetch(
+                "SELECT DISTINCT ON (trip_id) trip_id, latitude, longitude, speed, recorded_at "
+                "FROM gps_locations WHERE trip_id = ANY($1::text[]) ORDER BY trip_id, recorded_at DESC",
+                trip_ids
+            )
+            locs_by_trip = {r["trip_id"]: r for r in loc_rows}
+            pcount_rows = await conn.fetch(
+                "SELECT trip_id, COUNT(*) as cnt FROM trip_passengers WHERE trip_id = ANY($1::text[]) GROUP BY trip_id",
+                trip_ids
+            )
+            pcounts_by_trip = {r["trip_id"]: r["cnt"] for r in pcount_rows}
+
         result = []
         for trip in active_trips:
-            # Prefer trip-specific GPS row (correct trip context)
-            loc = await conn.fetchrow(
-                "SELECT latitude,longitude,speed,recorded_at FROM gps_locations "
-                "WHERE trip_id=$1 ORDER BY recorded_at DESC LIMIT 1",
-                trip["id"]
-            )
+            loc = locs_by_trip.get(trip["id"])
             # Fall back to trips.last_latitude which we now keep updated
             if not loc and trip.get("last_latitude") is not None:
                 lat = float(trip["last_latitude"])
@@ -13852,7 +14010,7 @@ async def driver_locations_map(admin: dict = Depends(require_admin)):
                 lng = float(loc["longitude"]) if loc and loc.get("longitude") is not None else None
                 speed = float(loc["speed"]) if loc and loc.get("speed") is not None else 0.0
                 last_update = iso(loc["recorded_at"]) if loc else None
-            pcount = await conn.fetchval("SELECT COUNT(*) FROM trip_passengers WHERE trip_id=$1", trip["id"])
+            pcount = pcounts_by_trip.get(trip["id"], 0)
             result.append({
                 "driver_id": trip["driver_id"],
                 "driver_name": trip["driver_name"],
@@ -14280,9 +14438,9 @@ async def set_dead_man_code(body: DeadManCodeIn, user: dict = Depends(get_curren
         raise HTTPException(400, "Dead man code must differ from your regular PIN")
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow("SELECT pin_hash FROM users WHERE id=$1", user["id"])
-        if not user_row or not verify_pin(body.current_pin, user_row["pin_hash"]):
+        if not user_row or not await verify_pin(body.current_pin, user_row["pin_hash"]):
             raise HTTPException(401, "Incorrect PIN")
-        hashed = hash_pin(body.dead_man_code)
+        hashed = await hash_pin(body.dead_man_code)
         existing = await conn.fetchrow("SELECT id FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
         if existing:
             await conn.execute(
@@ -14492,8 +14650,8 @@ async def end_trip_with_pin(body: TripEndPinIn, user: dict = Depends(get_current
         profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
         if not user_row:
             raise HTTPException(401, "User not found")
-        real_ok     = verify_pin(body.pin, user_row["pin_hash"])
-        dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
+        real_ok     = await verify_pin(body.pin, user_row["pin_hash"])
+        dead_man_ok = bool(profile and profile["dead_man_code"] and await verify_pin(body.pin, profile["dead_man_code"]))
         if not real_ok and not dead_man_ok:
             _safety_pin_limiter.record_failure(user["id"])
             raise HTTPException(401, "Incorrect PIN")
@@ -14529,8 +14687,8 @@ async def cancel_sos_with_pin(body: SosCancelPinIn, user: dict = Depends(get_cur
         profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
         if not user_row:
             raise HTTPException(401, "User not found")
-        real_ok     = verify_pin(body.pin, user_row["pin_hash"])
-        dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
+        real_ok     = await verify_pin(body.pin, user_row["pin_hash"])
+        dead_man_ok = bool(profile and profile["dead_man_code"] and await verify_pin(body.pin, profile["dead_man_code"]))
         if not real_ok and not dead_man_ok:
             _safety_pin_limiter.record_failure(user["id"])
             raise HTTPException(401, "Incorrect PIN")
@@ -15094,8 +15252,8 @@ async def track_me_end_pin(body: TripEndPinIn, user: dict = Depends(get_current_
         profile  = await conn.fetchrow("SELECT dead_man_code FROM passenger_safety_profiles WHERE user_id=$1", user["id"])
         if not user_row:
             raise HTTPException(401, "User not found")
-        real_ok     = verify_pin(body.pin, user_row["pin_hash"])
-        dead_man_ok = bool(profile and profile["dead_man_code"] and verify_pin(body.pin, profile["dead_man_code"]))
+        real_ok     = await verify_pin(body.pin, user_row["pin_hash"])
+        dead_man_ok = bool(profile and profile["dead_man_code"] and await verify_pin(body.pin, profile["dead_man_code"]))
         if not real_ok and not dead_man_ok:
             _safety_pin_limiter.record_failure(user["id"])
             raise HTTPException(401, "Incorrect PIN")
