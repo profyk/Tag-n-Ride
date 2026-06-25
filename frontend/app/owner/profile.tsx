@@ -65,6 +65,11 @@ export default function OwnerProfile() {
   const [provinceModal, setProvinceModal] = useState(false);
   const [savingProvince, setSavingProvince] = useState(false);
 
+  const [associations, setAssociations] = useState<{ id: string; name: string; city?: string; province?: string }[]>([]);
+  const [assocId, setAssocId] = useState<string | null>(null);
+  const [assocModal, setAssocModal] = useState(false);
+  const [savingAssoc, setSavingAssoc] = useState(false);
+
   // Dead man code
   const [deadManCodeSet, setDeadManCodeSet] = useState(false);
   const [deadManModal, setDeadManModal] = useState(false);
@@ -99,6 +104,8 @@ export default function OwnerProfile() {
       if (safetyRes) setDeadManCodeSet(!!safetyRes.dead_man_code_set);
       const resetRes = await api.getDeadManResetStatus().catch(() => null);
       if (resetRes) setDeadManResetRequest(resetRes.request);
+      const assocRes = await api.getTaxiAssociations().catch(() => null);
+      if (assocRes) { setAssociations(assocRes.associations); setAssocId(assocRes.my_association_id); }
     } catch {}
   }, []);
 
@@ -117,6 +124,19 @@ export default function OwnerProfile() {
       Alert.alert("Could not save", e?.message || "");
     } finally {
       setSavingProvince(false);
+    }
+  };
+
+  const saveAssociation = async (selectedId: string | null) => {
+    setSavingAssoc(true);
+    try {
+      await api.updateMyAssociation(selectedId);
+      setAssocId(selectedId);
+      setAssocModal(false);
+    } catch (e: any) {
+      Alert.alert("Could not save", e?.message || "");
+    } finally {
+      setSavingAssoc(false);
     }
   };
 
@@ -466,6 +486,22 @@ export default function OwnerProfile() {
             <Text style={styles.menuSub}>{user.province || "Not set — tap to select"}</Text>
           </View>
           {savingProvince
+            ? <ActivityIndicator color={colors.cyan} size="small" />
+            : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
+        </TouchableOpacity>
+
+        {/* Taxi Association */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => setAssocModal(true)}>
+          <View style={[styles.menuIcon, { backgroundColor: colors.cyanDim }]}>
+            <Ionicons name="business-outline" size={20} color={colors.cyan} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuTitle}>Taxi Association</Text>
+            <Text style={styles.menuSub}>
+              {assocId ? (associations.find(a => a.id === assocId)?.name || "Linked") : "Not set — tap to select"}
+            </Text>
+          </View>
+          {savingAssoc
             ? <ActivityIndicator color={colors.cyan} size="small" />
             : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
         </TouchableOpacity>
@@ -866,6 +902,52 @@ export default function OwnerProfile() {
         onSelect={saveProvince}
         onClose={() => setProvinceModal(false)}
       />
+
+      {/* Taxi association picker */}
+      <Modal visible={assocModal} transparent animationType="slide" onRequestClose={() => setAssocModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setAssocModal(false)}>
+          <Pressable style={[styles.modalSheet, { backgroundColor: colors.bg2, maxHeight: "75%" }]} onPress={e => e.stopPropagation()}>
+            <View style={styles.modalHandle} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Taxi Association</Text>
+            <Text style={[styles.modalSub, { color: colors.textMuted }]}>
+              Select the association your fleet operates under. Your admin will use this for monthly payments.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={styles.assocOption}
+                onPress={() => saveAssociation(null)}
+                disabled={savingAssoc}>
+                <Text style={[styles.assocOptionText, !assocId && { color: colors.cyan }]}>— None / Independent —</Text>
+                {!assocId && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+              </TouchableOpacity>
+              {associations.map(assoc => (
+                <TouchableOpacity
+                  key={assoc.id}
+                  style={styles.assocOption}
+                  onPress={() => saveAssociation(assoc.id)}
+                  disabled={savingAssoc}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.assocOptionText, assocId === assoc.id && { color: colors.cyan }]}>{assoc.name}</Text>
+                    {(assoc.city || assoc.province) && (
+                      <Text style={{ color: colors.textMuted, fontSize: 11 }}>{[assoc.city, assoc.province].filter(Boolean).join(", ")}</Text>
+                    )}
+                  </View>
+                  {assocId === assoc.id && <Ionicons name="checkmark" size={18} color={colors.cyan} />}
+                </TouchableOpacity>
+              ))}
+              {associations.length === 0 && (
+                <Text style={{ color: colors.textMuted, textAlign: "center", padding: 20, fontSize: 13 }}>
+                  No associations available yet
+                </Text>
+              )}
+            </ScrollView>
+            {savingAssoc && <ActivityIndicator color={colors.cyan} style={{ marginTop: 12 }} />}
+            <TouchableOpacity onPress={() => setAssocModal(false)} style={{ alignItems: "center", paddingVertical: 14 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -942,6 +1024,9 @@ const makeStyles = (colors: any) => StyleSheet.create({
   modalSub: { color: colors.textMuted, fontSize: 13, textAlign: "center", marginTop: 4, marginBottom: 20, lineHeight: 18 },
   inputLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", letterSpacing: 1.4, marginBottom: 8 },
   modalInput: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 14, color: colors.text, fontSize: 15, marginBottom: 16 },
+  assocOption: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  assocOptionActive: {},
+  assocOptionText: { color: colors.text, fontSize: 15, fontWeight: "600" },
   bankChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   bankChipActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
   bankChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },

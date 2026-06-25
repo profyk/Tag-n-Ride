@@ -245,6 +245,13 @@ export default function OwnerDashboard() {
   const [rejectReason, setRejectReason] = useState("");
   const [actingTransfer, setActingTransfer] = useState(false);
 
+  // Enhanced dashboard state
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [subscription, setSubscription] = useState<any>(null);
+  const [period, setPeriod] = useState<"today" | "week">("today");
+  const [driverSearch, setDriverSearch] = useState("");
+  const [driverStatusFilter, setDriverStatusFilter] = useState<"all" | "online" | "on_trip" | "offline">("all");
+
   // Deductions
   const [deductions, setDeductions] = useState<any[]>([]);
   const [deductionModal, setDeductionModal] = useState<Driver | null>(null);
@@ -264,18 +271,22 @@ export default function OwnerDashboard() {
 
   const load = useCallback(async () => {
     try {
-      const [dashRes, outRes, histRes, txRes, dedRes] = await Promise.all([
+      const [dashRes, outRes, histRes, txRes, dedRes, walletRes, subRes] = await Promise.all([
         api.ownerDashboard(),
         api.ownerOutstanding().catch(() => null),
         api.ownerCashupHistory().catch(() => null),
         api.ownerTransfers().catch(() => []),
         api.ownerListDeductions().catch(() => []),
+        api.ownerWallet().catch(() => null),
+        api.ownerSubscription().catch(() => null),
       ]);
       setData(dashRes);
       setOutstanding(outRes);
       setCashupHistory(histRes);
       setTransfers(txRes as DriverTransfer[]);
       setDeductions(dedRes as any[]);
+      if (walletRes?.balance !== undefined) setWalletBalance(parseFloat(walletRes.balance));
+      if (subRes) setSubscription(subRes);
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to load dashboard");
     } finally { setLoading(false); setRefreshing(false); }
@@ -435,6 +446,36 @@ export default function OwnerDashboard() {
   const onlineDrivers = drivers.filter(d => d.driver_status !== "offline").length;
   const onTripDrivers = drivers.filter(d => d.driver_status === "on_trip").length;
 
+  // Week revenue from cashup history
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+  const weekCashupIncome = (cashupHistory?.history ?? [])
+    .filter((c: any) => new Date(c.created_at) >= weekAgo)
+    .reduce((s: number, c: any) => s + (parseFloat(c.cashup_amount) || 0), 0);
+  const weekFleetRevenue = (cashupHistory?.history ?? [])
+    .filter((c: any) => new Date(c.created_at) >= weekAgo)
+    .reduce((s: number, c: any) => s + (parseFloat(c.cashup_amount) || 0) + (parseFloat(c.driver_profit) || 0), 0);
+
+  // Smart insights
+  const belowTargetDrivers = drivers.filter(d =>
+    d.payment_mode === "daily_target" && d.daily_target > 0 &&
+    d.driver_status !== "offline" && (d.today_earnings / d.daily_target) < 0.5
+  );
+  const offlineDrivers = drivers.filter(d => d.driver_status === "offline");
+
+  // Filtered driver list
+  const filteredDrivers = drivers
+    .filter(d => {
+      if (driverSearch.trim()) {
+        const q = driverSearch.toLowerCase();
+        return d.full_name.toLowerCase().includes(q) || (d.vehicle_plate || "").toLowerCase().includes(q);
+      }
+      return true;
+    })
+    .filter(d => driverStatusFilter === "all" || d.driver_status === driverStatusFilter);
+
+  const periodRevenue = period === "today" ? (data?.today_revenue ?? 0) : weekFleetRevenue;
+  const periodCashup = period === "today" ? (cashupHistory?.today_total ?? 0) : weekCashupIncome;
+
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
       <ScrollView
@@ -512,26 +553,62 @@ export default function OwnerDashboard() {
         ) : (
           <View style={{ paddingHorizontal: 16 }}>
 
+            {/* Period toggle */}
+            <View style={s.periodRow}>
+              {(["today", "week"] as const).map(p => (
+                <TouchableOpacity key={p} onPress={() => setPeriod(p)}
+                  style={[s.periodBtn, period === p && s.periodBtnActive]}>
+                  <Text style={[s.periodBtnText, period === p && s.periodBtnTextActive]}>
+                    {p === "today" ? "Today" : "This Week"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Hero revenue card */}
+            <View style={s.heroCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.heroLabel}>FLEET REVENUE</Text>
+                <Text style={s.heroValue}>{formatZAR(periodRevenue)}</Text>
+                {periodCashup > 0 && (
+                  <Text style={s.heroSub}>
+                    <Text style={{ color: colors.green, fontWeight: "800" }}>{formatZAR(periodCashup)}</Text> cashed up
+                  </Text>
+                )}
+              </View>
+              <View style={s.heroRight}>
+                <View style={[s.heroStat, { borderColor: colors.green + "40" }]}>
+                  <Text style={[s.heroStatVal, { color: colors.green }]}>{onTripDrivers}</Text>
+                  <Text style={s.heroStatLabel}>on trip</Text>
+                </View>
+                <View style={[s.heroStat, { borderColor: colors.cyan + "40" }]}>
+                  <Text style={[s.heroStatVal, { color: colors.cyan }]}>{onlineDrivers}</Text>
+                  <Text style={s.heroStatLabel}>active</Text>
+                </View>
+              </View>
+            </View>
+
             {/* Stats grid */}
             <View style={s.statsGrid}>
-              <StatCard label="Fleet Total" value={formatZAR(totalFleetEarnings)} icon="wallet-outline" color={colors.cyan} />
-              <StatCard label="Today" value={formatZAR(data?.today_revenue ?? 0)} icon="today-outline" color={colors.green} />
+              <StatCard label="My Wallet" value={walletBalance !== null ? formatZAR(walletBalance) : "—"} icon="wallet-outline" color={colors.cyan}
+                sub={subscription?.status === "active" ? `${subscription.driver_count ?? drivers.length} drivers` : undefined} />
+              <StatCard label="All-Time Earnings" value={formatZAR(totalFleetEarnings)} icon="trending-up-outline" color={colors.green} />
             </View>
             <View style={[s.statsGrid, { marginTop: 8 }]}>
-              <StatCard label="Drivers" value={String(drivers.length)} sub={`${verifiedCount} verified`} icon="car-sport-outline" color="#A064FF" />
-              <StatCard label="Avg Earnings" value={formatZAR(avgEarnings)} sub="per driver" icon="stats-chart-outline" color="#FFD60A" />
+              <StatCard label="Fleet Size" value={String(drivers.length)} sub={`${verifiedCount} verified`} icon="car-sport-outline" color="#A064FF" />
+              <StatCard label="Avg / Driver" value={formatZAR(avgEarnings)} sub="all-time" icon="stats-chart-outline" color="#FFD60A" />
             </View>
 
             {/* Live fleet status row */}
             {drivers.length > 0 && (
               <View style={s.liveStatusRow}>
                 <View style={s.liveStatusItem}>
-                  <View style={[s.statusDot, { backgroundColor: colors.green }]} />
-                  <Text style={s.liveStatusText}><Text style={{ color: colors.green, fontWeight: "800" }}>{onlineDrivers}</Text> active</Text>
-                </View>
-                <View style={s.liveStatusItem}>
                   <View style={[s.statusDot, { backgroundColor: "#FF9F0A" }]} />
                   <Text style={s.liveStatusText}><Text style={{ color: "#FF9F0A", fontWeight: "800" }}>{onTripDrivers}</Text> on trip</Text>
+                </View>
+                <View style={s.liveStatusItem}>
+                  <View style={[s.statusDot, { backgroundColor: colors.green }]} />
+                  <Text style={s.liveStatusText}><Text style={{ color: colors.green, fontWeight: "800" }}>{Math.max(0, onlineDrivers - onTripDrivers)}</Text> idle</Text>
                 </View>
                 <View style={s.liveStatusItem}>
                   <View style={[s.statusDot, { backgroundColor: colors.textDim }]} />
@@ -540,6 +617,34 @@ export default function OwnerDashboard() {
                 <Text style={s.liveLabel}>LIVE</Text>
               </View>
             )}
+
+            {/* Quick actions */}
+            <View style={s.quickActions}>
+              <TouchableOpacity style={s.quickBtn} onPress={() => setLinkModal(true)}>
+                <View style={[s.quickBtnIcon, { backgroundColor: colors.cyan + "22" }]}>
+                  <Ionicons name="person-add-outline" size={20} color={colors.cyan} />
+                </View>
+                <Text style={s.quickBtnLabel}>Add Driver</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickBtn} onPress={() => router.push("/owner/statement" as any)}>
+                <View style={[s.quickBtnIcon, { backgroundColor: "#A064FF22" }]}>
+                  <Ionicons name="document-text-outline" size={20} color="#A064FF" />
+                </View>
+                <Text style={s.quickBtnLabel}>Statement</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickBtn} onPress={() => router.push("/owner/trip-centre" as any)}>
+                <View style={[s.quickBtnIcon, { backgroundColor: "#FF9F0A22" }]}>
+                  <Ionicons name="map-outline" size={20} color="#FF9F0A" />
+                </View>
+                <Text style={s.quickBtnLabel}>Trip Centre</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickBtn} onPress={() => router.push("/owner/profile" as any)}>
+                <View style={[s.quickBtnIcon, { backgroundColor: colors.green + "22" }]}>
+                  <Ionicons name="card-outline" size={20} color={colors.green} />
+                </View>
+                <Text style={s.quickBtnLabel}>Wallet</Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Alert banners */}
             {cashupHistory?.today_total > 0 && (
@@ -615,12 +720,82 @@ export default function OwnerDashboard() {
             {activeTab === "drivers" && (
               <>
                 <View style={s.sectionRow}>
-                  <Text style={s.sectionLabel}>MY FLEET</Text>
+                  <Text style={s.sectionLabel}>MY FLEET ({drivers.length})</Text>
                   <TouchableOpacity onPress={() => setLinkModal(true)} style={s.addBtn}>
                     <Ionicons name="add" size={16} color={colors.bg} />
                     <Text style={s.addBtnText}>Add Driver</Text>
                   </TouchableOpacity>
                 </View>
+
+                {/* Search bar */}
+                {drivers.length > 0 && (
+                  <View style={s.searchBar}>
+                    <Ionicons name="search-outline" size={16} color={colors.textDim} />
+                    <TextInput
+                      style={s.searchInput}
+                      value={driverSearch}
+                      onChangeText={setDriverSearch}
+                      placeholder="Search by name or plate…"
+                      placeholderTextColor={colors.textDim}
+                    />
+                    {driverSearch.length > 0 && (
+                      <TouchableOpacity onPress={() => setDriverSearch("")}>
+                        <Ionicons name="close-circle" size={16} color={colors.textDim} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Status filter chips */}
+                {drivers.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {([
+                        { key: "all", label: "All", count: drivers.length, color: undefined as string | undefined },
+                        { key: "on_trip", label: "On Trip", count: onTripDrivers, color: "#FF9F0A" as string | undefined },
+                        { key: "online", label: "Idle", count: onlineDrivers - onTripDrivers, color: colors.green as string | undefined },
+                        { key: "offline", label: "Offline", count: offlineDrivers.length, color: colors.textDim as string | undefined },
+                      ]).map(f => (
+                        <TouchableOpacity key={f.key}
+                          onPress={() => setDriverStatusFilter(f.key as any)}
+                          style={[s.filterChip, driverStatusFilter === f.key && {
+                            backgroundColor: (f.color || colors.cyan) + "22",
+                            borderColor: (f.color || colors.cyan) + "88",
+                          }]}>
+                          {f.color && <View style={[s.chipDot, { backgroundColor: f.color }]} />}
+                          <Text style={[s.filterChipText, driverStatusFilter === f.key && { color: f.color || colors.cyan }]}>
+                            {f.label}
+                          </Text>
+                          <Text style={[s.filterChipCount, driverStatusFilter === f.key && { color: f.color || colors.cyan }]}>
+                            {f.count}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                )}
+
+                {/* Needs attention panel */}
+                {belowTargetDrivers.length > 0 && driverStatusFilter === "all" && !driverSearch && (
+                  <View style={s.attentionPanel}>
+                    <View style={s.attentionHeader}>
+                      <Ionicons name="alert-circle-outline" size={14} color="#FF9F0A" />
+                      <Text style={s.attentionTitle}>NEEDS ATTENTION · {belowTargetDrivers.length} DRIVER{belowTargetDrivers.length > 1 ? "S" : ""}</Text>
+                    </View>
+                    {belowTargetDrivers.map(d => {
+                      const pct = d.daily_target > 0 ? Math.round((d.today_earnings / d.daily_target) * 100) : 0;
+                      return (
+                        <View key={d.user_id} style={s.attentionRow}>
+                          <View style={[s.statusDot, { backgroundColor: d.driver_status === "on_trip" ? "#FF9F0A" : colors.green, marginTop: 1 }]} />
+                          <Text style={s.attentionName} numberOfLines={1}>{d.full_name}</Text>
+                          <Text style={s.attentionPct}>{pct}% of target</Text>
+                          <Text style={s.attentionRemaining}>{formatZAR(d.daily_target - d.today_earnings)} to go</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
                 {!drivers.length ? (
                   <View style={s.empty}>
                     <Ionicons name="car-outline" size={44} color={colors.textDim} />
@@ -631,8 +806,14 @@ export default function OwnerDashboard() {
                       <Text style={s.addBtnText}>Add First Driver</Text>
                     </TouchableOpacity>
                   </View>
+                ) : filteredDrivers.length === 0 ? (
+                  <View style={s.empty}>
+                    <Ionicons name="search-outline" size={36} color={colors.textDim} />
+                    <Text style={s.emptyTitle}>No drivers found</Text>
+                    <Text style={s.emptySub}>Try a different search or filter</Text>
+                  </View>
                 ) : (
-                  drivers.map((driver, idx) => {
+                  filteredDrivers.map((driver, idx) => {
                     const isTop = driver.user_id === topEarner?.user_id;
                     const isCommission = driver.payment_mode === "commission_split";
                     const progress = !isCommission && driver.daily_target && driver.today_earnings
@@ -738,6 +919,34 @@ export default function OwnerDashboard() {
                   </View>
                 ) : (
                   <>
+                    {/* Owner earnings summary */}
+                    <View style={[s.perfCard, { borderColor: colors.green + "44" }]}>
+                      <Text style={s.perfCardTitle}>Your Earnings</Text>
+                      <View style={{ flexDirection: "row", gap: 0, marginTop: 8 }}>
+                        <View style={{ flex: 1, alignItems: "center", paddingVertical: 8 }}>
+                          <Text style={[s.perfCardTitle, { color: colors.green, fontSize: 20 }]}>
+                            {formatZAR(periodCashup)}
+                          </Text>
+                          <Text style={s.perfCardSub}>{period === "today" ? "cashed up today" : "cashed up this week"}</Text>
+                        </View>
+                        <View style={{ width: 1, backgroundColor: colors.border, marginVertical: 4 }} />
+                        <View style={{ flex: 1, alignItems: "center", paddingVertical: 8 }}>
+                          <Text style={[s.perfCardTitle, { color: colors.cyan, fontSize: 20 }]}>
+                            {formatZAR(walletBalance ?? 0)}
+                          </Text>
+                          <Text style={s.perfCardSub}>wallet balance</Text>
+                        </View>
+                      </View>
+                      {outstanding?.total_outstanding > 0 && (
+                        <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#FFD60A11", borderRadius: 8, padding: 8 }}>
+                          <Ionicons name="warning-outline" size={13} color="#FFD60A" />
+                          <Text style={{ color: "#FFD60A", fontSize: 12, fontWeight: "700" }}>
+                            {formatZAR(outstanding.total_outstanding)} outstanding from {outstanding.items?.length} driver(s)
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
                     {/* Fleet health bar */}
                     <View style={s.perfCard}>
                       <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
@@ -748,6 +957,14 @@ export default function OwnerDashboard() {
                       </View>
                       <MiniBar progress={verifiedCount / Math.max(drivers.length, 1)} color={colors.cyan} />
                       <Text style={s.perfCardSub}>{verifiedCount} of {drivers.length} drivers verified</Text>
+                      {belowTargetDrivers.length > 0 && (
+                        <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Ionicons name="alert-circle-outline" size={13} color="#FF9F0A" />
+                          <Text style={{ color: "#FF9F0A", fontSize: 12, fontWeight: "600" }}>
+                            {belowTargetDrivers.length} driver(s) below 50% of daily target
+                          </Text>
+                        </View>
+                      )}
                     </View>
 
                     {/* Leaderboard */}
@@ -1585,4 +1802,40 @@ const s = StyleSheet.create({
   currentValueText: { color: colors.textMuted, fontSize: 12 },
   commissionHint: { backgroundColor: "#A064FF11", borderRadius: radius.sm, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: "#A064FF33" },
   commissionHintText: { color: colors.textMuted, fontSize: 12, textAlign: "center" },
+  // Period toggle
+  periodRow: { flexDirection: "row", gap: 8, marginTop: 10, marginBottom: 12 },
+  periodBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
+  periodBtnActive: { backgroundColor: colors.cyanDim, borderColor: colors.cyan },
+  periodBtnText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
+  periodBtnTextActive: { color: colors.cyan },
+  // Hero revenue card
+  heroCard: { backgroundColor: colors.bg2, borderRadius: radius.lg, borderWidth: 1.5, borderColor: colors.cyan + "44", padding: 18, flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  heroLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase", marginBottom: 4 },
+  heroValue: { color: colors.cyan, fontSize: 30, fontWeight: "900" },
+  heroSub: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  heroRight: { gap: 8, marginLeft: 12 },
+  heroStat: { backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8, alignItems: "center", minWidth: 60 },
+  heroStatVal: { fontSize: 22, fontWeight: "900" },
+  heroStatLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", marginTop: 2 },
+  // Quick actions
+  quickActions: { flexDirection: "row", gap: 8, marginTop: 14, marginBottom: 6 },
+  quickBtn: { flex: 1, alignItems: "center", gap: 6 },
+  quickBtnIcon: { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
+  quickBtnLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700" },
+  // Driver search
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.bg2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  searchInput: { flex: 1, color: colors.text, fontSize: 14, fontWeight: "600" },
+  // Status filter chips
+  filterChip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2 },
+  chipDot: { width: 7, height: 7, borderRadius: 4 },
+  filterChipText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
+  filterChipCount: { color: colors.textDim, fontSize: 11, fontWeight: "800" },
+  // Needs attention panel
+  attentionPanel: { backgroundColor: "#FF9F0A0D", borderRadius: radius.md, borderWidth: 1, borderColor: "#FF9F0A33", padding: 12, marginBottom: 14 },
+  attentionHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
+  attentionTitle: { color: "#FF9F0A", fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  attentionRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 5, borderTopWidth: 1, borderTopColor: "#FF9F0A22" },
+  attentionName: { color: colors.text, fontSize: 12, fontWeight: "700", flex: 1 },
+  attentionPct: { color: "#FF9F0A", fontSize: 11, fontWeight: "700" },
+  attentionRemaining: { color: colors.textMuted, fontSize: 11 },
 });

@@ -26,7 +26,7 @@ export default function OwnerTransactions() {
   const [txns, setTxns] = useState<FleetTxn[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<"all" | "today">("all");
+  const [filter, setFilter] = useState<"all" | "week" | "today">("all");
   const [confirmTarget, setConfirmTarget] = useState<{ type: "one"; id: string } | { type: "all" } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,8 +45,11 @@ export default function OwnerTransactions() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const today = new Date().toDateString();
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
   const filtered = filter === "today"
     ? txns.filter((t) => new Date(t.created_at).toDateString() === today)
+    : filter === "week"
+    ? txns.filter((t) => new Date(t.created_at) >= weekAgo)
     : txns;
 
   const totalNet = filtered.reduce((s, t) => s + t.driver_net, 0);
@@ -113,20 +116,15 @@ export default function OwnerTransactions() {
         )}
 
         <View style={styles.filterRow}>
-          <TouchableOpacity
-            style={[styles.filterBtn, filter === "all" && styles.filterBtnActive]}
-            onPress={() => setFilter("all")}>
-            <Text style={[styles.filterText, filter === "all" && styles.filterTextActive]}>
-              All Time
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterBtn, filter === "today" && styles.filterBtnActive]}
-            onPress={() => setFilter("today")}>
-            <Text style={[styles.filterText, filter === "today" && styles.filterTextActive]}>
-              Today
-            </Text>
-          </TouchableOpacity>
+          {(["all", "week", "today"] as const).map(f => (
+            <TouchableOpacity key={f}
+              style={[styles.filterBtn, filter === f && styles.filterBtnActive]}
+              onPress={() => setFilter(f)}>
+              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
+                {f === "all" ? "All Time" : f === "week" ? "This Week" : "Today"}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         <View style={styles.summaryCard}>
@@ -136,13 +134,18 @@ export default function OwnerTransactions() {
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>NET</Text>
+            <Text style={styles.summaryLabel}>NET (DRIVERS)</Text>
             <Text style={[styles.summaryVal, { color: colors.green }]}>{formatZAR(totalNet)}</Text>
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>FEES 3%</Text>
+            <Text style={styles.summaryLabel}>PLATFORM FEE</Text>
             <Text style={[styles.summaryVal, { color: colors.textMuted }]}>{formatZAR(totalFees)}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>TRIPS</Text>
+            <Text style={[styles.summaryVal, { color: "#A064FF" }]}>{filtered.length}</Text>
           </View>
         </View>
 
