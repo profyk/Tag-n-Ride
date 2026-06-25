@@ -31,6 +31,7 @@ export default function Transactions() {
   const [items, setItems] = useState<Txn[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [period, setPeriod] = useState<"all" | "today" | "week" | "month">("all");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Txn | null>(null);
   const [undone, setUndone] = useState<{ txn: Txn; index: number } | null>(null);
@@ -120,7 +121,19 @@ export default function Transactions() {
     try { await api.hideTransactions(allIds); } catch { load(); }
   };
 
-  const filtered = items.filter(t => {
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+  const monthAgo = new Date(now); monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+  const periodItems = items.filter(t => {
+    if (period === "today") return new Date(t.created_at).toDateString() === todayStr;
+    if (period === "week") return new Date(t.created_at) >= weekAgo;
+    if (period === "month") return new Date(t.created_at) >= monthAgo;
+    return true;
+  });
+
+  const filtered = periodItems.filter(t => {
     if (filter === "all") return true;
     if (filter === "topup") return t.type === "topup";
     if (filter === "withdrawal") return t.type === "withdrawal";
@@ -131,6 +144,11 @@ export default function Transactions() {
 
   const isDriver = state.status === "authed" && state.user.role === "driver";
   const filters: Filter[] = isDriver ? ["all", "in", "withdrawal"] : ["all", "out", "topup"];
+
+  const statEarned = filtered.filter(t => t.direction === "in" && t.status === "completed").reduce((s, t) => s + (t.gross_amount ?? t.amount), 0);
+  const statSpent = filtered.filter(t => t.direction === "out" && t.type === "payment" && t.status === "completed").reduce((s, t) => s + t.amount, 0);
+  const statTrips = filtered.filter(t => t.type === "payment" && t.status === "completed").length;
+  const statAvg = statTrips > 0 ? (isDriver ? statEarned : statSpent) / statTrips : 0;
   const s = makeStyles(colors);
 
   return (
@@ -145,6 +163,46 @@ export default function Transactions() {
         )}
       </View>
 
+      {/* Period selector */}
+      <View style={s.periodRow}>
+        {(["all", "today", "week", "month"] as const).map(p => (
+          <TouchableOpacity key={p} onPress={() => setPeriod(p)}
+            style={[s.periodBtn, period === p && s.periodBtnActive]}>
+            <Text style={[s.periodText, period === p && s.periodTextActive]}>
+              {p === "all" ? "All" : p === "today" ? "Today" : p === "week" ? "7 Days" : "30 Days"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Summary stats bar */}
+      {filtered.length > 0 && (
+        <View style={s.statsBar}>
+          <View style={s.statItem}>
+            <Text style={s.statLabel}>{isDriver ? "EARNED" : "SPENT"}</Text>
+            <Text style={[s.statVal, { color: isDriver ? colors.green : colors.cyan }]}>
+              {formatZAR(isDriver ? statEarned : statSpent)}
+            </Text>
+          </View>
+          <View style={s.statDivider} />
+          <View style={s.statItem}>
+            <Text style={s.statLabel}>TRIPS</Text>
+            <Text style={[s.statVal, { color: "#A064FF" }]}>{statTrips}</Text>
+          </View>
+          <View style={s.statDivider} />
+          <View style={s.statItem}>
+            <Text style={s.statLabel}>AVG</Text>
+            <Text style={[s.statVal, { color: colors.text }]}>{statAvg > 0 ? formatZAR(statAvg) : "—"}</Text>
+          </View>
+          <View style={s.statDivider} />
+          <View style={s.statItem}>
+            <Text style={s.statLabel}>TOTAL TXN</Text>
+            <Text style={[s.statVal, { color: colors.textMuted }]}>{filtered.length}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Type filter chips */}
       <View style={s.filterRow}>
         {filters.map((f) => (
           <TouchableOpacity key={f} onPress={() => setFilter(f)}
@@ -480,6 +538,26 @@ const makeStyles = (colors: any) => StyleSheet.create({
     backgroundColor: colors.redDim, borderWidth: 1, borderColor: colors.red + "40",
   },
   clearText: { color: colors.red, fontSize: 11, fontWeight: "700" },
+  periodRow: {
+    flexDirection: "row", paddingHorizontal: 20, gap: 6, paddingTop: 4, paddingBottom: 4,
+  },
+  periodBtn: {
+    flex: 1, paddingVertical: 7, borderRadius: radius.pill ?? 999,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg2,
+    alignItems: "center",
+  },
+  periodBtnActive: { borderColor: colors.cyan, backgroundColor: colors.cyanDim },
+  periodText: { color: colors.textMuted, fontWeight: "700", fontSize: 11 },
+  periodTextActive: { color: colors.cyan },
+  statsBar: {
+    flexDirection: "row", marginHorizontal: 20, marginBottom: 6,
+    backgroundColor: colors.bg2, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border, paddingVertical: 10,
+  },
+  statItem: { flex: 1, alignItems: "center" },
+  statLabel: { color: colors.textMuted, fontSize: 8, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" },
+  statVal: { fontSize: 13, fontWeight: "800", marginTop: 3 },
+  statDivider: { width: 1, backgroundColor: colors.border },
   filterRow: { flexDirection: "row", paddingHorizontal: 20, gap: 8, paddingVertical: 8 },
   filter: {
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,

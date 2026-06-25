@@ -633,6 +633,17 @@ export default function Home() {
   const s = makeStyles(colors);
   const breakdown = isDriver && wallet ? computeTodayBreakdown(allTxns, wallet.today_gross, wallet.today_platform_fee) : null;
 
+  // Week stats from already-loaded allTxns
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+  const weekEarnings = allTxns
+    .filter(t => t.type === "payment" && t.direction === "in" && t.status === "completed" && new Date(t.created_at) >= weekAgo)
+    .reduce((sum, t) => sum + (t.gross_amount ?? t.amount), 0);
+  const weekTripCount = allTxns.filter(t => t.type === "payment" && t.direction === "in" && t.status === "completed" && new Date(t.created_at) >= weekAgo).length;
+  const weekSpend = allTxns
+    .filter(t => t.type === "payment" && t.direction === "out" && t.status === "completed" && new Date(t.created_at) >= weekAgo)
+    .reduce((sum, t) => sum + t.amount, 0);
+  const weekRideCount = allTxns.filter(t => t.type === "payment" && t.direction === "out" && t.status === "completed" && new Date(t.created_at) >= weekAgo).length;
+
   return (
     <SafeAreaView style={s.root} edges={["top"]} testID="home-screen">
 
@@ -754,17 +765,41 @@ export default function Home() {
                     </Text>
                   </View>
                 )}
+                {weekEarnings > 0 && (
+                  <View style={s.weekRow}>
+                    <Ionicons name="calendar-outline" size={12} color={colors.textDim} />
+                    <Text style={s.weekLabel}>This week</Text>
+                    <Text style={s.weekVal}>{formatZAR(weekEarnings)}</Text>
+                    <Text style={s.weekSub}>· {weekTripCount} trip{weekTripCount !== 1 ? "s" : ""}</Text>
+                  </View>
+                )}
               </>
             )}
           </View>
         ) : (
           <View style={s.balanceCard} testID="balance-card">
             <View style={s.balanceCardGlow} />
-            <Text style={s.balanceLabel}>WALLET BALANCE · ZAR</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={s.balanceLabel}>WALLET BALANCE · ZAR</Text>
+              <TouchableOpacity onPress={() => router.push("/topup")} style={s.topUpChip}>
+                <Ionicons name="add" size={12} color={colors.cyan} />
+                <Text style={s.topUpChipText}>Top Up</Text>
+              </TouchableOpacity>
+            </View>
             {loading || !wallet ? (
               <ActivityIndicator color={colors.cyan} style={{ marginTop: 16 }} />
             ) : (
-              <Text style={s.balanceAmt} testID="balance-amount">{formatZAR(wallet.balance)}</Text>
+              <>
+                <Text style={s.balanceAmt} testID="balance-amount">{formatZAR(wallet.balance)}</Text>
+                {weekSpend > 0 && (
+                  <View style={s.weekRow}>
+                    <Ionicons name="trending-down-outline" size={12} color={colors.textDim} />
+                    <Text style={s.weekLabel}>Spent this week</Text>
+                    <Text style={[s.weekVal, { color: colors.textMuted }]}>{formatZAR(weekSpend)}</Text>
+                    <Text style={s.weekSub}>· {weekRideCount} ride{weekRideCount !== 1 ? "s" : ""}</Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
         )}
@@ -918,23 +953,49 @@ export default function Home() {
         <Text style={s.section}>QUICK ACTIONS</Text>
         {isDriver ? (
           <>
-            <View style={s.qaRow}>
-              <QA icon="qr-code" label="My QR" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-myqr" />
-              <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
-              <QA icon="car-sport-outline" label="Trip Centre" tone="cyan" colors={colors} onPress={() => router.push("/(app)/trip-centre")} testID="qa-tripcentre" />
-            </View>
+            {/* Primary action: show QR to passenger */}
+            <TouchableOpacity testID="qa-myqr" onPress={() => router.push("/(app)/action")} activeOpacity={0.85} style={s.primaryQA}>
+              <View style={s.primaryQAIcon}>
+                <Ionicons name="qr-code" size={28} color={colors.bg} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.primaryQALabel}>Show My QR</Text>
+                <Text style={s.primaryQASub}>Let passengers scan to pay you</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.bg} style={{ opacity: 0.7 }} />
+            </TouchableOpacity>
+
+            {/* Secondary actions */}
             <View style={[s.qaRow, { marginTop: 12 }]}>
-              <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />
               <QA icon="wallet-outline" label="CashUp" tone="purple" colors={colors} onPress={openCashUpModal} testID="qa-cashup" />
               <QA icon="arrow-up-circle-outline" label="Pay Out" tone="green" colors={colors} onPress={() => { setPayOutAmount(""); setPayOutModal(true); }} testID="qa-payout" />
+              <QA icon="flame-outline" label="Pay Fuel" tone="orange" colors={colors} onPress={() => setFuelModal(true)} testID="qa-payfuel" />
+            </View>
+            <View style={[s.qaRow, { marginTop: 12 }]}>
+              <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+              <QA icon="car-sport-outline" label="Trip Centre" tone="cyan" colors={colors} onPress={() => router.push("/(app)/trip-centre")} testID="qa-tripcentre" />
+              <QA icon="person-outline" label="Profile" tone="muted" colors={colors} onPress={() => router.push("/(app)/profile")} testID="qa-profile" />
             </View>
           </>
         ) : (
           <>
-            <View style={s.qaRow}>
-              <QA icon="scan" label="Scan & Pay" tone="cyan" colors={colors} onPress={() => router.push("/(app)/action")} testID="qa-scan" />
+            {/* Primary: scan to pay */}
+            <TouchableOpacity testID="qa-scan" onPress={() => router.push("/(app)/action")} activeOpacity={0.85} style={s.primaryQA}>
+              <View style={s.primaryQAIcon}>
+                <Ionicons name="scan" size={28} color={colors.bg} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.primaryQALabel}>Scan & Pay</Text>
+                <Text style={s.primaryQASub}>Point at driver's QR to pay your fare</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.bg} style={{ opacity: 0.7 }} />
+            </TouchableOpacity>
+
+            {/* Secondary actions */}
+            <View style={[s.qaRow, { marginTop: 12 }]}>
               <QA icon="add-circle-outline" label="Top Up" tone="green" colors={colors} onPress={() => router.push("/topup")} testID="qa-topup" />
               <QA icon="receipt-outline" label="History" tone="muted" colors={colors} onPress={() => router.push("/(app)/transactions")} testID="qa-history" />
+              <QA icon="shield-checkmark-outline" label="Safety" tone="cyan" colors={colors} onPress={() => router.push("/(app)/safety")} testID="qa-safety" />
             </View>
             {/* Track Me — safety quick action */}
             {trackMeSession ? (
@@ -1635,4 +1696,17 @@ const makeStyles = (colors: any) => StyleSheet.create({
   trackMeLiveBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(74,222,128,0.12)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(74,222,128,0.25)" },
   trackMeLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#4ade80" },
   trackMeLiveText: { color: "#4ade80", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  // Primary action button (driver QR / passenger scan)
+  primaryQA: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.cyan, borderRadius: radius.md, paddingVertical: 18, paddingHorizontal: 20, marginBottom: 4 },
+  primaryQAIcon: { width: 52, height: 52, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.2)", alignItems: "center", justifyContent: "center" },
+  primaryQALabel: { color: colors.bg, fontWeight: "900", fontSize: 17, letterSpacing: 0.3 },
+  primaryQASub: { color: colors.bg, fontSize: 11, marginTop: 3, opacity: 0.75 },
+  // Week context row (wallet card)
+  weekRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  weekLabel: { color: colors.textDim, fontSize: 11, fontWeight: "600", flex: 1 },
+  weekVal: { color: colors.cyan, fontSize: 12, fontWeight: "800" },
+  weekSub: { color: colors.textDim, fontSize: 11 },
+  // Passenger card top-up chip
+  topUpChip: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.cyanDim, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: colors.cyan + "55" },
+  topUpChipText: { color: colors.cyan, fontSize: 11, fontWeight: "700" },
 });
