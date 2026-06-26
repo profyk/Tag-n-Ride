@@ -10,6 +10,7 @@ import {
   Download, X, AlertTriangle, RefreshCw, Users, UserCheck,
   UserX, Filter, ChevronRight, Wallet, Activity, Phone,
   Mail, Hash, Calendar, Shield, Star, Clock,
+  Lock, Unlock, PlusCircle, MinusCircle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
@@ -111,9 +112,68 @@ function UserDetailModal({
   onResetPin: () => void; onDelete: () => void;
   superAdmin: boolean;
 }) {
-  const [wallet, setWallet]   = useState<any>(null);
-  const [txns, setTxns]       = useState<any[]>([]);
-  const [wLoading, setWLoading] = useState(true);
+  const [wallet, setWallet]       = useState<any>(null);
+  const [txns, setTxns]           = useState<any[]>([]);
+  const [wLoading, setWLoading]   = useState(true);
+  const [walletModal, setWalletModal] = useState(false);
+  const [creditType, setCreditType]   = useState<"credit" | "debit">("credit");
+  const [creditAmount, setCreditAmount] = useState("");
+  const [creditReason, setCreditReason] = useState("");
+  const [walletAdjusting, setWalletAdjusting] = useState(false);
+
+  const handleFreezeWallet = async () => {
+    try {
+      const res = await fetch(`${BASE}/api/admin/wallets/freeze`, {
+        method: "POST",
+        headers: authH(),
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Freeze failed");
+      toast.success("Wallet frozen");
+      setWallet((prev: any) => ({ ...prev, is_frozen: true }));
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleUnfreezeWallet = async () => {
+    try {
+      const res = await fetch(`${BASE}/api/admin/wallets/unfreeze`, {
+        method: "POST",
+        headers: authH(),
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Unfreeze failed");
+      toast.success("Wallet unfrozen");
+      setWallet((prev: any) => ({ ...prev, is_frozen: false }));
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleWalletAdjust = async () => {
+    const amt = parseFloat(creditAmount);
+    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (!creditReason.trim()) { toast.error("Enter a reason"); return; }
+    setWalletAdjusting(true);
+    try {
+      const endpoint = creditType === "credit" ? "credit" : "debit";
+      const res = await fetch(`${BASE}/api/admin/wallets/${endpoint}`, {
+        method: "POST",
+        headers: authH(),
+        body: JSON.stringify({ user_id: user.id, amount: amt, reason: creditReason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `${creditType} failed`);
+      toast.success(`Wallet ${creditType}ed R ${amt.toFixed(2)}`);
+      setWallet((prev: any) => ({
+        ...prev,
+        balance: (prev?.balance ?? 0) + (creditType === "credit" ? amt : -amt),
+      }));
+      setWalletModal(false);
+      setCreditAmount("");
+      setCreditReason("");
+    } catch (e: any) { toast.error(e.message); }
+    finally { setWalletAdjusting(false); }
+  };
 
   useEffect(() => {
     // Load wallet + recent txns via support lookup
@@ -179,16 +239,37 @@ function UserDetailModal({
         {/* Wallet + Risk */}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-bg2 border border-border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Wallet size={12} className="text-cyan" />
-              <p className="text-[10px] font-bold text-textDim uppercase tracking-widest">Wallet</p>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Wallet size={12} className="text-cyan" />
+                <p className="text-[10px] font-bold text-textDim uppercase tracking-widest">Wallet</p>
+              </div>
+              {!wLoading && wallet && (
+                <button onClick={() => setWalletModal(true)}
+                  className="text-[9px] font-bold text-cyan hover:text-text border border-cyan/20 hover:border-border px-2 py-0.5 rounded-full transition-colors">
+                  Adjust
+                </button>
+              )}
             </div>
             {wLoading ? <div className="h-5 w-20 bg-bg3 animate-pulse rounded" /> : (
               <>
                 <p className="text-xl font-black text-cyan tabular-nums">{wallet ? fmt(wallet.balance ?? 0) : "—"}</p>
-                {wallet?.is_frozen && (
-                  <span className="text-[10px] font-bold text-red bg-red/10 border border-red/20 px-2 py-0.5 rounded-full mt-1 inline-block">FROZEN</span>
-                )}
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  {wallet?.is_frozen ? (
+                    <>
+                      <span className="text-[10px] font-bold text-red bg-red/10 border border-red/20 px-2 py-0.5 rounded-full">FROZEN</span>
+                      <button onClick={handleUnfreezeWallet}
+                        className="flex items-center gap-1 text-[9px] font-bold text-green hover:text-text border border-green/20 hover:border-border px-2 py-0.5 rounded-full transition-colors">
+                        <Unlock size={8} /> Unfreeze
+                      </button>
+                    </>
+                  ) : wallet && (
+                    <button onClick={handleFreezeWallet}
+                      className="flex items-center gap-1 text-[9px] font-bold text-textDim hover:text-red border border-border hover:border-red/20 px-2 py-0.5 rounded-full transition-colors">
+                      <Lock size={8} /> Freeze
+                    </button>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -232,6 +313,64 @@ function UserDetailModal({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Wallet adjust modal (nested) */}
+        {walletModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setWalletModal(false)} />
+            <div className="relative bg-bg2 border border-border rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <p className="text-text font-black text-base">Wallet Adjustment</p>
+                <button onClick={() => setWalletModal(false)} className="text-textDim hover:text-text"><X size={16} /></button>
+              </div>
+              <p className="text-textMuted text-xs">Current balance: <span className="text-cyan font-bold">{fmt(wallet?.balance ?? 0)}</span></p>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setCreditType("credit")}
+                  className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                    creditType === "credit" ? "bg-green/10 border-green/30 text-green" : "border-border text-textMuted hover:text-text"
+                  }`}>
+                  <PlusCircle size={13} /> Credit
+                </button>
+                <button onClick={() => setCreditType("debit")}
+                  className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                    creditType === "debit" ? "bg-red/10 border-red/30 text-red" : "border-border text-textMuted hover:text-text"
+                  }`}>
+                  <MinusCircle size={13} /> Debit
+                </button>
+              </div>
+              <input
+                type="number"
+                placeholder="Amount (ZAR)"
+                value={creditAmount}
+                onChange={e => setCreditAmount(e.target.value)}
+                className="w-full px-4 py-2.5 bg-bg border border-border rounded-xl text-sm text-text placeholder:text-textDim focus:outline-none focus:border-cyan/50"
+              />
+              <input
+                placeholder="Reason (required)"
+                value={creditReason}
+                onChange={e => setCreditReason(e.target.value)}
+                className="w-full px-4 py-2.5 bg-bg border border-border rounded-xl text-sm text-text placeholder:text-textDim focus:outline-none focus:border-cyan/50"
+              />
+              <div className="flex gap-3">
+                <button onClick={() => setWalletModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-border text-xs font-bold text-textMuted hover:text-text transition-all">
+                  Cancel
+                </button>
+                <button onClick={handleWalletAdjust} disabled={walletAdjusting}
+                  className={`flex-1 py-2.5 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    creditType === "credit"
+                      ? "bg-green/10 border-green/30 text-green hover:bg-green/20"
+                      : "bg-red/10 border-red/30 text-red hover:bg-red/20"
+                  } disabled:opacity-50`}>
+                  {walletAdjusting ? <span className="animate-spin inline-block w-3 h-3 border border-current border-t-transparent rounded-full" /> : (
+                    creditType === "credit" ? <PlusCircle size={12} /> : <MinusCircle size={12} />
+                  )}
+                  {walletAdjusting ? "Processing…" : `Confirm ${creditType}`}
+                </button>
+              </div>
             </div>
           </div>
         )}

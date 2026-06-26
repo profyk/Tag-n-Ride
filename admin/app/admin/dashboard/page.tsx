@@ -9,7 +9,7 @@ import {
   ArrowRight, Copy, Clock, ShieldCheck, Zap, Users, Activity,
   BarChart3, Shield, Wallet, CreditCard, Car, FileCheck,
   RotateCcw, AlertOctagon, Building, Receipt, BookOpen,
-  Wrench, Landmark, Scale, ChevronRight, Check,
+  Wrench, Landmark, Scale, ChevronRight, Check, ArrowDownLeft,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
@@ -138,10 +138,18 @@ export default function DashboardPage() {
   const [lastUpdated,  setLastUpdated]  = useState<Date | null>(null);
   const [countdown,    setCountdown]    = useState(60);
   const [verifyingId,  setVerifyingId]  = useState<string | null>(null);
+  const [liveActivity, setLiveActivity] = useState<any[]>([]);
   const timerRef = useRef<any>(null);
 
   const adminName = getAdminName();
   const role      = getRole();
+
+  const rel = (ts: string) => {
+    const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  };
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
@@ -164,6 +172,19 @@ export default function DashboardPage() {
     }, 1000);
     return () => clearInterval(timerRef.current);
   }, [load]);
+
+  useEffect(() => {
+    const pollLive = async () => {
+      try {
+        const r = await api.transactions({});
+        const txns = Array.isArray(r?.data) ? r.data : (Array.isArray(r) ? r : []);
+        setLiveActivity(txns.slice(0, 15));
+      } catch {}
+    };
+    pollLive();
+    const id = setInterval(pollLive, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   const verifyDriver = async (userId: string, name: string) => {
     setVerifyingId(userId);
@@ -287,9 +308,10 @@ export default function DashboardPage() {
           <div className="space-y-3">
             <p className="text-[10px] font-bold text-textMuted uppercase tracking-widest">Today's Pulse</p>
             {[
-              { label: "Revenue",      value: formatZAR(data.today_revenue),     trend: revTrend,  color: "text-green",  prev: formatZAR(data.yesterday_revenue ?? 0)      },
-              { label: "Transactions", value: String(data.today_transactions),    trend: txnTrend,  color: "text-cyan",   prev: String(data.yesterday_transactions ?? 0)     },
-              { label: "New Signups",  value: String(data.today_signups),         trend: sigTrend,  color: "text-purple", prev: String(data.yesterday_signups ?? 0)          },
+              { label: "Revenue",         value: formatZAR(data.today_revenue),              trend: revTrend, color: "text-green",  prev: formatZAR(data.yesterday_revenue ?? 0),    sub: "vs yesterday" },
+              { label: "Transactions",    value: String(data.today_transactions),             trend: txnTrend, color: "text-cyan",   prev: String(data.yesterday_transactions ?? 0),  sub: "vs yesterday" },
+              { label: "New Signups",     value: String(data.today_signups),                  trend: sigTrend, color: "text-purple", prev: String(data.yesterday_signups ?? 0),       sub: "vs yesterday" },
+              { label: "Weekly Revenue",  value: (data as any).week_revenue != null ? formatZAR((data as any).week_revenue) : "—", trend: null, color: "text-yellow", prev: "", sub: "7-day rolling" },
             ].map(m => (
               <div key={m.label} className="flex items-center justify-between p-4 bg-bg2 border border-border rounded-xl">
                 <div>
@@ -303,7 +325,9 @@ export default function DashboardPage() {
                       {Math.abs(m.trend).toFixed(1)}%
                     </div>
                   ) : null}
-                  <p className="text-textDim text-[10px] mt-0.5">Yesterday: {m.prev}</p>
+                  <p className="text-textDim text-[10px] mt-0.5">
+                    {m.prev ? `Yesterday: ${m.prev}` : m.sub}
+                  </p>
                 </div>
               </div>
             ))}
@@ -625,6 +649,68 @@ export default function DashboardPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════
+            LIVE ACTIVITY FEED — 5s polling
+        ══════════════════════════════════════════════════════════════ */}
+        <div className="bg-bg2 border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan"></span>
+              </span>
+              <h2 className="text-sm font-bold text-text">Live Activity Feed</h2>
+              <span className="text-[10px] font-bold px-2 py-0.5 bg-cyan/10 text-cyan border border-cyan/20 rounded-full">
+                5s refresh
+              </span>
+            </div>
+            <Link href="/admin/transactions" className="flex items-center gap-1 text-xs text-textMuted hover:text-cyan transition-colors font-bold">
+              Full Feed <ArrowRight size={11} />
+            </Link>
+          </div>
+
+          {liveActivity.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-textDim text-xs gap-2">
+              <Spinner /> Waiting for activity…
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {liveActivity.map((t, i) => (
+                <div key={t.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                  i === 0 ? "bg-cyan/5 border border-cyan/10" : "hover:bg-bg3/40"
+                }`}>
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                    t.type === "topup"    ? "bg-cyan/10"   :
+                    t.type === "payment"  ? "bg-green/10"  :
+                    "bg-purple/10"
+                  }`}>
+                    {t.type === "topup"   ? <ArrowDownLeft size={12} className="text-cyan" />   :
+                     t.type === "payment" ? <CreditCard    size={12} className="text-green" />  :
+                                           <Wallet        size={12} className="text-purple" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-text font-semibold truncate">
+                      {t.sender_name || "—"} → {t.receiver_name || "—"}
+                    </p>
+                    <p className="text-[10px] text-textDim font-mono truncate">{t.reference}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className={`text-xs font-black tabular-nums ${
+                      t.type === "topup" ? "text-cyan" : t.type === "payment" ? "text-green" : "text-purple"
+                    }`}>{formatZAR(t.amount)}</p>
+                    <p className="text-[10px] text-textDim">{rel(t.created_at)}</p>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border flex-shrink-0 ${
+                    t.status === "completed" ? "bg-green/10 border-green/20 text-green" :
+                    t.status === "pending"   ? "bg-yellow/10 border-yellow/20 text-yellow" :
+                    "bg-red/10 border-red/20 text-red"
+                  }`}>{t.status}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
