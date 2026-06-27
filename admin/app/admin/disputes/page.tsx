@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   CheckCircle, Clock, AlertTriangle, X, Copy, ExternalLink,
@@ -34,6 +34,23 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Driver did not arrive":     "bg-purple/10 text-purple border-purple/20",
   "Other":                     "bg-bg2 text-textMuted border-border",
 };
+
+const AVATAR_COLORS = [
+  "bg-cyan/20 text-cyan border-cyan/30",
+  "bg-purple/20 text-purple border-purple/30",
+  "bg-green/20 text-green border-green/30",
+  "bg-yellow/20 text-yellow border-yellow/30",
+  "bg-orange-400/20 text-orange-400 border-orange-400/30",
+];
+function Avatar({ name }: { name: string }) {
+  const idx = (name || "?").charCodeAt(0) % AVATAR_COLORS.length;
+  const initials = (name || "?").split(" ").slice(0, 2).map(w => w[0]?.toUpperCase() || "").join("");
+  return (
+    <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[10px] font-black flex-shrink-0 ${AVATAR_COLORS[idx]}`}>
+      {initials}
+    </div>
+  );
+}
 
 function CategoryBadge({ category }: { category?: string }) {
   if (!category) return <span className="text-textDim text-xs">—</span>;
@@ -192,62 +209,93 @@ export default function DisputesPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <Table
-            headers={["User", "Phone", "Category", "Reference", "Amount", "Age", "Status", "Opened", "Actions"]}
-            empty={!filtered.length}>
-            {filtered.map((d: any) => {
-              const days = daysOpen(d.created_at);
-              const isUrgent = d.status === "open" && days > 7;
-              const isWarning = d.status === "open" && days > 3;
-              const isEscalated = d.resolution?.startsWith("[ESCALATED]");
-              return (
-                <Tr key={d.id} className={isUrgent ? "bg-red/5" : isWarning ? "bg-yellow/5" : isEscalated ? "bg-orange/5" : ""}>
-                  <Td className="font-semibold">{d.user_name}</Td>
-                  <Td className="font-mono text-xs text-textMuted">{d.phone_number}</Td>
-                  <Td><CategoryBadge category={d.category} /></Td>
-                  <Td>
-                    {d.reference ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[11px] text-textMuted">{d.reference.slice(0, 12)}…</span>
-                        <button onClick={() => copyRef(d.reference)} className="text-textDim hover:text-cyan">
-                          <Copy size={10} />
-                        </button>
-                      </div>
-                    ) : "—"}
-                  </Td>
-                  <Td className="font-bold">{d.amount ? formatZAR(d.amount) : "—"}</Td>
-                  <Td>
-                    {d.status === "open" && (
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={11} className={isUrgent ? "text-red" : isWarning ? "text-yellow" : "text-textMuted"} />
-                        <span className={`text-xs font-bold ${isUrgent ? "text-red" : isWarning ? "text-yellow" : "text-textMuted"}`}>
-                          {days}d {isUrgent ? "⚠" : ""}
-                        </span>
-                      </div>
-                    )}
-                  </Td>
-                  <Td>
-                    {isEscalated ? (
-                      <Badge label="escalated" tone="yellow" />
-                    ) : (
-                      <Badge label={d.status} tone={d.status === "open" ? "yellow" : "green"} />
-                    )}
-                  </Td>
-                  <Td className="text-textMuted text-xs">{formatDate(d.created_at)}</Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      <Button variant="ghost" onClick={() => setViewModal(d)}>View</Button>
-                      {d.status === "open" && (
-                        <Button variant="secondary" onClick={() => { setResolveModal(d); setResolution(""); setAdminNotes(""); setNotifyUser(true); }}>
-                          <CheckCircle size={12} /> Resolve
-                        </Button>
-                      )}
-                    </div>
-                  </Td>
-                </Tr>
-              );
-            })}
-          </Table>
+          <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["User", "Category", "Reference", "Amount", "Age", "Status", "Opened", "Actions"].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr><td colSpan={8} className="py-12 text-center text-textMuted">No disputes found</td></tr>
+                  ) : filtered.map((d: any) => {
+                    const days = daysOpen(d.created_at);
+                    const isUrgent = d.status === "open" && days > 7;
+                    const isWarning = d.status === "open" && days > 3;
+                    const isEscalated = d.resolution?.startsWith("[ESCALATED]");
+                    return (
+                      <tr key={d.id}
+                        className={`border-b border-border hover:bg-bg3/60 transition-colors cursor-pointer ${
+                          isUrgent ? "bg-red/3" : isWarning ? "bg-yellow/3" : isEscalated ? "bg-orange/3" : ""
+                        }`}
+                        onClick={() => setViewModal(d)}>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2.5">
+                            <Avatar name={d.user_name} />
+                            <div>
+                              <p className="font-bold text-text">{d.user_name}</p>
+                              <p className="text-textDim text-[10px] font-mono">{d.phone_number}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4"><CategoryBadge category={d.category} /></td>
+                        <td className="py-3 px-4">
+                          {d.reference ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-[11px] text-textMuted">{d.reference.slice(0, 10)}…</span>
+                              <button onClick={e => { e.stopPropagation(); copyRef(d.reference); }} className="text-textDim hover:text-cyan">
+                                <Copy size={10} />
+                              </button>
+                            </div>
+                          ) : <span className="text-textDim">—</span>}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-text tabular-nums">{d.amount ? formatZAR(d.amount) : "—"}</td>
+                        <td className="py-3 px-4">
+                          {d.status === "open" && (
+                            <div className="flex items-center gap-1">
+                              <Clock size={10} className={isUrgent ? "text-red" : isWarning ? "text-yellow" : "text-textDim"} />
+                              <span className={`font-black ${isUrgent ? "text-red" : isWarning ? "text-yellow" : "text-textDim"}`}>
+                                {days}d{isUrgent ? " ⚠" : ""}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          {isEscalated ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-orange/20 bg-orange/10 text-orange text-[10px] font-black">
+                              <ArrowUpCircle size={9} /> escalated
+                            </span>
+                          ) : (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                              d.status === "open"
+                                ? "border-yellow/20 bg-yellow/10 text-yellow"
+                                : "border-green/20 bg-green/10 text-green"
+                            }`}>
+                              {d.status === "open" ? <Clock size={9} /> : <CheckCircle size={9} />}
+                              {d.status}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-textDim whitespace-nowrap">{formatDate(d.created_at)}</td>
+                        <td className="py-3 px-4">
+                          {d.status === "open" && (
+                            <button onClick={e => { e.stopPropagation(); setResolveModal(d); setResolution(""); setAdminNotes(""); setNotifyUser(true); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-cyan/20 text-cyan text-[10px] font-bold hover:bg-cyan/10 transition-all">
+                              <CheckCircle size={10} /> Resolve
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
 

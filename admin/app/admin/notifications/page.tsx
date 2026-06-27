@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Input, Select, Spinner } from "@/components/ui";
+import { Card, Badge, Button, Input, Select, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import {
@@ -352,26 +352,35 @@ export default function AnnouncementsPage() {
               <RefreshCw size={14} />
             </button>
           </div>
-          {loading ? <Spinner /> : (
-            <Table headers={["Title", "Message", "Audience", "Sent By", "Date"]} empty={!broadcasts.length}>
-              {broadcasts.slice(0, 20).map((b: any) => (
-                <Tr key={b.id}>
-                  <Td className="font-semibold max-w-[160px] truncate">{b.title}</Td>
-                  <Td className="text-textMuted text-xs max-w-xs truncate">{b.body || b.message}</Td>
-                  <Td>
-                    <Badge label={b.target === "role" ? (b.target_role || "role") : (b.target || "all")} tone="cyan" />
-                  </Td>
-                  <Td className="text-textMuted text-xs">{b.sent_by_name || "System"}</Td>
-                  <Td className="text-textMuted text-xs whitespace-nowrap">{formatDate(b.sent_at || b.created_at)}</Td>
-                </Tr>
-              ))}
-            </Table>
-          )}
-          {!loading && broadcasts.length === 0 && (
+          {loading ? <Spinner /> : broadcasts.length === 0 ? (
             <div className="text-center py-12 border border-border rounded-xl">
               <Megaphone size={28} className="text-textDim mx-auto mb-3" />
               <p className="text-textMuted font-bold">No broadcasts sent yet</p>
               <p className="text-textDim text-sm mt-1">Broadcasts you send will appear here</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {broadcasts.slice(0, 20).map((b: any) => {
+                const audience = b.target === "role" ? (b.target_role || "role") : (b.target || "all");
+                return (
+                  <div key={b.id} className="bg-bg2 border border-border rounded-xl px-4 py-3 flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-cyanDim border border-cyan/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Megaphone size={13} className="text-cyan" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-bold text-text text-sm">{b.title}</p>
+                        <Badge label={audience} tone="cyan" />
+                      </div>
+                      <p className="text-textMuted text-xs mt-0.5 line-clamp-1">{b.body || b.message}</p>
+                    </div>
+                    <div className="text-right text-[10px] text-textDim flex-shrink-0">
+                      <p>{b.sent_by_name || "System"}</p>
+                      <p>{formatDate(b.sent_at || b.created_at)}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
