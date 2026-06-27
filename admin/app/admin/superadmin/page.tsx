@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, Badge, Input } from "@/components/ui";
+import { Card, Button, Spinner, Input } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatZAR } from "@/lib/utils";
 import { ArrowLeftRight, PlusCircle, MinusCircle, Snowflake, Wallet, Trash2, Search, AlertTriangle } from "lucide-react";
@@ -280,10 +280,9 @@ export default function SuperAdminPage() {
                     <p className="text-text font-bold">{walletData.user.full_name}</p>
                     <p className="text-textMuted text-xs">{walletData.user.phone_number}</p>
                   </div>
-                  <Badge
-                    label={walletData.wallet.is_frozen ? "Frozen" : "Active"}
-                    tone={walletData.wallet.is_frozen ? "red" : "green"}
-                  />
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${walletData.wallet.is_frozen ? "bg-red/10 border-red/20 text-red" : "bg-green/10 border-green/20 text-green"}`}>
+                    {walletData.wallet.is_frozen ? "Frozen" : "Active"}
+                  </span>
                 </div>
                 <p className="text-3xl font-extrabold text-cyan">
                   {formatZAR(walletData.wallet.balance)}

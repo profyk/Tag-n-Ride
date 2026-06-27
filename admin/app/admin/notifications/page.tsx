@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Badge, Button, Input, Select, Spinner } from "@/components/ui";
+import { Card, Button, Input, Select, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import {
@@ -66,8 +66,11 @@ const QUICK_TEMPLATES = [
 const TYPE_ICONS: Record<NotifType, any> = {
   info: Info, warning: AlertTriangle, success: CheckCircle, error: AlertTriangle,
 };
-const TYPE_TONES: Record<string, string> = {
-  info: "cyan", warning: "yellow", success: "green", error: "red",
+const TYPE_CLS: Record<string, string> = {
+  info:    "bg-cyan/10 border-cyan/20 text-cyan",
+  warning: "bg-yellow/10 border-yellow/20 text-yellow",
+  success: "bg-green/10 border-green/20 text-green",
+  error:   "bg-red/10 border-red/20 text-red",
 };
 
 export default function AnnouncementsPage() {
@@ -312,8 +315,8 @@ export default function AnnouncementsPage() {
                       {pushMessage || <span className="opacity-50">Your message will appear here...</span>}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <Badge label={pushType} tone={TYPE_TONES[pushType] as any} />
-                      <Badge label={pushTarget} tone="cyan" />
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${TYPE_CLS[pushType] || "bg-cyan/10 border-cyan/20 text-cyan"}`}>{pushType}</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-cyan/10 border-cyan/20 text-cyan">{pushTarget}</span>
                       <span className="text-textDim text-[10px]">just now</span>
                     </div>
                   </div>
@@ -333,7 +336,7 @@ export default function AnnouncementsPage() {
                       {bMessage || <span className="opacity-50">Your message will appear here...</span>}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <Badge label={bTarget === "role" ? (bRole || "role") : "all users"} tone="cyan" />
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-cyan/10 border-cyan/20 text-cyan">{bTarget === "role" ? (bRole || "role") : "all users"}</span>
                       <span className="text-textDim text-[10px]">just now</span>
                     </div>
                   </div>
@@ -370,7 +373,7 @@ export default function AnnouncementsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-bold text-text text-sm">{b.title}</p>
-                        <Badge label={audience} tone="cyan" />
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-cyan/10 border-cyan/20 text-cyan">{audience}</span>
                       </div>
                       <p className="text-textMuted text-xs mt-0.5 line-clamp-1">{b.body || b.message}</p>
                     </div>

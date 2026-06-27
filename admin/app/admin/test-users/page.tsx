@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Badge, Modal, Button } from "@/components/ui";
+import { Card, Spinner, Modal, Button } from "@/components/ui";
 import { hasPermission } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { formatZAR, formatDate } from "@/lib/utils";
@@ -221,9 +221,9 @@ const ROLE_COLORS: Record<string, string> = {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <span className="text-text font-bold">{u.full_name}</span>
-                        <Badge label="TEST" tone="purple" />
-                        <Badge label={u.role} tone={(u.role === "passenger" ? "cyan" : u.role === "driver" ? "green" : "purple") as any} />
-                        {!u.is_active && <Badge label="Inactive" tone="red" />}
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-purple/10 border-purple/20 text-purple">TEST</span>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${u.role === "passenger" ? "bg-cyan/10 border-cyan/20 text-cyan" : u.role === "driver" ? "bg-green/10 border-green/20 text-green" : "bg-purple/10 border-purple/20 text-purple"}`}>{u.role}</span>
+                        {!u.is_active && <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-red/10 border-red/20 text-red">Inactive</span>}
                       </div>
                       <p className="text-textMuted text-xs font-mono">{u.phone_number}</p>
                       <div className="flex items-center gap-4 mt-1 text-xs text-textDim">
