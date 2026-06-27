@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
+import { Card, Button, Spinner } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   TrendingUp, TrendingDown, Percent, Download, RefreshCw,
@@ -661,57 +661,68 @@ export default function RevenuePage() {
                 </h2>
                 <a href="/admin/fee-config" className="text-xs text-cyan hover:underline font-bold">Edit rates →</a>
               </div>
-              <Table headers={["Stream", "Rate", "Revenue", "Share", "Txns", "Description"]} empty={false}>
-                {STREAMS.map((stream) => {
-                  const Icon   = stream.icon;
-                  const amount = summary[stream.key] || 0;
-                  const prev   = prevSummary[stream.key] || 0;
-                  const count  = feeCounts[stream.key] || 0;
-                  const pct    = totalRevenue > 0 ? ((amount / totalRevenue) * 100).toFixed(1) : "0.0";
-                  return (
-                    <Tr key={stream.key}>
-                      <Td>
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                            style={{ background: `${stream.color}20` }}>
-                            <Icon size={12} style={{ color: stream.color }} />
-                          </div>
-                          <span className="font-semibold text-sm">{stream.label}</span>
-                        </div>
-                      </Td>
-                      <Td>
-                        <span className="text-xs font-bold px-2 py-0.5 rounded border text-cyan border-cyan/20 bg-cyanDim">
-                          {rates[stream.key] || "—"}
-                        </span>
-                      </Td>
-                      <Td>
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-text">{formatZAR(amount)}</span>
-                          <Chip current={amount} prev={prev} />
-                        </div>
-                      </Td>
-                      <Td>
-                        <div className="flex items-center gap-2 w-24">
-                          <div className="flex-1 h-1.5 bg-bg3 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full"
-                              style={{ width: `${Math.min(100, parseFloat(pct))}%`, background: stream.color }} />
-                          </div>
-                          <span className="text-textDim text-[10px] font-bold w-8">{pct}%</span>
-                        </div>
-                      </Td>
-                      <Td className="text-textMuted text-sm">{count > 0 ? count.toLocaleString() : "—"}</Td>
-                      <Td className="text-textMuted text-xs">{stream.desc}</Td>
-                    </Tr>
-                  );
-                })}
-                <Tr>
-                  <Td colSpan={2} className="font-black text-text text-sm">Total</Td>
-                  <Td><span className="font-black text-cyan text-base">{formatZAR(totalRevenue)}</span></Td>
-                  <Td className="text-text font-bold text-sm">100%</Td>
-                  <Td className="text-textMuted text-sm">{totalTxns.toLocaleString()}</Td>
-                  <Td className="text-textDim text-xs">All revenue streams</Td>
-                </Tr>
-              </Table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3">
+                      {["Stream", "Rate", "Revenue", "Share", "Txns", "Description"].map(col => (
+                        <th key={col} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {STREAMS.map((stream) => {
+                      const Icon   = stream.icon;
+                      const amount = summary[stream.key] || 0;
+                      const prev   = prevSummary[stream.key] || 0;
+                      const count  = feeCounts[stream.key] || 0;
+                      const pct    = totalRevenue > 0 ? ((amount / totalRevenue) * 100).toFixed(1) : "0.0";
+                      return (
+                        <tr key={stream.key} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                                style={{ background: `${stream.color}20` }}>
+                                <Icon size={12} style={{ color: stream.color }} />
+                              </div>
+                              <span className="font-semibold text-text text-sm">{stream.label}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded border text-cyan border-cyan/20 bg-cyanDim">
+                              {rates[stream.key] || "—"}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-text tabular-nums">{formatZAR(amount)}</span>
+                              <Chip current={amount} prev={prev} />
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2 w-24">
+                              <div className="flex-1 h-1.5 bg-bg3 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full"
+                                  style={{ width: `${Math.min(100, parseFloat(pct))}%`, background: stream.color }} />
+                              </div>
+                              <span className="text-textDim text-[10px] font-bold w-8">{pct}%</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-textMuted tabular-nums">{count > 0 ? count.toLocaleString() : "—"}</td>
+                          <td className="py-3 px-4 text-textMuted">{stream.desc}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="border-t-2 border-border bg-bg3/50">
+                      <td colSpan={2} className="py-3 px-4 font-black text-text text-sm">Total</td>
+                      <td className="py-3 px-4"><span className="font-black text-cyan text-base tabular-nums">{formatZAR(totalRevenue)}</span></td>
+                      <td className="py-3 px-4 text-text font-bold">100%</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{totalTxns.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-textDim">All revenue streams</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </Card>
 
             {/* Export */}

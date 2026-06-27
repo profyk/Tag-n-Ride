@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, StatCard } from "@/components/ui";
+import { Card, Button, Spinner } from "@/components/ui";
 import { api, WalletEntry } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {

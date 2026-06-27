@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Button, StatCard } from "@/components/ui";
+import { Card, Spinner, Button } from "@/components/ui";
 import { formatZAR } from "@/lib/utils";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -309,10 +309,17 @@ export default function DataAnalyticsPage() {
         {activeTab === "users" && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Total Users" value={String(dashboard?.total_users ?? "—")} tone="cyan" />
-              <StatCard label="Total Drivers" value={String(dashboard?.total_drivers ?? "—")} tone="green" />
-              <StatCard label="Passengers" value={String(dashboard?.total_passengers ?? "—")} tone="purple" />
-              <StatCard label="Today Signups" value={String(dashboard?.today_signups ?? "—")} tone="yellow" />
+              {[
+                { label: "Total Users",    value: String(dashboard?.total_users ?? "—"),      color: "text-cyan"   },
+                { label: "Total Drivers",  value: String(dashboard?.total_drivers ?? "—"),    color: "text-green"  },
+                { label: "Passengers",     value: String(dashboard?.total_passengers ?? "—"), color: "text-purple" },
+                { label: "Today Signups",  value: String(dashboard?.today_signups ?? "—"),    color: "text-yellow" },
+              ].map(s => (
+                <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+                  <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">{s.label}</p>
+                  <p className={`text-2xl font-black tabular-nums ${s.color}`}>{s.value}</p>
+                </div>
+              ))}
             </div>
 
             {/* Daily signups trend */}
@@ -419,10 +426,17 @@ export default function DataAnalyticsPage() {
 
             {/* Ops KPIs */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Pending Withdrawals" value={String(dashboard?.pending_withdrawals ?? 0)} tone={dashboard?.pending_withdrawals > 0 ? "yellow" : "green"} />
-              <StatCard label="Pending KYC" value={String(dashboard?.pending_kyc ?? 0)} tone={dashboard?.pending_kyc > 0 ? "cyan" : "green"} />
-              <StatCard label="Flagged Accounts" value={String(dashboard?.flagged_accounts ?? 0)} tone={dashboard?.flagged_accounts > 0 ? "red" : "green"} />
-              <StatCard label="Total Wallet Balance" value={formatZAR(dashboard?.total_wallet_balance ?? 0)} tone="purple" />
+              {[
+                { label: "Pending Withdrawals", value: String(dashboard?.pending_withdrawals ?? 0),   color: dashboard?.pending_withdrawals > 0 ? "text-yellow" : "text-green" },
+                { label: "Pending KYC",          value: String(dashboard?.pending_kyc ?? 0),           color: dashboard?.pending_kyc > 0 ? "text-cyan" : "text-green"           },
+                { label: "Flagged Accounts",     value: String(dashboard?.flagged_accounts ?? 0),      color: dashboard?.flagged_accounts > 0 ? "text-red" : "text-green"       },
+                { label: "Total Wallet Balance", value: formatZAR(dashboard?.total_wallet_balance ?? 0), color: "text-purple" },
+              ].map(s => (
+                <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+                  <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">{s.label}</p>
+                  <p className={`text-2xl font-black tabular-nums ${s.color}`}>{s.value}</p>
+                </div>
+              ))}
             </div>
 
             {/* Volume vs fees dual axis */}
