@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import { Spinner, PermissionGate } from "@/components/ui";
 import client, { api, SosRequest, DriverLocation } from "@/lib/api";
 import { LiveMap, MapPin as LiveMapPin } from "@/components/saferide/LiveMap";
 import { useAlertEscalation, notifyNewAlert } from "@/lib/useAlertEscalation";
@@ -534,9 +534,9 @@ export default function SafeRidePage() {
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${typePolice ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}>
                               {sos.emergency_type?.toUpperCase()}
                             </span>
-                            <Badge tone={sos.status === "resolved" ? "green" : (sos.status === "help_coming" || sos.status === "dispatched") ? "yellow" : "red"}>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${sos.status === "resolved" ? "bg-green/10 border-green/20 text-green" : (sos.status === "help_coming" || sos.status === "dispatched") ? "bg-yellow/10 border-yellow/20 text-yellow" : "bg-red/10 border-red/20 text-red"}`}>
                               {sos.status === "help_coming" ? "HELP COMING" : sos.status}
-                            </Badge>
+                            </span>
                             {clusteredIds.has(sos.id) && (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-orange-500/10 text-orange-400 border-orange-500/20">GROUP</span>
                             )}
@@ -694,7 +694,7 @@ export default function SafeRidePage() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className="font-extrabold text-text text-sm">{dm.user_name || "Unknown"}</p>
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-purple-500/10 text-purple-400 border-purple-500/20">DEAD MAN</span>
-                                <Badge tone={dm.status === "resolved" ? "green" : "red"}>{dm.status?.toUpperCase()}</Badge>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${dm.status === "resolved" ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>{dm.status?.toUpperCase()}</span>
                               </div>
                               {dm.user_phone ? (
                                 <a href={`tel:${dm.user_phone}`} className="text-cyan text-xs hover:underline flex items-center gap-1 mt-0.5">
@@ -956,7 +956,7 @@ export default function SafeRidePage() {
                           <Phone size={11} /> {d.phone_number}
                         </a>
                         <p className="text-xs text-textMuted mt-1">{d.vehicle_plate} · Rating {d.rating_avg?.toFixed(1)} ★</p>
-                        <Badge tone={d.is_verified ? "green" : "yellow"}>{d.is_verified ? "Verified" : "Unverified"}</Badge>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${d.is_verified ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>{d.is_verified ? "Verified" : "Unverified"}</span>
                       </div>
                     </div>
                   ))}
@@ -1010,9 +1010,9 @@ export default function SafeRidePage() {
                               </span>
                             )}
                           </div>
-                          <Badge tone={p.profile_complete ? "green" : "yellow"}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${p.profile_complete ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>
                             {p.profile_complete ? "SafeRide ✓" : "No Profile"}
-                          </Badge>
+                          </span>
                         </div>
                         {p.medical_conditions && (
                           <p className="text-xs text-textMuted bg-bg2 rounded p-2 mb-2">⚕ {p.medical_conditions}</p>
@@ -1127,9 +1127,9 @@ export default function SafeRidePage() {
                         SMS ✓
                       </span>
                     )}
-                    <Badge tone={inc.status === "resolved" ? "green" : "red"}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${inc.status === "resolved" ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>
                       {inc.status === "resolved" ? "Resolved" : "Active"}
-                    </Badge>
+                    </span>
                   </div>
                 </Link>
               ))}

@@ -3,14 +3,17 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import { Spinner, PermissionGate } from "@/components/ui";
 import { api, IncidentDetail, AdminUser, getCurrentAdminId, isSuperAdmin } from "@/lib/api";
 import { AlertTriangle, Phone, CheckCircle, XCircle, MapPin, ArrowLeft, Check, UserCheck, UserX, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
-const SEVERITY_TONE: Record<string, "muted" | "yellow" | "orange" | "red"> = {
-  low: "muted", medium: "yellow", high: "orange", critical: "red",
+const SEVERITY_CLS: Record<string, string> = {
+  low: "bg-bg3 border-border text-textMuted",
+  medium: "bg-yellow/10 border-yellow/20 text-yellow",
+  high: "bg-orange/10 border-orange/20 text-orange",
+  critical: "bg-red/10 border-red/20 text-red",
 };
 
 export default function IncidentDetailPage() {
@@ -134,9 +137,9 @@ export default function IncidentDetailPage() {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-lg font-black text-text">{incident.incident_reference}</h1>
-                  <Badge tone={incident.status === "resolved" ? "green" : "red"}>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${incident.status === "resolved" ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>
                     {incident.status === "resolved" ? "Resolved" : "Active"}
-                  </Badge>
+                  </span>
                   <span className="text-xs text-textMuted capitalize">{(incident.incident_type || "").replace(/_/g, " ")}</span>
                 </div>
                 <p className="text-xs text-textMuted mt-1">
@@ -172,7 +175,7 @@ export default function IncidentDetailPage() {
                   disabled={settingSeverity}
                   onClick={() => handleSetSeverity(s)}
                   className={`disabled:opacity-50 ${incident.severity === s ? "" : "opacity-50 hover:opacity-100"}`}>
-                  <Badge tone={SEVERITY_TONE[s]}>{s.toUpperCase()}</Badge>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${SEVERITY_CLS[s]}`}>{s.toUpperCase()}</span>
                 </button>
               ))}
             </div>
@@ -313,9 +316,9 @@ export default function IncidentDetailPage() {
                             {p.blood_type}
                           </span>
                         )}
-                        <Badge tone={p.profile_complete ? "green" : "yellow"}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${p.profile_complete ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>
                           {p.profile_complete ? "SafeRide ✓" : "No Profile"}
-                        </Badge>
+                        </span>
                       </div>
                     </div>
                   </div>

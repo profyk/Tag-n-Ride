@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import { Spinner, PermissionGate } from "@/components/ui";
 import { api, Incident } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import { AlertTriangle, Plus, Eye, CheckCircle, Search, AlertCircle } from "lucide-react";
@@ -10,8 +10,11 @@ import toast from "react-hot-toast";
 
 const INCIDENT_TYPES = ["accident", "breakdown", "suspicious_activity", "medical_emergency", "panic", "other"];
 
-const SEVERITY_TONE: Record<string, "muted" | "yellow" | "orange" | "red"> = {
-  low: "muted", medium: "yellow", high: "orange", critical: "red",
+const SEVERITY_CLS: Record<string, string> = {
+  low: "bg-bg3 border-border text-textMuted",
+  medium: "bg-yellow/10 border-yellow/20 text-yellow",
+  high: "bg-orange/10 border-orange/20 text-orange",
+  critical: "bg-red/10 border-red/20 text-red",
 };
 
 export default function IncidentsPage() {
@@ -231,7 +234,7 @@ export default function IncidentsPage() {
                     <td className="px-4 py-3 font-bold text-cyan">{inc.vehicle_plate}</td>
                     <td className="px-4 py-3 text-textMuted capitalize">{(inc.incident_type || "").replace(/_/g, " ")}</td>
                     <td className="px-4 py-3">
-                      <Badge tone={SEVERITY_TONE[inc.severity] || "muted"}>{(inc.severity || "medium").toUpperCase()}</Badge>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${SEVERITY_CLS[inc.severity] ?? SEVERITY_CLS.medium}`}>{(inc.severity || "medium").toUpperCase()}</span>
                     </td>
                     <td className="px-4 py-3 text-textMuted">{inc.assigned_admin_name || "—"}</td>
                     <td className="px-4 py-3">
@@ -252,9 +255,9 @@ export default function IncidentsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge tone={inc.status === "resolved" ? "green" : "red"}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${inc.status === "resolved" ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>
                         {inc.status === "resolved" ? "Resolved" : "Active"}
-                      </Badge>
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <Link href={`/admin/saferide/incidents/${inc.id}`}
