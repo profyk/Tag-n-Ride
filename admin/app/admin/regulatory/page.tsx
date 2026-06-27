@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal, Select, Card } from "@/components/ui";
+import { Button, Spinner, Input, Modal, Select, Card } from "@/components/ui";
 import { api, isSuperAdmin, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
@@ -27,7 +27,11 @@ type SARRecord = {
   notes?: string;
 };
 
-const SAR_STATUS_TONE: Record<string, any> = { draft: "yellow", filed: "green", no_action: "muted" };
+const SAR_STATUS_CLS: Record<string, string> = {
+  draft:     "bg-yellow/10 border-yellow/20 text-yellow",
+  filed:     "bg-green/10 border-green/20 text-green",
+  no_action: "bg-bg3 border-border text-textMuted",
+};
 
 function useSARStorage() {
   const key = "tnr_sar_records";
@@ -271,33 +275,48 @@ export default function RegulatoryPage() {
               <Button variant="secondary" onClick={exportCTR} disabled={filtered.length === 0}><Download size={13} /> Export CTR CSV</Button>
             </div>
 
-            {loading ? <Spinner /> : (
-              <Table headers={["Date", "Reference", "Type", "Amount", "Sender", "Receiver", "Status", "Action"]} empty={!filtered.length}>
-                {filtered.map(t => (
-                  <Tr key={t.id}>
-                    <Td className="text-xs text-textMuted">{formatDate(t.created_at)}</Td>
-                    <Td><span className="font-mono text-[11px] text-cyan">{t.reference?.slice(0, 16) ?? "—"}</span></Td>
-                    <Td><Badge label={t.type ?? "—"} tone="cyan" /></Td>
-                    <Td><span className="font-bold text-yellow">{formatZAR(t.amount)}</span></Td>
-                    <Td className="text-xs text-textMuted">{t.sender_name ?? "—"}</Td>
-                    <Td className="text-xs text-textMuted">{t.receiver_name ?? "—"}</Td>
-                    <Td><Badge label={t.status ?? "—"} tone={t.status === "completed" ? "green" : "yellow"} /></Td>
-                    <Td>
-                      <Button variant="secondary" onClick={() => {
-                        setNewSAR({
-                          transaction_ref: t.reference ?? "",
-                          amount: t.amount,
-                          subject_name: t.sender_name ?? t.receiver_name ?? "",
-                          reason: "Large transaction ≥ R25,000 — CTR required",
-                        });
-                        setSarModal(true);
-                      }}>
-                        <Plus size={11} /> SAR
-                      </Button>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+            {loading ? <Spinner /> : filtered.length === 0 ? (
+              <div className="text-center py-12 text-textMuted border border-dashed border-border rounded-xl">
+                <p className="font-semibold">No CTR transactions found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg2">
+                      {["Date","Reference","Type","Amount","Sender","Receiver","Status","Action"].map(h => (
+                        <th key={h} className="text-left px-4 py-3 text-[10px] font-bold text-textMuted uppercase tracking-widest">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(t => (
+                      <tr key={t.id} className="border-b border-border last:border-0 hover:bg-bg2/50 transition-colors">
+                        <td className="px-4 py-3 text-xs text-textMuted">{formatDate(t.created_at)}</td>
+                        <td className="px-4 py-3"><span className="font-mono text-[11px] text-cyan">{t.reference?.slice(0, 16) ?? "—"}</span></td>
+                        <td className="px-4 py-3"><span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-cyan/10 border-cyan/20 text-cyan">{t.type ?? "—"}</span></td>
+                        <td className="px-4 py-3"><span className="font-bold text-yellow">{formatZAR(t.amount)}</span></td>
+                        <td className="px-4 py-3 text-xs text-textMuted">{t.sender_name ?? "—"}</td>
+                        <td className="px-4 py-3 text-xs text-textMuted">{t.receiver_name ?? "—"}</td>
+                        <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${t.status === "completed" ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>{t.status ?? "—"}</span></td>
+                        <td className="px-4 py-3">
+                          <Button variant="secondary" onClick={() => {
+                            setNewSAR({
+                              transaction_ref: t.reference ?? "",
+                              amount: t.amount,
+                              subject_name: t.sender_name ?? t.receiver_name ?? "",
+                              reason: "Large transaction ≥ R25,000 — CTR required",
+                            });
+                            setSarModal(true);
+                          }}>
+                            <Plus size={11} /> SAR
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
@@ -322,34 +341,45 @@ export default function RegulatoryPage() {
                 <p className="text-xs mt-1">Create a SAR when you identify suspicious activity</p>
               </div>
             ) : (
-              <Table headers={["Date", "Subject", "Transaction", "Amount", "Reason", "Status", "Actions"]} empty={false}>
-                {sarRecords.map(r => (
-                  <Tr key={r.id}>
-                    <Td className="text-xs text-textMuted">{formatDate(r.date)}</Td>
-                    <Td>
-                      <p className="font-semibold text-xs">{r.subject_name}</p>
-                      {r.subject_phone && <p className="text-textDim text-[10px] font-mono">{r.subject_phone}</p>}
-                    </Td>
-                    <Td><span className="font-mono text-[10px] text-cyan">{r.transaction_ref || "—"}</span></Td>
-                    <Td className="font-bold">{r.amount > 0 ? formatZAR(r.amount) : "—"}</Td>
-                    <Td className="text-xs text-textMuted max-w-[200px] truncate">{r.reason}</Td>
-                    <Td><Badge label={r.status.replace("_", " ")} tone={SAR_STATUS_TONE[r.status]} /></Td>
-                    <Td>
-                      <div className="flex gap-1.5">
-                        <Button variant="ghost" onClick={() => setViewSAR(r)}><Eye size={12} /></Button>
-                        {r.status === "draft" && (
-                          <Button variant="secondary" onClick={() => updateSARStatus(r.id, "filed")}>
-                            <CheckCircle size={12} /> Filed
-                          </Button>
-                        )}
-                        {r.status === "draft" && (
-                          <Button variant="ghost" onClick={() => updateSARStatus(r.id, "no_action")}>No Action</Button>
-                        )}
-                      </div>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg2">
+                      {["Date","Subject","Transaction","Amount","Reason","Status","Actions"].map(h => (
+                        <th key={h} className="text-left px-4 py-3 text-[10px] font-bold text-textMuted uppercase tracking-widest">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sarRecords.map(r => (
+                      <tr key={r.id} className="border-b border-border last:border-0 hover:bg-bg2/50 transition-colors">
+                        <td className="px-4 py-3 text-xs text-textMuted">{formatDate(r.date)}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-xs">{r.subject_name}</p>
+                          {r.subject_phone && <p className="text-textDim text-[10px] font-mono">{r.subject_phone}</p>}
+                        </td>
+                        <td className="px-4 py-3"><span className="font-mono text-[10px] text-cyan">{r.transaction_ref || "—"}</span></td>
+                        <td className="px-4 py-3 font-bold">{r.amount > 0 ? formatZAR(r.amount) : "—"}</td>
+                        <td className="px-4 py-3 text-xs text-textMuted max-w-[200px] truncate">{r.reason}</td>
+                        <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${SAR_STATUS_CLS[r.status] ?? SAR_STATUS_CLS.draft}`}>{r.status.replace("_", " ")}</span></td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1.5">
+                            <Button variant="ghost" onClick={() => setViewSAR(r)}><Eye size={12} /></Button>
+                            {r.status === "draft" && (
+                              <Button variant="secondary" onClick={() => updateSARStatus(r.id, "filed")}>
+                                <CheckCircle size={12} /> Filed
+                              </Button>
+                            )}
+                            {r.status === "draft" && (
+                              <Button variant="ghost" onClick={() => updateSARStatus(r.id, "no_action")}>No Action</Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
@@ -405,7 +435,7 @@ export default function RegulatoryPage() {
       {viewSAR && (
         <Modal open={!!viewSAR} onClose={() => setViewSAR(null)} title="SAR Record">
           <div className="space-y-3">
-            <Badge label={viewSAR.status.replace("_", " ")} tone={SAR_STATUS_TONE[viewSAR.status]} />
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${SAR_STATUS_CLS[viewSAR.status] ?? SAR_STATUS_CLS.draft}`}>{viewSAR.status.replace("_", " ")}</span>
             {[
               { l: "Date Created", v: formatDate(viewSAR.date) },
               { l: "Subject Name", v: viewSAR.subject_name },

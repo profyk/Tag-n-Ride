@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Badge, Spinner } from "@/components/ui";
+import { Card, Button, Spinner } from "@/components/ui";
 import { api, hasPermission, downloadAuthFile } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import {
@@ -247,10 +247,7 @@ export default function ExportCenterPage() {
                         </div>
                       </div>
                     </div>
-                    <Badge
-                      label={job.status}
-                      tone={job.status === "ready" ? "green" : job.status === "failed" ? "red" : "yellow"}
-                    />
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${job.status === "ready" ? "bg-green/10 border-green/20 text-green" : job.status === "failed" ? "bg-red/10 border-red/20 text-red" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>{job.status}</span>
                   </div>
                 ))}
               </div>

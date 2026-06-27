@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, Badge } from "@/components/ui";
+import { Card, Button, Spinner } from "@/components/ui";
 import { api, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
@@ -178,7 +178,7 @@ export default function SettlementPage() {
                           <p className="text-yellow font-bold text-sm">{pendingWithdrawals.length} Pending Approvals</p>
                           <p className="text-textMuted text-xs">{formatZAR(pendingTotal)} awaiting decision</p>
                         </div>
-                        <Badge label="Action" tone="yellow" />
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-yellow/10 border-yellow/20 text-yellow">Action</span>
                       </div>
                     </a>
                   )}
@@ -190,7 +190,7 @@ export default function SettlementPage() {
                           <p className="text-cyan font-bold text-sm">{approvedUnpaid.length} Processing Payouts</p>
                           <p className="text-textMuted text-xs">{formatZAR(approvedTotal)} being settled</p>
                         </div>
-                        <Badge label="Processing" tone="cyan" />
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-cyan/10 border-cyan/20 text-cyan">Processing</span>
                       </div>
                     </a>
                   )}
@@ -202,7 +202,7 @@ export default function SettlementPage() {
                           <p className="text-red font-bold text-sm">{failedPayouts.length} Failed Payouts</p>
                           <p className="text-textMuted text-xs">{formatZAR(failedTotal)} needs retry</p>
                         </div>
-                        <Badge label="Failed" tone="red" />
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-red/10 border-red/20 text-red">Failed</span>
                       </div>
                     </a>
                   )}

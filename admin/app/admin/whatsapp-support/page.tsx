@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, Modal, Button } from "@/components/ui";
+import { Spinner, Modal, Button } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import {
@@ -55,10 +55,16 @@ const QUICK_REPLIES = [
   { label: "Closing", text: "Thank you for reaching out! We've resolved your query. Have a great day! 🚗" },
 ];
 
-const STATUS_CONFIG: Record<ConvStatus, { label: string; tone: any; icon: any }> = {
-  open:     { label: "Open",     tone: "green",  icon: MessageCircle },
-  pending:  { label: "Pending",  tone: "yellow", icon: Clock },
-  resolved: { label: "Resolved", tone: "muted",  icon: CheckCircle },
+const STATUS_CONFIG: Record<ConvStatus, { label: string; icon: any }> = {
+  open:     { label: "Open",     icon: MessageCircle },
+  pending:  { label: "Pending",  icon: Clock },
+  resolved: { label: "Resolved", icon: CheckCircle },
+};
+
+const STATUS_CLS: Record<ConvStatus, string> = {
+  open:     "bg-green/10 border-green/20 text-green",
+  pending:  "bg-yellow/10 border-yellow/20 text-yellow",
+  resolved: "bg-bg3 border-border text-textMuted",
 };
 
 function timeAgo(iso: string) {
@@ -410,7 +416,7 @@ export default function WhatsAppSupportPage() {
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     {conv.status !== "open" && (
-                      <Badge label={conv.status} tone={STATUS_CONFIG[conv.status].tone} />
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[conv.status]}`}>{conv.status}</span>
                     )}
                     {conv.status === "open" && (() => {
                       const mins = Math.floor((Date.now() - new Date(conv.last_message_at).getTime()) / 60000);
@@ -457,7 +463,7 @@ export default function WhatsAppSupportPage() {
                       {selectedConv?.contact_name || selectedConv?.phone}
                     </p>
                     {selectedConv?.status && (
-                      <Badge label={selectedConv.status} tone={STATUS_CONFIG[selectedConv.status].tone} />
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[selectedConv.status]}`}>{selectedConv.status}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
