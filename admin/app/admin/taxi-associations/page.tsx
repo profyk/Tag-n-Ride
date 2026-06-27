@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Button, Badge, Table, Tr, Td } from "@/components/ui";
+import { Card, Spinner, Button } from "@/components/ui";
 import { api, TaxiAssociation, AssociationPayout, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { useRouter } from "next/navigation";
@@ -451,10 +451,9 @@ export default function TaxiAssociationsPage() {
                       )}
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                      <Badge
-                        label={assoc.is_active ? "Active" : "Inactive"}
-                        tone={assoc.is_active ? "green" : "muted"}
-                      />
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${assoc.is_active ? "bg-green/10 border-green/20 text-green" : "bg-bg3 border-border text-textDim"}`}>
+                        {assoc.is_active ? "Active" : "Inactive"}
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border flex-wrap">
@@ -508,10 +507,9 @@ export default function TaxiAssociationsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 flex-wrap">
                         <h2 className="text-text font-extrabold text-xl">{selected.name}</h2>
-                        <Badge
-                          label={selected.is_active ? "Active" : "Inactive"}
-                          tone={selected.is_active ? "green" : "muted"}
-                        />
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${selected.is_active ? "bg-green/10 border-green/20 text-green" : "bg-bg3 border-border text-textDim"}`}>
+                          {selected.is_active ? "Active" : "Inactive"}
+                        </span>
                       </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
                         {selected.registration_number && (
@@ -726,25 +724,33 @@ export default function TaxiAssociationsPage() {
                           <p className="text-textDim text-xs mt-1">Assign drivers from the Drivers section.</p>
                         </div>
                       ) : (
-                        <Table
-                          headers={["Driver", "Phone", "Rides", "Total Revenue", "Platform Fees", "Status"]}
-                          empty={false}>
-                          {drivers.map((d: any) => (
-                            <Tr key={d.id}>
-                              <Td className="font-semibold text-text">{d.full_name}</Td>
-                              <Td className="font-mono text-textMuted text-xs">{d.phone_number}</Td>
-                              <Td className="text-cyan font-bold">{d.ride_count}</Td>
-                              <Td className="font-bold text-green">{formatZAR(d.total_ride_revenue)}</Td>
-                              <Td className="font-bold text-yellow">{formatZAR(d.total_platform_fees)}</Td>
-                              <Td>
-                                <Badge
-                                  label={d.is_active ? "Active" : "Inactive"}
-                                  tone={d.is_active ? "green" : "muted"}
-                                />
-                              </Td>
-                            </Tr>
-                          ))}
-                        </Table>
+                        <div className="overflow-x-auto rounded-xl border border-border">
+                          <table className="w-full text-sm border-collapse">
+                            <thead>
+                              <tr className="border-b border-border bg-bg3/60">
+                                {["Driver", "Phone", "Rides", "Total Revenue", "Platform Fees", "Status"].map(h => (
+                                  <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {drivers.map((d: any) => (
+                                <tr key={d.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                                  <td className="py-3 px-4 font-semibold text-text text-xs">{d.full_name}</td>
+                                  <td className="py-3 px-4 font-mono text-textMuted text-xs">{d.phone_number}</td>
+                                  <td className="py-3 px-4 text-cyan font-bold text-xs">{d.ride_count}</td>
+                                  <td className="py-3 px-4 font-bold text-green text-xs">{formatZAR(d.total_ride_revenue)}</td>
+                                  <td className="py-3 px-4 font-bold text-yellow text-xs">{formatZAR(d.total_platform_fees)}</td>
+                                  <td className="py-3 px-4">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${d.is_active ? "bg-green/10 border-green/20 text-green" : "bg-bg3 border-border text-textDim"}`}>
+                                      {d.is_active ? "Active" : "Inactive"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )
                     )}
                   </Card>
@@ -768,24 +774,32 @@ export default function TaxiAssociationsPage() {
                           <p className="text-textDim text-xs mt-1">Link an owner from their profile page in Fleet Owners.</p>
                         </div>
                       ) : (
-                        <Table
-                          headers={["Owner", "Business", "Phone", "Fleet Size", "Status"]}
-                          empty={false}>
-                          {owners.map((o: any) => (
-                            <Tr key={o.id}>
-                              <Td className="font-semibold text-text">{o.full_name}</Td>
-                              <Td className="text-textMuted">{o.business_name || "—"}</Td>
-                              <Td className="font-mono text-textMuted text-xs">{o.phone_number}</Td>
-                              <Td className="text-cyan font-bold">{o.fleet_size}</Td>
-                              <Td>
-                                <Badge
-                                  label={o.is_active ? "Active" : "Inactive"}
-                                  tone={o.is_active ? "green" : "muted"}
-                                />
-                              </Td>
-                            </Tr>
-                          ))}
-                        </Table>
+                        <div className="overflow-x-auto rounded-xl border border-border">
+                          <table className="w-full text-sm border-collapse">
+                            <thead>
+                              <tr className="border-b border-border bg-bg3/60">
+                                {["Owner", "Business", "Phone", "Fleet Size", "Status"].map(h => (
+                                  <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {owners.map((o: any) => (
+                                <tr key={o.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                                  <td className="py-3 px-4 font-semibold text-text text-xs">{o.full_name}</td>
+                                  <td className="py-3 px-4 text-textMuted text-xs">{o.business_name || "—"}</td>
+                                  <td className="py-3 px-4 font-mono text-textMuted text-xs">{o.phone_number}</td>
+                                  <td className="py-3 px-4 text-cyan font-bold text-xs">{o.fleet_size}</td>
+                                  <td className="py-3 px-4">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${o.is_active ? "bg-green/10 border-green/20 text-green" : "bg-bg3 border-border text-textDim"}`}>
+                                      {o.is_active ? "Active" : "Inactive"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )
                     )}
                   </Card>
@@ -829,32 +843,41 @@ export default function TaxiAssociationsPage() {
                           {revenue.monthly.length === 0 ? (
                             <p className="text-textMuted text-sm text-center py-6">No revenue data yet.</p>
                           ) : (
-                            <Table
-                              headers={["Month", "Rides", "Ride Revenue", "Platform Fees", "Sub Fees", "Stmt Fees", "TNR Revenue", selected.agreement_type === "percentage" ? `${selected.agreement_amount}% Owed` : "Fixed Payout"]}
-                              empty={false}>
-                              {revenue.monthly.map((m: any, i: number) => {
-                                const d = new Date(m.month);
-                                const tnrRev = (m.platform_fees || 0) + (m.subscription_fees || 0) + (m.statement_fees || 0);
-                                let owed = 0;
-                                if (selected.agreement_type === "percentage") owed = tnrRev * (selected.agreement_amount / 100);
-                                else if (selected.agreement_type === "per_driver") owed = selected.agreement_amount * (selected.driver_count || 0);
-                                else owed = selected.agreement_amount;
-                                return (
-                                  <Tr key={i}>
-                                    <Td className="font-bold text-text whitespace-nowrap">
-                                      {MONTHS[d.getMonth()]} {d.getFullYear()}
-                                    </Td>
-                                    <Td className="text-cyan">{m.ride_count}</Td>
-                                    <Td className="text-green font-semibold">{formatZAR(m.ride_revenue)}</Td>
-                                    <Td className="text-yellow font-semibold">{formatZAR(m.platform_fees)}</Td>
-                                    <Td className="text-purple font-semibold">{formatZAR(m.subscription_fees || 0)}</Td>
-                                    <Td className="text-orange-400 font-semibold">{formatZAR(m.statement_fees || 0)}</Td>
-                                    <Td className="font-extrabold text-text">{formatZAR(tnrRev)}</Td>
-                                    <Td className="font-extrabold text-cyan">{formatZAR(owed)}</Td>
-                                  </Tr>
-                                );
-                              })}
-                            </Table>
+                            <div className="overflow-x-auto rounded-xl border border-border">
+                              <table className="w-full text-sm border-collapse">
+                                <thead>
+                                  <tr className="border-b border-border bg-bg3/60">
+                                    {["Month", "Rides", "Ride Revenue", "Platform Fees", "Sub Fees", "Stmt Fees", "TNR Revenue", selected.agreement_type === "percentage" ? `${selected.agreement_amount}% Owed` : "Fixed Payout"].map(h => (
+                                      <th key={String(h)} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {revenue.monthly.map((m: any, i: number) => {
+                                    const d = new Date(m.month);
+                                    const tnrRev = (m.platform_fees || 0) + (m.subscription_fees || 0) + (m.statement_fees || 0);
+                                    let owed = 0;
+                                    if (selected.agreement_type === "percentage") owed = tnrRev * (selected.agreement_amount / 100);
+                                    else if (selected.agreement_type === "per_driver") owed = selected.agreement_amount * (selected.driver_count || 0);
+                                    else owed = selected.agreement_amount;
+                                    return (
+                                      <tr key={i} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                                        <td className="py-3 px-4 font-bold text-text text-xs whitespace-nowrap">
+                                          {MONTHS[d.getMonth()]} {d.getFullYear()}
+                                        </td>
+                                        <td className="py-3 px-4 text-cyan text-xs">{m.ride_count}</td>
+                                        <td className="py-3 px-4 text-green font-semibold text-xs">{formatZAR(m.ride_revenue)}</td>
+                                        <td className="py-3 px-4 text-yellow font-semibold text-xs">{formatZAR(m.platform_fees)}</td>
+                                        <td className="py-3 px-4 text-purple font-semibold text-xs">{formatZAR(m.subscription_fees || 0)}</td>
+                                        <td className="py-3 px-4 text-orange-400 font-semibold text-xs">{formatZAR(m.statement_fees || 0)}</td>
+                                        <td className="py-3 px-4 font-extrabold text-text text-xs">{formatZAR(tnrRev)}</td>
+                                        <td className="py-3 px-4 font-extrabold text-cyan text-xs">{formatZAR(owed)}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
                           )}
                         </Card>
                       </>
@@ -906,10 +929,9 @@ export default function TaxiAssociationsPage() {
                                   <p className="font-bold text-text text-sm">
                                     {MONTHS[(p.period_month || 1) - 1]} {p.period_year}
                                   </p>
-                                  <Badge
-                                    label={p.status}
-                                    tone={p.status === "paid" ? "green" : p.status === "cancelled" ? "red" : "yellow"}
-                                  />
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${p.status === "paid" ? "bg-green/10 border-green/20 text-green" : p.status === "cancelled" ? "bg-red/10 border-red/20 text-red" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>
+                                    {p.status}
+                                  </span>
                                   <span className="font-mono text-textDim text-[10px]">{p.reference}</span>
                                 </div>
                                 <div className="flex gap-4 mt-1 text-xs text-textMuted flex-wrap">

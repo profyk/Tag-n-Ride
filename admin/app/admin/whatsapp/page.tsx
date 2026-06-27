@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select, StatCard } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input, Select } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import {
   MessageCircle, Send, CheckCheck, Check, Clock, XCircle,
@@ -80,8 +80,10 @@ const STATUS_CONFIG: Record<MsgStatus, { label: string; icon: any; color: string
   failed:    { label: "Failed",    icon: XCircle,    color: "text-red" },
 };
 
-const CATEGORY_TONE: Record<string, any> = {
-  UTILITY: "cyan", TRANSACTIONAL: "green", MARKETING: "purple",
+const CATEGORY_CLS: Record<string, string> = {
+  UTILITY:       "bg-cyan/10 border-cyan/20 text-cyan",
+  TRANSACTIONAL: "bg-green/10 border-green/20 text-green",
+  MARKETING:     "bg-purple/10 border-purple/20 text-purple",
 };
 
 function StatusChip({ status }: { status: MsgStatus }) {
@@ -387,9 +389,18 @@ export default function WhatsAppPage() {
               </div>
             )}
           </Card>
-          <StatCard label="Messages Today" value={todayMessages.length.toString()} tone="cyan" />
-          <StatCard label="Read Rate" value={`${readRate}%`} tone="green" />
-          <StatCard label="Opted Out" value={optouts.length.toString()} tone="yellow" />
+          <div className="bg-bg2 border border-border rounded-xl p-4 flex flex-col justify-between">
+            <p className="text-[9px] font-bold text-textDim uppercase tracking-wider">Messages Today</p>
+            <p className="text-2xl font-black tabular-nums text-cyan">{todayMessages.length}</p>
+          </div>
+          <div className="bg-bg2 border border-border rounded-xl p-4 flex flex-col justify-between">
+            <p className="text-[9px] font-bold text-textDim uppercase tracking-wider">Read Rate</p>
+            <p className="text-2xl font-black tabular-nums text-green">{readRate}%</p>
+          </div>
+          <div className="bg-bg2 border border-border rounded-xl p-4 flex flex-col justify-between">
+            <p className="text-[9px] font-bold text-textDim uppercase tracking-wider">Opted Out</p>
+            <p className="text-2xl font-black tabular-nums text-yellow">{optouts.length}</p>
+          </div>
         </div>
 
         {/* Disconnected alert */}
@@ -669,25 +680,38 @@ export default function WhatsAppPage() {
             </div>
 
             {loadingHistory ? <Spinner /> : (
-              <Table
-                headers={["Recipient", "Template / Message", "Type", "Status", "Sent At", "Sent By"]}
-                empty={!filteredMessages.length}>
-                {filteredMessages.map((m: any) => (
-                  <Tr key={m.id}>
-                    <Td>
-                      <p className="font-semibold text-sm">{m.recipient_name || "—"}</p>
-                      <p className="text-textDim text-[10px] font-mono">{m.to}</p>
-                    </Td>
-                    <Td className="text-textMuted text-xs max-w-[180px] truncate">{m.template_name || m.message_preview || "—"}</Td>
-                    <Td>
-                      <Badge label={m.message_type || "template"} tone={m.message_type === "freetext" ? "purple" : "cyan"} />
-                    </Td>
-                    <Td><StatusChip status={m.status} /></Td>
-                    <Td className="text-textMuted text-xs whitespace-nowrap">{formatDate(m.sent_at)}</Td>
-                    <Td className="text-textMuted text-xs">{m.sent_by_name || "System"}</Td>
-                  </Tr>
-                ))}
-              </Table>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3/60">
+                      {["Recipient", "Template / Message", "Type", "Status", "Sent At", "Sent By"].map(h => (
+                        <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMessages.length === 0 ? (
+                      <tr><td colSpan={6} className="py-10 text-center text-textMuted text-sm">No records found</td></tr>
+                    ) : filteredMessages.map((m: any) => (
+                      <tr key={m.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                        <td className="py-3 px-4">
+                          <p className="font-semibold text-text text-xs">{m.recipient_name || "—"}</p>
+                          <p className="text-textDim text-[10px] font-mono">{m.to}</p>
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs max-w-[180px] truncate">{m.template_name || m.message_preview || "—"}</td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${m.message_type === "freetext" ? "bg-purple/10 border-purple/20 text-purple" : "bg-cyan/10 border-cyan/20 text-cyan"}`}>
+                            {m.message_type || "template"}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4"><StatusChip status={m.status} /></td>
+                        <td className="py-3 px-4 text-textMuted text-xs whitespace-nowrap">{formatDate(m.sent_at)}</td>
+                        <td className="py-3 px-4 text-textMuted text-xs">{m.sent_by_name || "System"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {!loadingHistory && filteredMessages.length === 0 && messages.length > 0 && (
@@ -723,7 +747,7 @@ export default function WhatsAppPage() {
                         <h3 className="text-text font-bold text-sm">{t.name}</h3>
                         <div className={`w-2 h-2 rounded-full ${t.status === "approved" ? "bg-green" : t.status === "pending" ? "bg-yellow" : "bg-red"}`} />
                       </div>
-                      <Badge label={t.category} tone={CATEGORY_TONE[t.category] || "cyan"} />
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${CATEGORY_CLS[t.category] || "bg-cyan/10 border-cyan/20 text-cyan"}`}>{t.category}</span>
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -805,30 +829,39 @@ export default function WhatsAppPage() {
                     </p>
                   </div>
                 ) : (
-                  <Table
-                    headers={["User", "Phone", "Opted Out", "Reason", "Action"]}
-                    empty={false}>
-                    {filteredOptouts.map((o: any) => (
-                      <Tr key={o.phone}>
-                        <Td className="font-semibold">{o.name || "—"}</Td>
-                        <Td className="font-mono text-xs text-textMuted">{o.phone}</Td>
-                        <Td className="text-textMuted text-xs whitespace-nowrap">{formatDate(o.opted_out_at)}</Td>
-                        <Td>
-                          <span className="text-xs text-red font-bold">{o.reason || "STOP reply"}</span>
-                        </Td>
-                        <Td>
-                          <button
-                            onClick={() => handleRemoveOptout(o.phone)}
-                            disabled={removingOptout === o.phone}
-                            title="Re-subscribe this contact"
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-green/30 text-green text-[10px] font-bold hover:bg-green/10 transition-all disabled:opacity-50">
-                            <UserCheck size={10} />
-                            {removingOptout === o.phone ? "…" : "Re-subscribe"}
-                          </button>
-                        </Td>
-                      </Tr>
-                    ))}
-                  </Table>
+                  <div className="overflow-x-auto rounded-xl border border-border">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="border-b border-border bg-bg3/60">
+                          {["User", "Phone", "Opted Out", "Reason", "Action"].map(h => (
+                            <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredOptouts.map((o: any) => (
+                          <tr key={o.phone} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                            <td className="py-3 px-4 font-semibold text-text text-xs">{o.name || "—"}</td>
+                            <td className="py-3 px-4 font-mono text-xs text-textMuted">{o.phone}</td>
+                            <td className="py-3 px-4 text-textMuted text-xs whitespace-nowrap">{formatDate(o.opted_out_at)}</td>
+                            <td className="py-3 px-4">
+                              <span className="text-xs text-red font-bold">{o.reason || "STOP reply"}</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                onClick={() => handleRemoveOptout(o.phone)}
+                                disabled={removingOptout === o.phone}
+                                title="Re-subscribe this contact"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-green/30 text-green text-[10px] font-bold hover:bg-green/10 transition-all disabled:opacity-50">
+                                <UserCheck size={10} />
+                                {removingOptout === o.phone ? "…" : "Re-subscribe"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
                 <p className="text-textDim text-xs mt-3">{filteredOptouts.length} record{filteredOptouts.length !== 1 ? "s" : ""}</p>
               </>

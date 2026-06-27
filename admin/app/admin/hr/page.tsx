@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input, Select } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { api, getRole, hasPermission } from "@/lib/api";
 import { DangerPinModal, useDangerPin, getDangerToken } from "@/components/DangerPinModal";
@@ -37,7 +37,18 @@ const monthlyUIF  = (monthly: number) => Math.min(monthly * 0.01, 177.12);
 
 const DEPARTMENTS = ["Engineering", "Finance", "Operations", "Business Dev", "Support", "Management", "Marketing", "Legal"];
 const EMP_TYPES = ["Permanent", "Fixed-term Contract", "Part-time", "Freelance"];
-const STATUS_TONE: Record<string, any> = { active: "green", terminated: "red", probation: "yellow", on_leave: "cyan" };
+const STATUS_CLS: Record<string, string> = {
+  active:     "bg-green/10 border-green/20 text-green",
+  terminated: "bg-red/10 border-red/20 text-red",
+  probation:  "bg-yellow/10 border-yellow/20 text-yellow",
+  on_leave:   "bg-cyan/10 border-cyan/20 text-cyan",
+};
+const PAY_STATUS_CLS: Record<string, string> = {
+  paid:     "bg-green/10 border-green/20 text-green",
+  approved: "bg-cyan/10 border-cyan/20 text-cyan",
+  rejected: "bg-red/10 border-red/20 text-red",
+  pending:  "bg-yellow/10 border-yellow/20 text-yellow",
+};
 const SA_BANKS = ["ABSA", "FNB", "Nedbank", "Standard Bank", "Capitec", "Discovery Bank", "Investec", "TymeBank", "African Bank"];
 const SA_BRANCH: Record<string, string> = { "ABSA": "632005", "FNB": "250655", "Nedbank": "198765", "Standard Bank": "051001", "Capitec": "470010" };
 
@@ -470,57 +481,75 @@ function HRPageInner() {
                 <div className="text-center py-12 text-textMuted">No employees match the filter</div>
               )
             ) : (
-              <Table headers={["Employee", "Department", "Role", "Type", "Gross Salary", "PAYE", "UIF", "Status", "Start", ""]}
-                empty={false}>
-                {filtered.map(s => {
-                  const paye = monthlyPAYE(s.gross_salary);
-                  const uif  = monthlyUIF(s.gross_salary);
-                  const isRevealed = !!revealed[s.id];
-                  return (
-                    <Tr key={s.id} onClick={() => setViewStaff(s)}>
-                      <Td>
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-cyanDim border border-cyan/20 flex items-center justify-center text-[11px] font-extrabold text-cyan">
-                            {s.full_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-text text-xs">{s.full_name}</p>
-                            <p className="text-textDim text-[10px]">{s.email || "—"}</p>
-                          </div>
-                        </div>
-                      </Td>
-                      <Td className="text-textMuted text-xs">{s.department}</Td>
-                      <Td className="text-textMuted text-xs">{s.role_title}</Td>
-                      <Td><Badge label={s.employment_type} tone="cyan" /></Td>
-                      <Td className="font-bold text-green">{formatZAR(s.gross_salary)}</Td>
-                      <Td className="text-yellow text-xs">{formatZAR(paye)}</Td>
-                      <Td className="text-purple text-xs">{formatZAR(uif)}</Td>
-                      <Td><Badge label={s.status} tone={STATUS_TONE[s.status] || "cyan"} /></Td>
-                      <Td className="text-textDim text-xs">{formatDate(s.start_date)}</Td>
-                      <Td>
-                        <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                          <button
-                            onClick={() => handleReveal(s)}
-                            title={isRevealed ? "Hide sensitive data" : "Reveal sensitive data"}
-                            className={`p-1.5 rounded-lg border transition-all ${isRevealed ? "bg-yellow/10 border-yellow/30 text-yellow" : "border-border text-textDim hover:text-yellow hover:border-yellow/30"}`}>
-                            {isRevealed ? <Unlock size={11} /> : <Lock size={11} />}
-                          </button>
-                          <button onClick={() => openEdit(s)}
-                            className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
-                            <Edit2 size={11} />
-                          </button>
-                          {s.status !== "terminated" && (
-                            <button onClick={() => setTermStaff(s)}
-                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all">
-                              <UserX size={11} />
-                            </button>
-                          )}
-                        </div>
-                      </Td>
-                    </Tr>
-                  );
-                })}
-              </Table>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3/60">
+                      {["Employee", "Department", "Role", "Type", "Gross Salary", "PAYE", "UIF", "Status", "Start", ""].map(h => (
+                        <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(s => {
+                      const paye = monthlyPAYE(s.gross_salary);
+                      const uif  = monthlyUIF(s.gross_salary);
+                      const isRevealed = !!revealed[s.id];
+                      return (
+                        <tr key={s.id} onClick={() => setViewStaff(s)} className="border-b border-border/50 hover:bg-bg3/40 transition-colors cursor-pointer">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-full bg-cyanDim border border-cyan/20 flex items-center justify-center text-[11px] font-extrabold text-cyan">
+                                {s.full_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                              </div>
+                              <div>
+                                <p className="font-semibold text-text text-xs">{s.full_name}</p>
+                                <p className="text-textDim text-[10px]">{s.email || "—"}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-textMuted text-xs">{s.department}</td>
+                          <td className="py-3 px-4 text-textMuted text-xs">{s.role_title}</td>
+                          <td className="py-3 px-4">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-cyan/20 bg-cyan/10 text-cyan text-[10px] font-bold">
+                              {s.employment_type}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-green text-xs">{formatZAR(s.gross_salary)}</td>
+                          <td className="py-3 px-4 text-yellow text-xs">{formatZAR(paye)}</td>
+                          <td className="py-3 px-4 text-purple text-xs">{formatZAR(uif)}</td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[s.status] || "bg-cyan/10 border-cyan/20 text-cyan"}`}>
+                              {s.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-textDim text-xs">{formatDate(s.start_date)}</td>
+                          <td className="py-3 px-4">
+                            <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={() => handleReveal(s)}
+                                title={isRevealed ? "Hide sensitive data" : "Reveal sensitive data"}
+                                className={`p-1.5 rounded-lg border transition-all ${isRevealed ? "bg-yellow/10 border-yellow/30 text-yellow" : "border-border text-textDim hover:text-yellow hover:border-yellow/30"}`}>
+                                {isRevealed ? <Unlock size={11} /> : <Lock size={11} />}
+                              </button>
+                              <button onClick={() => openEdit(s)}
+                                className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
+                                <Edit2 size={11} />
+                              </button>
+                              {s.status !== "terminated" && (
+                                <button onClick={() => setTermStaff(s)}
+                                  className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all">
+                                  <UserX size={11} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </>
         )}
@@ -560,70 +589,79 @@ function HRPageInner() {
 
             {/* Payments table */}
             {salaryLoading ? <Spinner /> : (
-              <Table
-                headers={["Employee", "Bank / Account", "Gross", "PAYE", "UIF", "Net Pay", "Period", "Status", "Actions"]}
-                empty={!salaryPayments.length}
-              >
-                {salaryPayments.map(sp => (
-                  <Tr key={sp.id}>
-                    <Td>
-                      <p className="font-semibold text-text text-xs">{sp.employee_name}</p>
-                      {sp.description && <p className="text-[10px] text-textDim">{sp.description}</p>}
-                    </Td>
-                    <Td>
-                      <p className="text-xs text-textMuted">{sp.bank_name}</p>
-                      <p className="text-[10px] font-mono text-textDim">****{sp.account_number.slice(-4)}</p>
-                    </Td>
-                    <Td className="font-bold text-text text-xs">{formatZAR(sp.gross_amount)}</Td>
-                    <Td className="text-yellow text-xs">{formatZAR(sp.paye_deducted)}</Td>
-                    <Td className="text-purple text-xs">{formatZAR(sp.uif_deducted)}</Td>
-                    <Td className="font-bold text-green text-xs">{formatZAR(sp.net_amount)}</Td>
-                    <Td className="text-textMuted text-xs">{sp.pay_period}</Td>
-                    <Td>
-                      <Badge
-                        label={sp.status}
-                        tone={sp.status === "paid" ? "green" : sp.status === "approved" ? "cyan" : sp.status === "rejected" ? "red" : "yellow"}
-                      />
-                    </Td>
-                    <Td>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {sp.status === "pending" && canApproveOrPay && (
-                          <>
-                            <button
-                              onClick={() => handleApproveSalary(sp)}
-                              title="Approve"
-                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all"
-                            >
-                              <Check size={11} />
-                            </button>
-                            <button
-                              onClick={() => setRejectModal(sp)}
-                              title="Reject"
-                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all"
-                            >
-                              <XIcon size={11} />
-                            </button>
-                          </>
-                        )}
-                        {sp.status === "approved" && canApproveOrPay && (
-                          <button
-                            onClick={() => handlePaySalary(sp)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-green/30 bg-green/10 text-green text-[10px] font-bold hover:bg-green/20 transition-all"
-                          >
-                            <Wallet size={11} /> Pay
-                          </button>
-                        )}
-                        {sp.status === "paid" && sp.paid_at && (
-                          <span className="text-[10px] text-textDim">{formatDate(sp.paid_at)}</span>
-                        )}
-                        {sp.status === "rejected" && (
-                          <span className="text-[10px] text-red/70" title={sp.rejection_reason || ""}>Rejected</span>
-                        )}
-                      </div>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3/60">
+                      {["Employee", "Bank / Account", "Gross", "PAYE", "UIF", "Net Pay", "Period", "Status", "Actions"].map(h => (
+                        <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salaryPayments.length === 0 ? (
+                      <tr><td colSpan={9} className="py-10 text-center text-textMuted text-sm">No salary records found</td></tr>
+                    ) : salaryPayments.map(sp => (
+                      <tr key={sp.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                        <td className="py-3 px-4">
+                          <p className="font-semibold text-text text-xs">{sp.employee_name}</p>
+                          {sp.description && <p className="text-[10px] text-textDim">{sp.description}</p>}
+                        </td>
+                        <td className="py-3 px-4">
+                          <p className="text-xs text-textMuted">{sp.bank_name}</p>
+                          <p className="text-[10px] font-mono text-textDim">****{sp.account_number.slice(-4)}</p>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-text text-xs">{formatZAR(sp.gross_amount)}</td>
+                        <td className="py-3 px-4 text-yellow text-xs">{formatZAR(sp.paye_deducted)}</td>
+                        <td className="py-3 px-4 text-purple text-xs">{formatZAR(sp.uif_deducted)}</td>
+                        <td className="py-3 px-4 font-bold text-green text-xs">{formatZAR(sp.net_amount)}</td>
+                        <td className="py-3 px-4 text-textMuted text-xs">{sp.pay_period}</td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${PAY_STATUS_CLS[sp.status] || "bg-yellow/10 border-yellow/20 text-yellow"}`}>
+                            {sp.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-1.5 flex-wrap">
+                            {sp.status === "pending" && canApproveOrPay && (
+                              <>
+                                <button
+                                  onClick={() => handleApproveSalary(sp)}
+                                  title="Approve"
+                                  className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all"
+                                >
+                                  <Check size={11} />
+                                </button>
+                                <button
+                                  onClick={() => setRejectModal(sp)}
+                                  title="Reject"
+                                  className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all"
+                                >
+                                  <XIcon size={11} />
+                                </button>
+                              </>
+                            )}
+                            {sp.status === "approved" && canApproveOrPay && (
+                              <button
+                                onClick={() => handlePaySalary(sp)}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-green/30 bg-green/10 text-green text-[10px] font-bold hover:bg-green/20 transition-all"
+                              >
+                                <Wallet size={11} /> Pay
+                              </button>
+                            )}
+                            {sp.status === "paid" && sp.paid_at && (
+                              <span className="text-[10px] text-textDim">{formatDate(sp.paid_at)}</span>
+                            )}
+                            {sp.status === "rejected" && (
+                              <span className="text-[10px] text-red/70" title={sp.rejection_reason || ""}>Rejected</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
@@ -647,8 +685,12 @@ function HRPageInner() {
                   <p className="text-text font-extrabold text-base">{viewStaff.full_name}</p>
                   <p className="text-textMuted text-sm">{viewStaff.role_title} · {viewStaff.department}</p>
                   <div className="flex items-center gap-2 mt-1">
-                    <Badge label={viewStaff.status} tone={STATUS_TONE[viewStaff.status] || "cyan"} />
-                    <Badge label={viewStaff.employment_type} tone="purple" />
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[viewStaff.status] || "bg-cyan/10 border-cyan/20 text-cyan"}`}>
+                      {viewStaff.status}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-purple/20 bg-purple/10 text-purple text-[10px] font-bold">
+                      {viewStaff.employment_type}
+                    </span>
                   </div>
                 </div>
               </div>
