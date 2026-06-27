@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Badge, Button, Spinner, Table, Tr, Td } from "@/components/ui";
+import { Card, Button, Spinner } from "@/components/ui";
 import { api, Driver, Transaction, TaxiAssociation, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { ArrowLeft, CheckCircle, Star, Printer, Download, Building2, X, RefreshCw, ShieldAlert, AlertTriangle, QrCode as QrCodeIcon } from "lucide-react";
@@ -255,19 +255,15 @@ export default function DriverDetailPage() {
                 )}
               </div>
               <div className="flex flex-col items-end gap-2">
-                <Badge
-                  label={driver.is_verified ? "Verified" : "Pending"}
-                  tone={driver.is_verified ? "green" : "yellow"}
-                />
-                <Badge
-                  label={driver.kyc_status || "No KYC"}
-                  tone={
-                    driver.kyc_status === "approved" ? "green"
-                    : driver.kyc_status === "pending" ? "yellow"
-                    : driver.kyc_status === "rejected" ? "red"
-                    : "muted"
-                  }
-                />
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${driver.is_verified ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>
+                  {driver.is_verified ? "Verified" : "Pending"}
+                </span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${
+                  driver.kyc_status === "approved" ? "bg-green/10 border-green/20 text-green"
+                  : driver.kyc_status === "pending" ? "bg-yellow/10 border-yellow/20 text-yellow"
+                  : driver.kyc_status === "rejected" ? "bg-red/10 border-red/20 text-red"
+                  : "bg-bg3 border-border text-textDim"
+                }`}>{driver.kyc_status || "No KYC"}</span>
               </div>
             </div>
 
@@ -503,30 +499,43 @@ export default function DriverDetailPage() {
         {/* Transaction history */}
         <Card>
           <h3 className="text-text font-bold mb-4">Transaction History</h3>
-          <Table
-            headers={["Reference", "Type", "Amount", "Net", "From", "To", "Status", "Date"]}
-            empty={!txns.length}>
-            {txns.map((t) => (
-              <Tr key={t.id}>
-                <Td><span className="font-mono text-[11px] text-textMuted">{t.reference}</span></Td>
-                <Td>
-                  <Badge label={t.type}
-                    tone={t.type === "topup" ? "cyan" : t.type === "payment" ? "green" : "purple"} />
-                </Td>
-                <Td className="font-bold">{formatZAR(t.amount)}</Td>
-                <Td className="text-green text-xs font-semibold">
-                  {t.driver_net ? formatZAR(t.driver_net) : "—"}
-                </Td>
-                <Td className="text-textMuted text-xs">{t.sender_name || "—"}</Td>
-                <Td className="text-textMuted text-xs">{t.receiver_name || "—"}</Td>
-                <Td>
-                  <Badge label={t.status}
-                    tone={t.status === "completed" ? "green" : t.status === "pending" ? "yellow" : "red"} />
-                </Td>
-                <Td className="text-textMuted text-xs">{formatDate(t.created_at)}</Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border bg-bg3/60">
+                  {["Reference", "Type", "Amount", "Net", "From", "To", "Status", "Date"].map(h => (
+                    <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {txns.length === 0 ? (
+                  <tr><td colSpan={8} className="py-10 text-center text-textMuted text-sm">No transactions</td></tr>
+                ) : txns.map((t) => (
+                  <tr key={t.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                    <td className="py-3 px-4"><span className="font-mono text-[11px] text-textMuted">{t.reference}</span></td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${t.type === "topup" ? "bg-cyan/10 border-cyan/20 text-cyan" : t.type === "payment" ? "bg-green/10 border-green/20 text-green" : "bg-purple/10 border-purple/20 text-purple"}`}>
+                        {t.type}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 font-bold text-text text-xs">{formatZAR(t.amount)}</td>
+                    <td className="py-3 px-4 text-green text-xs font-semibold">
+                      {t.driver_net ? formatZAR(t.driver_net) : "—"}
+                    </td>
+                    <td className="py-3 px-4 text-textMuted text-xs">{t.sender_name || "—"}</td>
+                    <td className="py-3 px-4 text-textMuted text-xs">{t.receiver_name || "—"}</td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${t.status === "completed" ? "bg-green/10 border-green/20 text-green" : t.status === "pending" ? "bg-yellow/10 border-yellow/20 text-yellow" : "bg-red/10 border-red/20 text-red"}`}>
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted text-xs">{formatDate(t.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       </div>
 

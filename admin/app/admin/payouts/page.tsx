@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Card, Input, Select } from "@/components/ui";
+import { Button, Spinner, Card, Input, Select } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { Download, RefreshCw, ArrowRight, X, Zap, AlertTriangle, CheckCircle, Settings, Save, ShieldCheck, Fuel } from "lucide-react";
 import toast from "react-hot-toast";
@@ -14,12 +14,15 @@ const authHeaders = () => ({
   Authorization: `Bearer ${getToken()}`,
 });
 
-function statusTone(s: string) {
-  if (s === "completed" || s === "paid" || s === "success") return "green";
-  if (s === "pending" || s === "processing") return "yellow";
-  if (s === "failed" || s === "payout_failed") return "red";
-  return "muted";
-}
+const P_STATUS_CLS: Record<string, string> = {
+  completed:     "bg-green/10 border-green/20 text-green",
+  paid:          "bg-green/10 border-green/20 text-green",
+  success:       "bg-green/10 border-green/20 text-green",
+  pending:       "bg-yellow/10 border-yellow/20 text-yellow",
+  processing:    "bg-yellow/10 border-yellow/20 text-yellow",
+  failed:        "bg-red/10 border-red/20 text-red",
+  payout_failed: "bg-red/10 border-red/20 text-red",
+};
 
 // ── Payout Settings Panel ─────────────────────────────────────────────────────
 
@@ -388,35 +391,46 @@ export default function PayoutsPage() {
             <p className="text-xs mt-1">Payouts appear here after withdrawals are approved and processed</p>
           </div>
         ) : (
-          <Table
-            headers={["Driver", "Phone", "Requested", "Fee", "Net Paid", "Bank", "Account", "Status", "Stitch ID", "Date"]}
-            empty={false}>
-            {filtered.map((p: any) => (
-              <Tr key={p.id}>
-                <Td className="font-semibold">{p.driver_name || "—"}</Td>
-                <Td className="font-mono text-xs text-textMuted">{p.phone_number || "—"}</Td>
-                <Td className="font-bold">{formatZAR(p.amount)}</Td>
-                <Td className="text-red text-xs">R{(p.fee ?? 0).toFixed(2)}</Td>
-                <Td className="text-green font-bold">{formatZAR(p.net_amount ?? p.amount)}</Td>
-                <Td className="text-textMuted text-xs">{p.bank_name || "—"}</Td>
-                <Td className="font-mono text-xs text-textMuted">{p.account_number || "—"}</Td>
-                <Td>
-                  <Badge label={p.status} tone={statusTone(p.status)} />
-                  {p.failure_reason && (
-                    <p className="text-[10px] text-red mt-0.5">{p.failure_reason}</p>
-                  )}
-                </Td>
-                <Td>
-                  <span className="font-mono text-[10px] text-textDim">
-                    {p.stitch_disbursement_id?.slice(0, 16) || "—"}
-                  </span>
-                </Td>
-                <Td className="text-textMuted text-xs">
-                  {formatDate(p.initiated_at || p.created_at)}
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border bg-bg3/60">
+                  {["Driver", "Phone", "Requested", "Fee", "Net Paid", "Bank", "Account", "Status", "Stitch ID", "Date"].map(h => (
+                    <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p: any) => (
+                  <tr key={p.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                    <td className="py-3 px-4 font-semibold text-text text-xs">{p.driver_name || "—"}</td>
+                    <td className="py-3 px-4 font-mono text-xs text-textMuted">{p.phone_number || "—"}</td>
+                    <td className="py-3 px-4 font-bold text-text text-xs">{formatZAR(p.amount)}</td>
+                    <td className="py-3 px-4 text-red text-xs">R{(p.fee ?? 0).toFixed(2)}</td>
+                    <td className="py-3 px-4 text-green font-bold text-xs">{formatZAR(p.net_amount ?? p.amount)}</td>
+                    <td className="py-3 px-4 text-textMuted text-xs">{p.bank_name || "—"}</td>
+                    <td className="py-3 px-4 font-mono text-xs text-textMuted">{p.account_number || "—"}</td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${P_STATUS_CLS[p.status] || "bg-bg3 border-border text-textDim"}`}>
+                        {p.status}
+                      </span>
+                      {p.failure_reason && (
+                        <p className="text-[10px] text-red mt-0.5">{p.failure_reason}</p>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="font-mono text-[10px] text-textDim">
+                        {p.stitch_disbursement_id?.slice(0, 16) || "—"}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted text-xs">
+                      {formatDate(p.initiated_at || p.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </AdminShell>
