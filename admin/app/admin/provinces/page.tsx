@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Table, Tr, Td } from "@/components/ui";
+import { Card, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatZAR } from "@/lib/utils";
 import { MapPin, Users, Car, Building2, TrendingUp } from "lucide-react";
@@ -192,23 +192,34 @@ export default function ProvincesPage() {
           <h2 className="text-sm font-extrabold text-textMuted uppercase tracking-widest mb-4">
             Full Breakdown
           </h2>
-          <Table
-            headers={["Province", "Passengers", "Drivers", "Owners", "Total Users", "Rides", "Gross Revenue", "Platform Fees", "Driver Net"]}
-            empty={!topByUsers.length}>
-            {topByUsers.map(p => (
-              <Tr key={p.province}>
-                <Td className="font-semibold">{p.province}</Td>
-                <Td className="text-cyan">{p.passengers.toLocaleString()}</Td>
-                <Td className="text-green">{p.drivers.toLocaleString()}</Td>
-                <Td className="text-purple">{p.owners.toLocaleString()}</Td>
-                <Td className="font-bold">{(p.passengers + p.drivers + p.owners).toLocaleString()}</Td>
-                <Td>{p.rides.toLocaleString()}</Td>
-                <Td className="font-bold text-yellow">{formatZAR(p.gross_revenue)}</Td>
-                <Td className="text-textMuted">{formatZAR(p.platform_fees)}</Td>
-                <Td className="text-textMuted">{formatZAR(p.driver_net)}</Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-bg3">
+                  {["Province", "Passengers", "Drivers", "Owners", "Total", "Rides", "Gross Revenue", "Platform Fees", "Driver Net"].map(h => (
+                    <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {topByUsers.length === 0 ? (
+                  <tr><td colSpan={9} className="py-10 text-center text-textMuted">No province data</td></tr>
+                ) : topByUsers.map(p => (
+                  <tr key={p.province} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                    <td className="py-3 px-4 font-bold text-text">{p.province}</td>
+                    <td className="py-3 px-4 text-cyan font-bold tabular-nums">{p.passengers.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-green font-bold tabular-nums">{p.drivers.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-purple font-bold tabular-nums">{p.owners.toLocaleString()}</td>
+                    <td className="py-3 px-4 font-black text-text tabular-nums">{(p.passengers + p.drivers + p.owners).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-textMuted tabular-nums">{p.rides.toLocaleString()}</td>
+                    <td className="py-3 px-4 font-black text-yellow tabular-nums">{formatZAR(p.gross_revenue)}</td>
+                    <td className="py-3 px-4 text-textMuted tabular-nums">{formatZAR(p.platform_fees)}</td>
+                    <td className="py-3 px-4 text-textMuted tabular-nums">{formatZAR(p.driver_net)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
 
       </div>

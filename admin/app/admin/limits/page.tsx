@@ -1,14 +1,17 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Modal, Input, Spinner } from "@/components/ui";
+import { Card, Button, Modal, Input, Spinner } from "@/components/ui";
 import { formatZAR } from "@/lib/utils";
 import { Gauge, Edit2, Save, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, TxLimit } from "@/lib/api";
 
-const ROLE_TONE: Record<string, "cyan" | "green" | "yellow" | "purple" | "muted"> = {
-  passenger: "cyan", driver: "green", new_user: "yellow", owner: "purple",
+const ROLE_STYLE: Record<string, string> = {
+  passenger: "bg-cyan/10 border-cyan/20 text-cyan",
+  driver:    "bg-green/10 border-green/20 text-green",
+  new_user:  "bg-yellow/10 border-yellow/20 text-yellow",
+  owner:     "bg-purple/10 border-purple/20 text-purple",
 };
 
 export default function LimitsPage() {
@@ -60,29 +63,50 @@ export default function LimitsPage() {
           </div>
 
           {loading ? <Spinner /> : (
-            <Table
-              headers={["Role", "Daily Limit", "Single Txn", "Monthly Limit", "Min Topup", "Max Topup", "Max Withdrawal", "Min Withdrawal", "Status", "Actions"]}
-              empty={!limits.length}
-            >
-              {limits.map((l) => (
-                <Tr key={l.id}>
-                  <Td><Badge label={l.role} tone={ROLE_TONE[l.role] || "muted"} /></Td>
-                  <Td className="font-semibold">{formatZAR(l.daily_limit)}</Td>
-                  <Td className="font-semibold">{formatZAR(l.single_txn_limit)}</Td>
-                  <Td className="font-semibold">{formatZAR(l.monthly_limit)}</Td>
-                  <Td className="text-textMuted text-xs">{formatZAR(l.min_topup)}</Td>
-                  <Td className="text-textMuted text-xs">{formatZAR(l.max_topup)}</Td>
-                  <Td className="text-textMuted text-xs">{l.max_withdrawal > 0 ? formatZAR(l.max_withdrawal) : "—"}</Td>
-                  <Td className="text-textMuted text-xs">{l.min_withdrawal > 0 ? formatZAR(l.min_withdrawal) : "—"}</Td>
-                  <Td><Badge label={l.enabled ? "enabled" : "disabled"} tone={l.enabled ? "green" : "red"} /></Td>
-                  <Td>
-                    <Button variant="secondary" onClick={() => openEdit(l)}>
-                      <Edit2 size={12} /> Edit
-                    </Button>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["Role", "Daily", "Single Txn", "Monthly", "Min Topup", "Max Topup", "Max Withdrawal", "Min Withdrawal", "Status", ""].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {limits.length === 0 ? (
+                    <tr><td colSpan={10} className="py-12 text-center text-textMuted">No limits configured</td></tr>
+                  ) : limits.map(l => (
+                    <tr key={l.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black capitalize ${ROLE_STYLE[l.role] || "bg-bg3 border-border text-textMuted"}`}>
+                          {l.role.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 font-bold text-text tabular-nums">{formatZAR(l.daily_limit)}</td>
+                      <td className="py-3 px-4 font-bold text-text tabular-nums">{formatZAR(l.single_txn_limit)}</td>
+                      <td className="py-3 px-4 font-bold text-text tabular-nums">{formatZAR(l.monthly_limit)}</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{formatZAR(l.min_topup)}</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{formatZAR(l.max_topup)}</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{l.max_withdrawal > 0 ? formatZAR(l.max_withdrawal) : "—"}</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{l.min_withdrawal > 0 ? formatZAR(l.min_withdrawal) : "—"}</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                          l.enabled ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"
+                        }`}>
+                          {l.enabled ? "enabled" : "disabled"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <button onClick={() => openEdit(l)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-textMuted text-[10px] font-bold hover:text-cyan hover:border-cyan/30 transition-all">
+                          <Edit2 size={10} /> Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>
