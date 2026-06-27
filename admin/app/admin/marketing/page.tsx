@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input, Select } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
@@ -210,31 +210,62 @@ export default function MarketingPage() {
             <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest">All Promotions</h2>
             <Button onClick={() => setCreateModal(true)} variant="secondary"><Plus size={13} /> Create</Button>
           </div>
-          <Table headers={["Code", "Discount", "Type", "Uses", "Role", "Expires", "Status", ""]} empty={!promos.length}>
-            {promos.map(p => (
-              <Tr key={p.id}>
-                <Td className="font-mono font-bold text-cyan">{p.code}</Td>
-                <Td className="font-bold">
-                  {p.discount_type === "percent" ? `${p.discount_value}%` : formatZAR(p.discount_value)}
-                </Td>
-                <Td><Badge label={p.discount_type} tone="cyan" /></Td>
-                <Td className="text-textMuted">{p.use_count || 0}{p.max_uses ? ` / ${p.max_uses}` : ""}</Td>
-                <Td><Badge label={p.target_role || "all"} tone="purple" /></Td>
-                <Td className="text-textMuted text-xs">{p.expires_at ? formatDate(p.expires_at) : "Never"}</Td>
-                <Td><Badge label={p.active ? "active" : "paused"} tone={p.active ? "green" : "yellow"} /></Td>
-                <Td>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleTogglePromo(p)} className="text-xs px-2 py-1 rounded border border-border text-textMuted hover:text-cyan hover:border-cyan/30 transition-all">
-                      {p.active ? "Pause" : "Activate"}
-                    </button>
-                    <button onClick={() => handleDeletePromo(p.id)} className="text-xs px-2 py-1 rounded border border-border text-textMuted hover:text-red hover:border-red/30 transition-all">
-                      Delete
-                    </button>
-                  </div>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["Code", "Discount", "Type", "Uses", "Role", "Expires", "Status", ""].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {promos.length === 0 ? (
+                    <tr><td colSpan={8} className="py-10 text-center text-textMuted">No promotions yet</td></tr>
+                  ) : promos.map(p => (
+                    <tr key={p.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                      <td className="py-3 px-4 font-mono font-black text-cyan">{p.code}</td>
+                      <td className="py-3 px-4 font-bold text-text tabular-nums">
+                        {p.discount_type === "percent" ? `${p.discount_value}%` : formatZAR(p.discount_value)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded-full border border-cyan/20 bg-cyan/10 text-cyan text-[10px] font-bold">
+                          {p.discount_type}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{p.use_count || 0}{p.max_uses ? ` / ${p.max_uses}` : ""}</td>
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded-full border border-purple/20 bg-purple/10 text-purple text-[10px] font-bold">
+                          {p.target_role || "all"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-textDim whitespace-nowrap">{p.expires_at ? formatDate(p.expires_at) : "Never"}</td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                          p.active ? "border-green/20 bg-green/10 text-green" : "border-yellow/20 bg-yellow/10 text-yellow"
+                        }`}>
+                          {p.active ? "active" : "paused"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex gap-1.5">
+                          <button onClick={() => handleTogglePromo(p)}
+                            className="text-[10px] px-2 py-1 rounded-lg border border-border text-textMuted hover:text-cyan hover:border-cyan/30 font-bold transition-all">
+                            {p.active ? "Pause" : "Activate"}
+                          </button>
+                          <button onClick={() => handleDeletePromo(p.id)}
+                            className="text-[10px] px-2 py-1 rounded-lg border border-border text-textMuted hover:text-red hover:border-red/30 font-bold transition-all">
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         {/* Recent broadcasts */}
@@ -243,17 +274,32 @@ export default function MarketingPage() {
             <h2 className="text-sm font-bold text-textMuted uppercase tracking-widest">Recent Broadcasts</h2>
             <Button onClick={() => window.location.href = "/admin/notifications"} variant="secondary"><Send size={13} /> Manage Broadcasts</Button>
           </div>
-          <Table headers={["Title", "Message", "Audience", "Sent By", "Date"]} empty={!broadcasts.length}>
-            {broadcasts.slice(0, 10).map((b: any) => (
-              <Tr key={b.id}>
-                <Td className="font-semibold">{b.title}</Td>
-                <Td className="text-textMuted text-xs max-w-xs truncate">{b.body || b.message}</Td>
-                <Td><Badge label={b.target === "role" ? b.target_role || "role" : b.target || "all"} tone="cyan" /></Td>
-                <Td className="text-textMuted text-xs">{b.sent_by_name || "System"}</Td>
-                <Td className="text-textMuted text-xs">{formatDate(b.sent_at || b.created_at)}</Td>
-              </Tr>
-            ))}
-          </Table>
+          {broadcasts.length === 0 ? (
+            <div className="py-8 text-center border border-border rounded-xl text-textMuted text-sm">No broadcasts yet</div>
+          ) : (
+            <div className="space-y-2">
+              {broadcasts.slice(0, 10).map((b: any) => (
+                <div key={b.id} className="bg-bg2 border border-border rounded-xl px-4 py-3 flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-cyanDim border border-cyan/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Megaphone size={13} className="text-cyan" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-bold text-text text-sm">{b.title}</p>
+                      <span className="px-2 py-0.5 rounded-full border border-cyan/20 bg-cyan/10 text-cyan text-[10px] font-bold">
+                        {b.target === "role" ? b.target_role || "role" : b.target || "all"}
+                      </span>
+                    </div>
+                    <p className="text-textMuted text-[11px] mt-0.5 line-clamp-1">{b.body || b.message}</p>
+                  </div>
+                  <div className="text-right text-[10px] text-textDim flex-shrink-0">
+                    <p>{b.sent_by_name || "System"}</p>
+                    <p>{formatDate(b.sent_at || b.created_at)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
       </div>
