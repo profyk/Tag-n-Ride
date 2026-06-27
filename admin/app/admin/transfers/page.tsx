@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Modal, Select, Input } from "@/components/ui";
+import { Button, Spinner, Modal, Select, Input } from "@/components/ui";
 import { api, DriverTransfer, ContactAttempt } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { ArrowRightLeft, Phone, MessageSquare, Mail, Users, CheckCircle, XCircle, RefreshCw, ChevronDown } from "lucide-react";
@@ -25,6 +25,16 @@ const STATUS_LABELS: Record<string, string> = {
   rejected_by_old_owner: "Rejected (Old Owner)",
   rejected_by_new_owner: "Rejected (New Owner)",
   cancelled: "Cancelled",
+};
+
+const STATUS_CLS: Record<string, string> = {
+  pending_old_owner:     "bg-yellow/10 border-yellow/20 text-yellow",
+  pending_new_owner:     "bg-yellow/10 border-yellow/20 text-yellow",
+  escalated_to_admin:    "bg-orange/10 border-orange/20 text-orange",
+  completed:             "bg-green/10 border-green/20 text-green",
+  rejected_by_old_owner: "bg-red/10 border-red/20 text-red",
+  rejected_by_new_owner: "bg-red/10 border-red/20 text-red",
+  cancelled:             "bg-bg3 border-border text-textMuted",
 };
 
 const CONTACT_METHODS = ["phone", "whatsapp", "email", "in_person"];
@@ -133,32 +143,44 @@ export default function TransfersPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <Table
-            headers={["Driver", "From Fleet", "To Fleet", "Status", "Escalated", "Actions"]}
-            empty={!transfers.length}
-          >
-            {transfers.map(t => (
-              <Tr key={t.id}>
-                <Td>
-                  <p className="font-semibold">{t.driver_name}</p>
-                  <p className="text-xs text-textDim font-mono">{t.driver_phone}</p>
-                </Td>
-                <Td className="text-sm text-textMuted">{t.old_owner_name || "—"}</Td>
-                <Td className="text-sm">{t.new_owner_name}</Td>
-                <Td>
-                  <Badge label={STATUS_LABELS[t.status] || t.status} tone={STATUS_COLORS[t.status] || "muted"} />
-                </Td>
-                <Td className="text-xs text-textMuted">
-                  {t.escalated_at ? formatDate(t.escalated_at) : "—"}
-                </Td>
-                <Td>
-                  <Button variant="secondary" onClick={() => openDetail(t)}>
-                    <ArrowRightLeft size={12} /> Review
-                  </Button>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border bg-bg3/60">
+                  {["Driver", "From Fleet", "To Fleet", "Status", "Escalated", "Actions"].map(h => (
+                    <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.length === 0 ? (
+                  <tr><td colSpan={6} className="py-10 text-center text-textMuted text-sm">No transfers</td></tr>
+                ) : transfers.map(t => (
+                  <tr key={t.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                    <td className="py-3 px-4">
+                      <p className="font-semibold text-text">{t.driver_name}</p>
+                      <p className="text-xs text-textDim font-mono">{t.driver_phone}</p>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-textMuted">{t.old_owner_name || "—"}</td>
+                    <td className="py-3 px-4 text-sm text-text">{t.new_owner_name}</td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[t.status] || "bg-bg3 border-border text-textMuted"}`}>
+                        {STATUS_LABELS[t.status] || t.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-xs text-textMuted">
+                      {t.escalated_at ? formatDate(t.escalated_at) : "—"}
+                    </td>
+                    <td className="py-3 px-4">
+                      <Button variant="secondary" onClick={() => openDetail(t)}>
+                        <ArrowRightLeft size={12} /> Review
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -175,7 +197,9 @@ export default function TransfersPage() {
               </div>
               <div className="bg-bg rounded-lg p-3">
                 <p className="text-textMuted text-xs font-bold uppercase tracking-wide mb-1">Status</p>
-                <Badge label={STATUS_LABELS[selected.status] || selected.status} tone={STATUS_COLORS[selected.status] || "muted"} />
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[selected.status] || "bg-bg3 border-border text-textMuted"}`}>
+                  {STATUS_LABELS[selected.status] || selected.status}
+                </span>
               </div>
               <div className="bg-bg rounded-lg p-3">
                 <p className="text-textMuted text-xs font-bold uppercase tracking-wide mb-1">From Fleet</p>

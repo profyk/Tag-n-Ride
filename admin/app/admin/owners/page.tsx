@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Input, Modal } from "@/components/ui";
+import { Button, Spinner, Input, Modal } from "@/components/ui";
 import { api, Owner } from "@/lib/api";
 import { formatZAR, formatDate, SA_PROVINCES } from "@/lib/utils";
 import {
@@ -239,18 +239,16 @@ function OwnerDetailModal({ owner, onClose, onQr }: {
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs">
                 <span className="text-textMuted">Cashup Method</span>
-                <Badge
-                  label={owner.cashup_method === "wallet" ? "Wallet" : "Bank Transfer"}
-                  tone={owner.cashup_method === "wallet" ? "cyan" : "purple"}
-                />
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${owner.cashup_method === "wallet" ? "bg-cyan/10 border-cyan/20 text-cyan" : "bg-purple/10 border-purple/20 text-purple"}`}>
+                  {owner.cashup_method === "wallet" ? "Wallet" : "Bank Transfer"}
+                </span>
               </div>
               {(owner as any).subscription_status && (
                 <div className="flex justify-between text-xs">
                   <span className="text-textMuted">Subscription</span>
-                  <Badge
-                    label={(owner as any).subscription_status}
-                    tone={(owner as any).subscription_status === "active" ? "green" : "muted"}
-                  />
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${(owner as any).subscription_status === "active" ? "bg-green/10 border-green/20 text-green" : "bg-bg3 border-border text-textMuted"}`}>
+                    {(owner as any).subscription_status}
+                  </span>
                 </div>
               )}
             </div>
@@ -539,10 +537,9 @@ export default function OwnersPage() {
 
                       {/* Cashup method */}
                       <td className="py-3 px-4">
-                        <Badge
-                          label={o.cashup_method === "wallet" ? "Wallet" : "Bank"}
-                          tone={o.cashup_method === "wallet" ? "cyan" : "purple"}
-                        />
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${o.cashup_method === "wallet" ? "bg-cyan/10 border-cyan/20 text-cyan" : "bg-purple/10 border-purple/20 text-purple"}`}>
+                          {o.cashup_method === "wallet" ? "Wallet" : "Bank"}
+                        </span>
                       </td>
 
                       {/* Bank setup */}

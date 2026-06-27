@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Card } from "@/components/ui";
+import { Button, Spinner, Modal, Input, Card } from "@/components/ui";
 import { api, KYCDocument } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import {
@@ -37,8 +37,11 @@ const REJECTION_PRESETS = [
   "Handwritten licence not accepted — must be a government-issued card",
 ];
 
-const TONE = (s: string): any =>
-  s === "approved" ? "green" : s === "pending" ? "yellow" : s === "rejected" ? "red" : "muted";
+const KYC_CLS = (s: string) =>
+  s === "approved" ? "bg-green/10 border-green/20 text-green"
+  : s === "pending" ? "bg-yellow/10 border-yellow/20 text-yellow"
+  : s === "rejected" ? "bg-red/10 border-red/20 text-red"
+  : "bg-bg3 border-border text-textMuted";
 
 function waitDays(submitted: string) {
   return Math.floor((Date.now() - new Date(submitted).getTime()) / 86400000);
@@ -406,81 +409,83 @@ export default function KYCPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <Table
-            headers={["", "Name", "Phone", "Status", "Submitted", "Waiting", "Reviewed By", "Actions"]}
-            empty={!filtered.length}>
-            {filtered
-              .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())
-              .map((doc) => {
-                const days = waitDays(doc.submitted_at);
-                const thumbSrc = thumb(doc.selfie_url);
-                const isApprovingThis = approving === doc.user_id;
-                return (
-                  <Tr key={doc.id}>
-                    {/* Selfie thumbnail */}
-                    <Td>
-                      {thumbSrc ? (
-                        <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border flex-shrink-0">
-                          <img
-                            src={thumbSrc}
-                            alt="Selfie"
-                            className="w-full h-full object-cover"
-                            onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-bg3 border border-border flex items-center justify-center">
-                          <User size={14} className="text-textDim" />
-                        </div>
-                      )}
-                    </Td>
-                    <Td className="font-semibold">{doc.full_name || "—"}</Td>
-                    <Td className="font-mono text-xs text-textMuted">{doc.phone_number || "—"}</Td>
-                    <Td><Badge label={doc.status} tone={TONE(doc.status)} /></Td>
-                    <Td className="text-textMuted text-xs whitespace-nowrap">{formatDate(doc.submitted_at)}</Td>
-                    <Td>
-                      {doc.status === "pending" && (
-                        <div className="flex items-center gap-1.5">
-                          <Clock size={11} className={days > 5 ? "text-red" : days > 2 ? "text-yellow" : "text-textMuted"} />
-                          <span className={`text-xs font-bold ${days > 5 ? "text-red" : days > 2 ? "text-yellow" : "text-textMuted"}`}>
-                            {days}d
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border bg-bg3/60">
+                  {["", "Name", "Phone", "Status", "Submitted", "Waiting", "Reviewed By", "Actions"].map(h => (
+                    <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr><td colSpan={8} className="py-10 text-center text-textMuted text-sm">No KYC submissions</td></tr>
+                ) : filtered
+                  .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())
+                  .map((doc) => {
+                    const days = waitDays(doc.submitted_at);
+                    const thumbSrc = thumb(doc.selfie_url);
+                    const isApprovingThis = approving === doc.user_id;
+                    return (
+                      <tr key={doc.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                        <td className="py-3 px-4">
+                          {thumbSrc ? (
+                            <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border flex-shrink-0">
+                              <img src={thumbSrc} alt="Selfie" className="w-full h-full object-cover"
+                                onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                            </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-bg3 border border-border flex items-center justify-center">
+                              <User size={14} className="text-textDim" />
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-text">{doc.full_name || "—"}</td>
+                        <td className="py-3 px-4 font-mono text-xs text-textMuted">{doc.phone_number || "—"}</td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${KYC_CLS(doc.status)}`}>
+                            {doc.status}
                           </span>
-                        </div>
-                      )}
-                    </Td>
-                    <Td className="text-textMuted text-xs">
-                      {doc.status !== "pending" ? (doc.reviewed_by || (doc.reviewed_at ? formatDate(doc.reviewed_at) : "—")) : "—"}
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {doc.status === "pending" && (
-                          <>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleApprove(doc)}
-                              loading={isApprovingThis}
-                              className="text-green border-green/20 bg-green/5 hover:bg-green/10">
-                              <CheckCircle size={12} /> Approve
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs whitespace-nowrap">{formatDate(doc.submitted_at)}</td>
+                        <td className="py-3 px-4">
+                          {doc.status === "pending" && (
+                            <div className="flex items-center gap-1.5">
+                              <Clock size={11} className={days > 5 ? "text-red" : days > 2 ? "text-yellow" : "text-textMuted"} />
+                              <span className={`text-xs font-bold ${days > 5 ? "text-red" : days > 2 ? "text-yellow" : "text-textMuted"}`}>
+                                {days}d
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs">
+                          {doc.status !== "pending" ? (doc.reviewed_by || (doc.reviewed_at ? formatDate(doc.reviewed_at) : "—")) : "—"}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {doc.status === "pending" && (
+                              <>
+                                <Button variant="secondary" onClick={() => handleApprove(doc)} loading={isApprovingThis}
+                                  className="text-green border-green/20 bg-green/5 hover:bg-green/10">
+                                  <CheckCircle size={12} /> Approve
+                                </Button>
+                                <Button variant="danger" onClick={() => setRejectModal(doc)}>
+                                  <XCircle size={12} /> Reject
+                                </Button>
+                              </>
+                            )}
+                            <Button variant="ghost" onClick={() => handleView(doc)} title="View documents">
+                              <Eye size={12} /> View
                             </Button>
-                            <Button
-                              variant="danger"
-                              onClick={() => setRejectModal(doc)}>
-                              <XCircle size={12} /> Reject
-                            </Button>
-                          </>
-                        )}
-                        <Button
-                          variant="ghost"
-                          onClick={() => handleView(doc)}
-                          title="View documents">
-                          <Eye size={12} /> View
-                        </Button>
-                      </div>
-                    </Td>
-                  </Tr>
-                );
-              })}
-          </Table>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -519,7 +524,9 @@ export default function KYCPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Badge label={viewDoc.status} tone={TONE(viewDoc.status)} />
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${KYC_CLS(viewDoc.status)}`}>
+                  {viewDoc.status}
+                </span>
                 <span className="text-textDim text-xs hidden sm:block">
                   {formatDate(viewDoc.submitted_at)}
                   {viewDoc.status === "pending" && (

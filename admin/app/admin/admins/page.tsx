@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Modal, Input, Select, Card } from "@/components/ui";
+import { Button, Spinner, Modal, Input, Select, Card } from "@/components/ui";
 import { api, AdminUser, isSuperAdmin } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
 import { PlusCircle, Trash2, ShieldOff, ShieldCheck, LogOut, Edit2, Key, Clock, Activity, AlertTriangle } from "lucide-react";
@@ -175,78 +175,81 @@ export default function AdminsPage() {
         </div>
 
         {loading ? <Spinner /> : (
-          <Table
-            headers={["Name", "Email", "Role", "Status", "Last Login", "Inactivity", "Created By", "Actions"]}
-            empty={!admins.length}>
-            {admins.map((a) => {
-              const lastLoginDays = daysSince(a.last_login ?? null);
-              const stale = lastLoginDays !== null && lastLoginDays > 30;
-              return (
-                <Tr key={a.id} className={!a.is_active ? "opacity-60" : ""}>
-                  <Td className="font-semibold">{a.full_name}</Td>
-                  <Td className="text-textMuted text-sm">{a.email}</Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-1">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(a.role)}`}>
-                        {a.role}
-                      </span>
-                      {(a.extra_roles || []).map(r => (
-                        <span key={r} className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border opacity-70 ${roleBadgeColor(r)}`}>
-                          +{r}
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border bg-bg3/60">
+                  {["Name", "Email", "Role", "Status", "Last Login", "Inactivity", "Created By", "Actions"].map(h => (
+                    <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {admins.length === 0 ? (
+                  <tr><td colSpan={8} className="py-10 text-center text-textMuted text-sm">No admin accounts</td></tr>
+                ) : admins.map((a) => {
+                  const lastLoginDays = daysSince(a.last_login ?? null);
+                  const stale = lastLoginDays !== null && lastLoginDays > 30;
+                  return (
+                    <tr key={a.id} className={`border-b border-border/50 hover:bg-bg3/40 transition-colors ${!a.is_active ? "opacity-60" : ""}`}>
+                      <td className="py-3 px-4 font-semibold text-text">{a.full_name}</td>
+                      <td className="py-3 px-4 text-textMuted text-sm">{a.email}</td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-wrap gap-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(a.role)}`}>
+                            {a.role}
+                          </span>
+                          {(a.extra_roles || []).map(r => (
+                            <span key={r} className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border opacity-70 ${roleBadgeColor(r)}`}>
+                              +{r}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${a.is_active ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>
+                          {a.is_active ? "Active" : "Suspended"}
                         </span>
-                      ))}
-                    </div>
-                  </Td>
-                  <Td>
-                    <Badge label={a.is_active ? "Active" : "Suspended"} tone={a.is_active ? "green" : "red"} />
-                  </Td>
-                  <Td className="text-textMuted text-xs">
-                    {a.last_login ? formatDate(a.last_login) : (
-                      <span className="text-yellow font-bold text-[10px]">Never</span>
-                    )}
-                  </Td>
-                  <Td>
-                    {lastLoginDays === null ? (
-                      <span className="text-yellow text-xs">—</span>
-                    ) : (
-                      <div className="flex items-center gap-1">
-                        <Clock size={10} className={stale ? "text-yellow" : "text-textDim"} />
-                        <span className={`text-xs ${stale ? "text-yellow font-bold" : "text-textMuted"}`}>
-                          {lastLoginDays}d ago
-                        </span>
-                      </div>
-                    )}
-                  </Td>
-                  <Td className="text-textMuted text-xs">{a.created_by_name || "—"}</Td>
-                  <Td>
-                    {a.role !== "superadmin" && (
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" onClick={() => {
-                          setEditModal(a); setEditRole(a.role);
-                          setEditExtraRoles(a.extra_roles || []);
-                          setEditName(a.full_name); setEditEmail(a.email);
-                        }}>
-                          <Edit2 size={12} />
-                        </Button>
-                        <Button variant="ghost" onClick={() => setPwModal(a)}>
-                          <Key size={12} />
-                        </Button>
-                        <Button variant="ghost" onClick={() => handleForceLogout(a)}>
-                          <LogOut size={12} />
-                        </Button>
-                        <Button variant={a.is_active ? "danger" : "secondary"} onClick={() => handleSuspend(a)}>
-                          {a.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
-                        </Button>
-                        <Button variant="danger" onClick={() => handleDelete(a)}>
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    )}
-                  </Td>
-                </Tr>
-              );
-            })}
-          </Table>
+                      </td>
+                      <td className="py-3 px-4 text-textMuted text-xs">
+                        {a.last_login ? formatDate(a.last_login) : <span className="text-yellow font-bold text-[10px]">Never</span>}
+                      </td>
+                      <td className="py-3 px-4">
+                        {lastLoginDays === null ? (
+                          <span className="text-yellow text-xs">—</span>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Clock size={10} className={stale ? "text-yellow" : "text-textDim"} />
+                            <span className={`text-xs ${stale ? "text-yellow font-bold" : "text-textMuted"}`}>{lastLoginDays}d ago</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-textMuted text-xs">{a.created_by_name || "—"}</td>
+                      <td className="py-3 px-4">
+                        {a.role !== "superadmin" && (
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" onClick={() => {
+                              setEditModal(a); setEditRole(a.role);
+                              setEditExtraRoles(a.extra_roles || []);
+                              setEditName(a.full_name); setEditEmail(a.email);
+                            }}>
+                              <Edit2 size={12} />
+                            </Button>
+                            <Button variant="ghost" onClick={() => setPwModal(a)}><Key size={12} /></Button>
+                            <Button variant="ghost" onClick={() => handleForceLogout(a)}><LogOut size={12} /></Button>
+                            <Button variant={a.is_active ? "danger" : "secondary"} onClick={() => handleSuspend(a)}>
+                              {a.is_active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
+                            </Button>
+                            <Button variant="danger" onClick={() => handleDelete(a)}><Trash2 size={12} /></Button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

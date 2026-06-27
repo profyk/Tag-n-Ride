@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Badge, Button, Modal, Input } from "@/components/ui";
+import { Card, Spinner, Button, Modal, Input } from "@/components/ui";
 import { api, hasPermission } from "@/lib/api";
 import { DangerPinModal, useDangerPin } from "@/components/DangerPinModal";
 import { formatZAR, formatDate } from "@/lib/utils";
@@ -49,9 +49,13 @@ function InfoRow({ label, value, copy }: { label: string; value: string; copy?: 
   );
 }
 
-const TXN_TONE: Record<string, any> = {
-  topup: "cyan", payment: "green", withdrawal: "purple",
-  cashup: "yellow", refund: "green", failed: "red",
+const TXN_CLS: Record<string, string> = {
+  topup:      "bg-cyan/10 border-cyan/20 text-cyan",
+  payment:    "bg-green/10 border-green/20 text-green",
+  withdrawal: "bg-purple/10 border-purple/20 text-purple",
+  cashup:     "bg-yellow/10 border-yellow/20 text-yellow",
+  refund:     "bg-green/10 border-green/20 text-green",
+  failed:     "bg-red/10 border-red/20 text-red",
 };
 
 export default function SupportPage() {
@@ -306,10 +310,10 @@ export default function SupportPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-text font-extrabold text-lg">{result.user.full_name}</h2>
-                    <Badge label={result.user.role} tone="cyan" />
-                    <Badge label={result.user.is_active ? "Active" : "Blocked"} tone={result.user.is_active ? "green" : "red"} />
-                    {result.user.flagged && <Badge label="Flagged" tone="yellow" />}
-                    {result.wallet?.is_frozen && <Badge label="Wallet Frozen" tone="red" />}
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-cyan/10 border-cyan/20 text-cyan">{result.user.role}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${result.user.is_active ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>{result.user.is_active ? "Active" : "Blocked"}</span>
+                    {result.user.flagged && <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-yellow/10 border-yellow/20 text-yellow">Flagged</span>}
+                    {result.wallet?.is_frozen && <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-red/10 border-red/20 text-red">Wallet Frozen</span>}
                   </div>
                   <div className="flex items-center gap-4 mt-1 flex-wrap">
                     <div className="flex items-center gap-1.5 text-textMuted text-xs">
@@ -527,7 +531,7 @@ export default function SupportPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <Badge label={t.type} tone={TXN_TONE[t.type] ?? "cyan"} />
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${TXN_CLS[t.type] ?? "bg-cyan/10 border-cyan/20 text-cyan"}`}>{t.type}</span>
                                 <span className="font-mono text-[10px] text-textDim truncate">{t.reference}</span>
                               </div>
                               <p className="text-textMuted text-xs mt-0.5">{formatDate(t.created_at)}</p>
@@ -536,7 +540,7 @@ export default function SupportPage() {
                               <p className={`font-bold text-sm ${t.direction === "in" ? "text-green" : "text-text"}`}>
                                 {t.direction === "in" ? "+" : "-"}{formatZAR(t.amount)}
                               </p>
-                              <Badge label={t.status} tone={t.status === "completed" ? "green" : t.status === "failed" ? "red" : "yellow"} />
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${t.status === "completed" ? "bg-green/10 border-green/20 text-green" : t.status === "failed" ? "bg-red/10 border-red/20 text-red" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>{t.status}</span>
                             </div>
                             {expandedTxn === t.id ? <ChevronUp size={12} className="text-textDim" /> : <ChevronDown size={12} className="text-textDim" />}
                           </div>
@@ -578,7 +582,7 @@ export default function SupportPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-text font-bold text-sm">{formatZAR(w.amount)}</span>
-                            <Badge label={w.status} tone={w.status === "approved" || w.status === "paid" ? "green" : w.status === "pending" ? "yellow" : "red"} />
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${w.status === "approved" || w.status === "paid" ? "bg-green/10 border-green/20 text-green" : w.status === "pending" ? "bg-yellow/10 border-yellow/20 text-yellow" : "bg-red/10 border-red/20 text-red"}`}>{w.status}</span>
                           </div>
                           <p className="text-textMuted text-xs">{w.bank_name} · ****{w.account_number?.slice(-4)}</p>
                           <p className="text-textDim text-[10px]">{formatDate(w.created_at)}</p>
