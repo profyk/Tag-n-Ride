@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard, Modal } from "@/components/ui";
+import { Card, Button, Spinner, Modal } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import { Star, Flag, Trash2, Download, TrendingUp, BarChart3, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
@@ -123,11 +123,18 @@ export default function FeedbackPage() {
       <div className="space-y-6">
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Reviews" value={String(stats.total)} tone="cyan" />
-          <StatCard label="Average Rating" value={`${stats.avg_rating.toFixed(1)} ★`} tone={stats.avg_rating >= 4 ? "green" : stats.avg_rating >= 3 ? "yellow" : "red"} />
-          <StatCard label="Sentiment Score" value={`${sentimentScore}%`} tone={sentimentScore >= 70 ? "green" : sentimentScore >= 50 ? "yellow" : "red"} />
-          <StatCard label="Flagged Reviews" value={String(stats.flagged_count)} tone={stats.flagged_count > 0 ? "red" : "green"} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Total Reviews",   value: String(stats.total),              color: "text-cyan"   },
+            { label: "Average Rating",  value: `${stats.avg_rating.toFixed(1)} ★`, color: stats.avg_rating >= 4 ? "text-green" : stats.avg_rating >= 3 ? "text-yellow" : "text-red" },
+            { label: "Sentiment Score", value: `${sentimentScore}%`,              color: sentimentScore >= 70 ? "text-green" : sentimentScore >= 50 ? "text-yellow" : "text-red"  },
+            { label: "Flagged Reviews", value: String(stats.flagged_count),       color: stats.flagged_count > 0 ? "text-red" : "text-green" },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-2">{s.label}</p>
+              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Sentiment banner */}
@@ -193,45 +200,59 @@ export default function FeedbackPage() {
           </div>
 
           {loading ? <Spinner /> : (
-            <Table
-              headers={["", "Rating", "Comment", "From", "About", "Flagged", "Date", "Actions"]}
-              empty={!items.length}
-            >
-              {items.map((item) => (
-                <Tr key={item.id}>
-                  <Td>
-                    <input
-                      type="checkbox"
-                      className="w-3.5 h-3.5 accent-cyan"
-                      checked={selected.has(item.id)}
-                      onChange={() => toggleSelect(item.id)}
-                    />
-                  </Td>
-                  <Td><StarDisplay rating={item.rating} /></Td>
-                  <Td className="text-textMuted text-xs max-w-[200px]">{item.comment || <span className="italic text-textDim">No comment</span>}</Td>
-                  <Td>
-                    <p className="text-sm font-semibold">{item.rater_name}</p>
-                    <p className="text-[10px] text-textMuted capitalize">{item.rater_role}</p>
-                  </Td>
-                  <Td>
-                    <p className="text-sm font-semibold">{item.rated_name}</p>
-                    <p className="text-[10px] text-textMuted capitalize">{item.rated_role}</p>
-                  </Td>
-                  <Td>{item.is_flagged ? <Badge label="flagged" tone="red" /> : <span className="text-textDim text-xs">—</span>}</Td>
-                  <Td className="text-textMuted text-xs">{formatDate(item.created_at)}</Td>
-                  <Td>
-                    <div className="flex items-center gap-1.5">
-                      <Button variant="ghost" onClick={() => flag(item)} title={item.is_flagged ? "Unflag" : "Flag"}>
-                        <Flag size={13} className={item.is_flagged ? "text-yellow" : "text-textDim"} />
-                      </Button>
-                      <Button variant="ghost" onClick={() => remove(item)}>
-                        <Trash2 size={13} className="text-red" />
-                      </Button>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["", "Rating", "Comment", "From", "About", "Flagged", "Date", ""].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.length === 0 ? (
+                    <tr><td colSpan={8} className="py-12 text-center text-textMuted">No feedback found</td></tr>
+                  ) : items.map(item => (
+                    <tr key={item.id} className={`border-b border-border hover:bg-bg3/50 transition-colors ${item.is_flagged ? "bg-red/3" : ""}`}>
+                      <td className="py-3 px-4">
+                        <input type="checkbox" className="w-3.5 h-3.5 accent-cyan"
+                          checked={selected.has(item.id)} onChange={() => toggleSelect(item.id)} />
+                      </td>
+                      <td className="py-3 px-4"><StarDisplay rating={item.rating} /></td>
+                      <td className="py-3 px-4 text-textMuted max-w-[200px]">
+                        <span className="line-clamp-2">{item.comment || <em className="text-textDim">No comment</em>}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-bold text-text">{item.rater_name}</p>
+                        <p className="text-textDim text-[10px] capitalize">{item.rater_role}</p>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-bold text-text">{item.rated_name}</p>
+                        <p className="text-textDim text-[10px] capitalize">{item.rated_role}</p>
+                      </td>
+                      <td className="py-3 px-4">
+                        {item.is_flagged
+                          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-red/20 bg-red/10 text-red text-[10px] font-black"><Flag size={8} /> flagged</span>
+                          : <span className="text-textDim">—</span>}
+                      </td>
+                      <td className="py-3 px-4 text-textDim whitespace-nowrap">{formatDate(item.created_at)}</td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => flag(item)} title={item.is_flagged ? "Unflag" : "Flag"}
+                            className="p-1.5 rounded-lg text-textDim hover:text-yellow transition-all">
+                            <Flag size={12} className={item.is_flagged ? "text-yellow" : ""} />
+                          </button>
+                          <button onClick={() => remove(item)}
+                            className="p-1.5 rounded-lg text-textDim hover:text-red transition-all">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>

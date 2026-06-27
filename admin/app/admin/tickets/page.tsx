@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Input, StatCard } from "@/components/ui";
+import { Card, Button, Spinner, Input } from "@/components/ui";
 import { formatDate, formatZAR } from "@/lib/utils";
 import {
   Scale, AlertTriangle, RotateCcw, Flag, RefreshCw,
@@ -35,16 +35,25 @@ interface Ticket {
   metadata?: Record<string, any>;
 }
 
+const TONE_CLS: Record<string, string> = {
+  red:    "bg-red/10 border-red/20 text-red",
+  yellow: "bg-yellow/10 border-yellow/20 text-yellow",
+  orange: "bg-orange-400/10 border-orange-400/20 text-orange-400",
+  purple: "bg-purple/10 border-purple/20 text-purple",
+  green:  "bg-green/10 border-green/20 text-green",
+  cyan:   "bg-cyan/10 border-cyan/20 text-cyan",
+};
+
 const TYPE_CONFIG: Record<TicketType, { label: string; icon: any; tone: string }> = {
-  dispute:     { label: "Dispute",      icon: Scale,          tone: "red" },
+  dispute:     { label: "Dispute",      icon: Scale,          tone: "red"    },
   refund:      { label: "Refund",       icon: RotateCcw,      tone: "yellow" },
   flagged:     { label: "Flagged User", icon: Flag,           tone: "orange" },
   kyc_rejected:{ label: "KYC Rejected", icon: AlertTriangle,  tone: "purple" },
 };
 
 const STATUS_CONFIG: Record<TicketStatus, { tone: string; label: string }> = {
-  open:     { tone: "green",  label: "Open" },
-  pending:  { tone: "yellow", label: "Pending" },
+  open:     { tone: "green",  label: "Open"     },
+  pending:  { tone: "yellow", label: "Pending"  },
   resolved: { tone: "cyan",   label: "Resolved" },
   rejected: { tone: "red",    label: "Rejected" },
 };
@@ -191,12 +200,19 @@ export default function TicketsPage() {
       <div className="space-y-5">
 
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <StatCard label="Open" value={counts.open.toString()} tone={counts.open > 0 ? "red" : "green"} />
-          <StatCard label="Pending" value={counts.pending.toString()} tone="yellow" />
-          <StatCard label="High Priority" value={counts.high.toString()} tone={counts.high > 0 ? "red" : "cyan"} />
-          <StatCard label="Disputes" value={counts.disputes.toString()} tone="red" />
-          <StatCard label="Refunds" value={counts.refunds.toString()} tone="yellow" />
-          <StatCard label="Flagged" value={counts.flagged.toString()} tone="purple" />
+          {[
+            { label: "Open",          value: counts.open,     color: counts.open > 0 ? "text-red" : "text-green",     click: () => setStatusFilter("open")    },
+            { label: "Pending",       value: counts.pending,  color: "text-yellow",                                    click: () => setStatusFilter("pending")  },
+            { label: "High Priority", value: counts.high,     color: counts.high > 0 ? "text-red" : "text-textMuted", click: undefined                         },
+            { label: "Disputes",      value: counts.disputes, color: "text-red",                                       click: () => setTypeFilter("dispute")    },
+            { label: "Refunds",       value: counts.refunds,  color: "text-yellow",                                    click: () => setTypeFilter("refund")     },
+            { label: "Flagged Users", value: counts.flagged,  color: "text-purple",                                    click: () => setTypeFilter("flagged")    },
+          ].map(s => (
+            <div key={s.label} onClick={s.click} className={`bg-bg2 border border-border rounded-xl p-4 ${s.click ? "cursor-pointer hover:border-cyan/20 transition-colors" : ""}`}>
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-2">{s.label}</p>
+              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
 
         <Card>
@@ -258,15 +274,15 @@ export default function TicketsPage() {
                       onClick={() => setExpanded(isExp ? null : t.id)}
                       className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-bg3 transition-colors">
 
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 bg-${Cfg.tone}/10`}>
-                        <Icon size={14} className={`text-${Cfg.tone}`} />
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${TONE_CLS[Cfg.tone]?.split(" ")[0] || "bg-bg3"}`}>
+                        <Icon size={14} className={TONE_CLS[Cfg.tone]?.split(" ")[2] || "text-textMuted"} />
                       </div>
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-text font-bold text-sm">{t.user_name}</span>
-                          <Badge label={Cfg.label} tone={Cfg.tone as any} />
-                          <Badge label={STATUS_CONFIG[t.status].label} tone={STATUS_CONFIG[t.status].tone as any} />
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${TONE_CLS[Cfg.tone] || "bg-bg3 border-border text-textMuted"}`}>{Cfg.label}</span>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${TONE_CLS[STATUS_CONFIG[t.status].tone] || "bg-bg3 border-border text-textMuted"}`}>{STATUS_CONFIG[t.status].label}</span>
                           {t.priority === "high" && !isRes && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-red/10 text-red border border-red/20">HIGH</span>
                           )}
