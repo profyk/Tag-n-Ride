@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input, StatCard } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   Banknote, Lock, Unlock, PlusCircle, MinusCircle, X, Search,
@@ -344,19 +344,20 @@ export default function WalletOpsPage() {
 
         {/* ── Stat cards ── */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          <StatCard label="Total Wallets"  value={allWallets.length.toString()} />
-          <StatCard label="System AUM"     value={formatZAR(totalBalance)} tone="green" />
-          <StatCard
-            label="Frozen"
-            value={frozenList.length.toString()}
-            tone={frozenList.length > 0 ? "red" : undefined}
-            sub={frozenList.length > 0 ? `${formatZAR(frozenBalance)} locked` : "None frozen"}
-          />
-          <StatCard label="Active Wallets"   value={activeCount.toString()}          tone="cyan" />
-          <StatCard label="Drivers AUM"      value={formatZAR(roleTotal("driver"))}  tone="green"
-            sub={`${roleCount("driver")} drivers`} />
-          <StatCard label="Passengers AUM"   value={formatZAR(roleTotal("passenger"))} tone="cyan"
-            sub={`${roleCount("passenger")} passengers`} />
+          {[
+            { label: "Total Wallets",   value: allWallets.length.toString(),        color: "text-text",  sub: "" },
+            { label: "System AUM",      value: formatZAR(totalBalance),             color: "text-green", sub: "" },
+            { label: "Frozen",          value: frozenList.length.toString(),         color: frozenList.length > 0 ? "text-red" : "text-textDim", sub: frozenList.length > 0 ? `${formatZAR(frozenBalance)} locked` : "None frozen" },
+            { label: "Active Wallets",  value: activeCount.toString(),              color: "text-cyan",  sub: "" },
+            { label: "Drivers AUM",     value: formatZAR(roleTotal("driver")),      color: "text-green", sub: `${roleCount("driver")} drivers` },
+            { label: "Passengers AUM",  value: formatZAR(roleTotal("passenger")),   color: "text-cyan",  sub: `${roleCount("passenger")} passengers` },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">{s.label}</p>
+              <p className={`text-xl font-black tabular-nums ${s.color}`}>{s.value}</p>
+              {s.sub && <p className="text-[10px] text-textDim mt-0.5">{s.sub}</p>}
+            </div>
+          ))}
         </div>
 
         {/* ── Frozen alert banner ── */}

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { getRole } from "@/lib/api";
 import { DangerPinModal, useDangerPin, getDangerToken } from "@/components/DangerPinModal";
@@ -104,8 +104,12 @@ type CompanyConfig = {
   company_email?: string;
 };
 
-const STATUS_TONE: Record<string, any> = {
-  draft: "cyan", submitted: "yellow", approved: "purple", executed: "green", cancelled: "red",
+const STATUS_CLS: Record<string, string> = {
+  draft:     "bg-cyan/10 border-cyan/20 text-cyan",
+  submitted: "bg-yellow/10 border-yellow/20 text-yellow",
+  approved:  "bg-purple/10 border-purple/20 text-purple",
+  executed:  "bg-green/10 border-green/20 text-green",
+  cancelled: "bg-red/10 border-red/20 text-red",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -607,46 +611,57 @@ function PayrollPageInner() {
             <Button onClick={() => setNewModal(true)}><Plus size={13} /> New Payroll Run</Button>
           </div>
         ) : (
-          <Table
-            headers={["Period", "Employees", "Gross Payroll", "PAYE", "Net Pay", "Status", "Created By", "Last Updated", ""]}
-            empty={false}>
-            {runs.map(run => (
-              <Tr key={run.id} onClick={() => openRun(run)}>
-                <Td>
-                  <div>
-                    <p className="font-extrabold text-text text-sm">{formatMonth(run.period_month)}</p>
-                    <p className="text-textDim text-[10px]">{run.period_month}</p>
-                  </div>
-                </Td>
-                <Td className="text-text font-bold">{run.employee_count}</Td>
-                <Td className="font-bold text-text">{formatZAR(run.total_gross)}</Td>
-                <Td className="text-yellow text-xs">{formatZAR(run.total_paye)}</Td>
-                <Td className="font-extrabold text-green">{formatZAR(run.total_net)}</Td>
-                <Td><Badge label={STATUS_LABEL[run.status] || run.status} tone={STATUS_TONE[run.status] || "cyan"} /></Td>
-                <Td className="text-textMuted text-xs">{run.created_by_name || "—"}</Td>
-                <Td className="text-textDim text-xs">
-                  {run.executed_at ? formatDate(run.executed_at) :
-                   run.approved_at ? formatDate(run.approved_at) :
-                   run.submitted_at ? formatDate(run.submitted_at) :
-                   formatDate(run.created_at)}
-                </Td>
-                <Td>
-                  <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => openRun(run)}
-                      className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
-                      <Eye size={11} />
-                    </button>
-                    {run.status === "executed" && (
-                      <button onClick={() => handleExport(run)}
-                        className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all">
-                        <Download size={11} />
-                      </button>
-                    )}
-                  </div>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-bg3">
+                  {["Period", "Employees", "Gross Payroll", "PAYE", "Net Pay", "Status", "Created By", "Last Updated", ""].map(col => (
+                    <th key={col} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map(run => (
+                  <tr key={run.id} className="border-b border-border hover:bg-bg3/50 transition-colors cursor-pointer" onClick={() => openRun(run)}>
+                    <td className="py-3 px-4">
+                      <p className="font-extrabold text-text">{formatMonth(run.period_month)}</p>
+                      <p className="text-textDim text-[10px]">{run.period_month}</p>
+                    </td>
+                    <td className="py-3 px-4 font-bold text-text tabular-nums">{run.employee_count}</td>
+                    <td className="py-3 px-4 font-bold text-text tabular-nums">{formatZAR(run.total_gross)}</td>
+                    <td className="py-3 px-4 text-yellow tabular-nums">{formatZAR(run.total_paye)}</td>
+                    <td className="py-3 px-4 font-extrabold text-green tabular-nums">{formatZAR(run.total_net)}</td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                        STATUS_CLS[run.status] || "bg-cyan/10 border-cyan/20 text-cyan"
+                      }`}>{STATUS_LABEL[run.status] || run.status}</span>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted">{run.created_by_name || "—"}</td>
+                    <td className="py-3 px-4 text-textDim whitespace-nowrap">
+                      {run.executed_at ? formatDate(run.executed_at) :
+                       run.approved_at ? formatDate(run.approved_at) :
+                       run.submitted_at ? formatDate(run.submitted_at) :
+                       formatDate(run.created_at)}
+                    </td>
+                    <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => openRun(run)}
+                          className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all">
+                          <Eye size={11} />
+                        </button>
+                        {run.status === "executed" && (
+                          <button onClick={() => handleExport(run)}
+                            className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all">
+                            <Download size={11} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
