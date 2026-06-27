@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, PermissionGate } from "@/components/ui";
+import { Spinner, PermissionGate } from "@/components/ui";
 import client, { api } from "@/lib/api";
 import { LiveMap, MapPin as LiveMapPin } from "@/components/saferide/LiveMap";
 import { useAlertEscalation, notifyNewAlert } from "@/lib/useAlertEscalation";
@@ -308,7 +308,7 @@ export default function MonitoringPage() {
                           )}
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <Badge tone={sos.status === "help_coming" ? "yellow" : "red"}>{sos.status === "help_coming" ? "HELP COMING" : sos.status.toUpperCase()}</Badge>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${sos.status === "help_coming" ? "bg-yellow/10 border-yellow/20 text-yellow" : "bg-red/10 border-red/20 text-red"}`}>{sos.status === "help_coming" ? "HELP COMING" : sos.status.toUpperCase()}</span>
                           <p className="text-[10px] text-red-400 font-bold mt-1">{elapsedLabel(sos.created_at)}</p>
                         </div>
                       </div>

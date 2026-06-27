@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Badge, Modal, Input, Select } from "@/components/ui";
+import { Card, Button, Modal, Input, Select } from "@/components/ui";
 import { hasPermission, isSuperAdmin } from "@/lib/api";
 import { formatZAR } from "@/lib/utils";
 import {
@@ -79,14 +79,8 @@ function RuleCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-text font-bold text-sm truncate">{rule.name}</p>
-            <Badge
-              label={rule.action === "block" ? "Block" : "Flag"}
-              tone={rule.action === "block" ? "red" : "yellow"}
-            />
-            <Badge
-              label={rule.active ? "Active" : "Inactive"}
-              tone={rule.active ? "green" : "muted"}
-            />
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${rule.action === "block" ? "bg-red/10 border-red/20 text-red" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>{rule.action === "block" ? "Block" : "Flag"}</span>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${rule.active ? "bg-green/10 border-green/20 text-green" : "bg-bg3 border-border text-textMuted"}`}>{rule.active ? "Active" : "Inactive"}</span>
           </div>
           {rule.description && <p className="text-textDim text-xs mt-0.5">{rule.description}</p>}
         </div>
@@ -141,17 +135,14 @@ function AlertRow({ alert, onResolve }: { alert: VelocityAlert; onResolve: (id: 
         </div>
       </td>
       <td className="px-4 py-3">
-        <Badge
-          label={alert.action_taken}
-          tone={alert.action_taken === "blocked" ? "red" : "yellow"}
-        />
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${alert.action_taken === "blocked" ? "bg-red/10 border-red/20 text-red" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>{alert.action_taken}</span>
       </td>
       <td className="px-4 py-3 text-textDim text-xs">
         {new Date(alert.triggered_at).toLocaleString()}
       </td>
       <td className="px-4 py-3">
         {alert.resolved ? (
-          <Badge label="Resolved" tone="green" />
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold bg-green/10 border-green/20 text-green">Resolved</span>
         ) : (
           <button
             onClick={() => onResolve(alert.id)}

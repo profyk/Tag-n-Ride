@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Modal } from "@/components/ui";
+import { Button, Spinner, Modal } from "@/components/ui";
 import { api, getToken } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
@@ -41,9 +41,9 @@ type CompanyConfig = {
   company_email?: string;
 };
 
-const STATUS_TONE: Record<string, "green" | "red" | "yellow" | "cyan" | "purple" | "muted" | "orange"> = {
-  generated: "green",
-  deleted: "red",
+const STATUS_CLS: Record<string, string> = {
+  generated: "bg-green/10 border-green/20 text-green",
+  deleted: "bg-red/10 border-red/20 text-red",
 };
 
 function DocTypeBadge({ type }: { type: string }) {
@@ -339,128 +339,128 @@ export default function DriverStatementsPage() {
               <span className="text-green-400">{payslipCount} formal payslip{payslipCount !== 1 ? "s" : ""}</span>
             </div>
 
-            <Table
-              headers={["Type", "Period", "Net Earnings", "Fee Charged", "Reference", "Generated", "Status", ""]}
-              empty={false}
-            >
-              {payslips.map(p => (
-                <>
-                  <Tr
-                    key={p.id}
-                    className="cursor-pointer"
-                    onClick={() => setExpanded(expanded === p.id ? null : p.id)}
-                  >
-                    <Td><DocTypeBadge type={p.document_type ?? "statement"} /></Td>
-                    <Td><span className="font-semibold text-text">{p.period_label}</span></Td>
-                    <Td><span className="font-bold text-green">{formatZAR(p.driver_net_earnings)}</span></Td>
-                    <Td><span className="text-textMuted">{formatZAR(p.fee_charged)}</span></Td>
-                    <Td><span className="font-mono text-xs text-text">{p.reference_number}</span></Td>
-                    <Td className="text-textMuted text-xs">{formatDate(p.created_at)}</Td>
-                    <Td><Badge label={p.status} tone={STATUS_TONE[p.status] ?? "muted"} /></Td>
-
-                    {/* Action buttons */}
-                    <Td>
-                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                        {/* Print / Download */}
-                        <button
-                          title="Print / Download PDF"
-                          onClick={() => setPrintSlip(p)}
-                          className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all"
-                        >
-                          <Printer size={11} />
-                        </button>
-
-                        {/* Download (same as print — browser saves as PDF) */}
-                        <button
-                          title="Download"
-                          onClick={() => setPrintSlip(p)}
-                          className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all"
-                        >
-                          <Download size={11} />
-                        </button>
-
-                        {/* Share */}
-                        <button
-                          title={p.document_type === "payslip" ? "Share verification link" : "Share"}
-                          onClick={() => handleShare(p)}
-                          className="p-1.5 rounded-lg border border-border text-textDim hover:text-purple hover:border-purple/30 transition-all"
-                        >
-                          {copiedId === p.id ? <Check size={11} className="text-green" /> : <Share2 size={11} />}
-                        </button>
-
-                        {/* Delete */}
-                        {p.status !== "deleted" && (
-                          <button
-                            title="Delete document"
-                            onClick={() => setDeleteTarget(p)}
-                            className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all"
-                          >
-                            <Trash2 size={11} />
-                          </button>
-                        )}
-                      </div>
-                    </Td>
-                  </Tr>
-
-                  {/* Expanded detail row */}
-                  {expanded === p.id && (
-                    <Tr key={`${p.id}-detail`}>
-                      <Td colSpan={8}>
-                        <div className="bg-bg border border-border rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Gross Earnings</p>
-                            <p className="font-bold text-text">{formatZAR(p.gross_earnings)}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Platform Fee (3%)</p>
-                            <p className="font-bold text-red">{formatZAR(p.platform_fee)}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Total Net</p>
-                            <p className="font-bold text-text">{formatZAR(p.total_net)}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Owner Payouts</p>
-                            <p className="font-bold text-text">{formatZAR(p.owner_payouts)}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Driver Cashups (Self)</p>
-                            <p className="font-bold text-text">{formatZAR(p.driver_cashups_self)}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Wallet at Generation</p>
-                            <p className="font-bold text-text">{formatZAR(p.wallet_balance_at_generation)}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Total Trips</p>
-                            <p className="font-bold text-text">{p.total_trips}</p>
-                          </div>
-                          <div>
-                            <p className="text-textMuted text-xs mb-1">Rating</p>
-                            <p className="font-bold text-text">
-                              {(p.rating_avg ?? 0).toFixed(1)} ★ ({p.rating_count})
-                            </p>
-                          </div>
-                          {p.document_type === "payslip" && (
-                            <div className="col-span-2 md:col-span-4">
-                              <p className="text-textMuted text-xs mb-1">Verification URL</p>
-                              <a
-                                href={`/verify?ref=${p.reference_number}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-cyan text-xs font-mono break-all hover:underline"
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Type", "Period", "Net Earnings", "Fee Charged", "Reference", "Generated", "Status", ""].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-textMuted uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {payslips.map(p => (
+                    <>
+                      <tr
+                        key={p.id}
+                        className="border-b border-border hover:bg-bg3 transition-colors cursor-pointer"
+                        onClick={() => setExpanded(expanded === p.id ? null : p.id)}
+                      >
+                        <td className="px-4 py-3"><DocTypeBadge type={p.document_type ?? "statement"} /></td>
+                        <td className="px-4 py-3"><span className="font-semibold text-text">{p.period_label}</span></td>
+                        <td className="px-4 py-3"><span className="font-bold text-green">{formatZAR(p.driver_net_earnings)}</span></td>
+                        <td className="px-4 py-3"><span className="text-textMuted">{formatZAR(p.fee_charged)}</span></td>
+                        <td className="px-4 py-3"><span className="font-mono text-xs text-text">{p.reference_number}</span></td>
+                        <td className="px-4 py-3 text-textMuted text-xs">{formatDate(p.created_at)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${STATUS_CLS[p.status] ?? "bg-bg3 border-border text-textMuted"}`}>{p.status}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <button
+                              title="Print / Download PDF"
+                              onClick={() => setPrintSlip(p)}
+                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-cyan hover:border-cyan/30 transition-all"
+                            >
+                              <Printer size={11} />
+                            </button>
+                            <button
+                              title="Download"
+                              onClick={() => setPrintSlip(p)}
+                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-green hover:border-green/30 transition-all"
+                            >
+                              <Download size={11} />
+                            </button>
+                            <button
+                              title={p.document_type === "payslip" ? "Share verification link" : "Share"}
+                              onClick={() => handleShare(p)}
+                              className="p-1.5 rounded-lg border border-border text-textDim hover:text-purple hover:border-purple/30 transition-all"
+                            >
+                              {copiedId === p.id ? <Check size={11} className="text-green" /> : <Share2 size={11} />}
+                            </button>
+                            {p.status !== "deleted" && (
+                              <button
+                                title="Delete document"
+                                onClick={() => setDeleteTarget(p)}
+                                className="p-1.5 rounded-lg border border-border text-textDim hover:text-red hover:border-red/30 transition-all"
                               >
-                                {typeof window !== "undefined" ? window.location.origin : ""}/verify?ref={p.reference_number}
-                              </a>
+                                <Trash2 size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {expanded === p.id && (
+                        <tr key={`${p.id}-detail`} className="border-b border-border">
+                          <td colSpan={8} className="px-4 py-3">
+                            <div className="bg-bg border border-border rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Gross Earnings</p>
+                                <p className="font-bold text-text">{formatZAR(p.gross_earnings)}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Platform Fee (3%)</p>
+                                <p className="font-bold text-red">{formatZAR(p.platform_fee)}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Total Net</p>
+                                <p className="font-bold text-text">{formatZAR(p.total_net)}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Owner Payouts</p>
+                                <p className="font-bold text-text">{formatZAR(p.owner_payouts)}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Driver Cashups (Self)</p>
+                                <p className="font-bold text-text">{formatZAR(p.driver_cashups_self)}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Wallet at Generation</p>
+                                <p className="font-bold text-text">{formatZAR(p.wallet_balance_at_generation)}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Total Trips</p>
+                                <p className="font-bold text-text">{p.total_trips}</p>
+                              </div>
+                              <div>
+                                <p className="text-textMuted text-xs mb-1">Rating</p>
+                                <p className="font-bold text-text">
+                                  {(p.rating_avg ?? 0).toFixed(1)} ★ ({p.rating_count})
+                                </p>
+                              </div>
+                              {p.document_type === "payslip" && (
+                                <div className="col-span-2 md:col-span-4">
+                                  <p className="text-textMuted text-xs mb-1">Verification URL</p>
+                                  <a
+                                    href={`/verify?ref=${p.reference_number}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-cyan text-xs font-mono break-all hover:underline"
+                                  >
+                                    {typeof window !== "undefined" ? window.location.origin : ""}/verify?ref={p.reference_number}
+                                  </a>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </Td>
-                    </Tr>
-                  )}
-                </>
-              ))}
-            </Table>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </div>

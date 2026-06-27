@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Spinner, Input } from "@/components/ui";
+import { Card, Spinner, Input } from "@/components/ui";
 import { formatDate } from "@/lib/utils";
 import { Search, FileText, AlertTriangle, CheckCircle, Clock } from "lucide-react";
 
@@ -97,38 +97,49 @@ export default function FleetDocumentsPage() {
             <p className="font-semibold">No documents found</p>
           </div>
         ) : (
-          <Table headers={["Driver", "Owner", "Document", "Expiry Date", "Days Left", "Status"]}>
-            {visible.map(d => (
-              <Tr key={d.id}>
-                <Td>
-                  <p className="font-bold text-text">{d.driver_name}</p>
-                  <p className="text-xs text-muted">{d.driver_phone}</p>
-                </Td>
-                <Td><p className="text-sm text-text">{d.owner_name}</p></Td>
-                <Td>
-                  <span className="px-2 py-1 bg-bg rounded text-xs font-bold text-muted uppercase tracking-wider">
-                    {DOC_LABELS[d.document_type] || d.document_type}
-                  </span>
-                </Td>
-                <Td>
-                  <p className="text-sm font-mono text-text">{d.expiry_date || "—"}</p>
-                  {d.notes && <p className="text-xs text-muted mt-1">{d.notes}</p>}
-                </Td>
-                <Td>
-                  {d.days_left !== null ? (
-                    <span className={`text-sm font-bold ${d.days_left < 0 ? "text-red-400" : d.days_left <= 30 ? "text-orange-400" : "text-green-400"}`}>
-                      {d.days_left < 0 ? `${Math.abs(d.days_left)}d overdue` : d.days_left === 0 ? "Today" : `${d.days_left}d`}
-                    </span>
-                  ) : "—"}
-                </Td>
-                <Td>
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${STATUS_COLORS[d.status] || ""}`}>
-                    {d.status === "expiring_soon" ? "EXPIRING SOON" : d.status?.toUpperCase()}
-                  </span>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Driver", "Owner", "Document", "Expiry Date", "Days Left", "Status"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-textMuted uppercase tracking-widest">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(d => (
+                  <tr key={d.id} className="border-b border-border last:border-0 hover:bg-bg3 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-text">{d.driver_name}</p>
+                      <p className="text-xs text-muted">{d.driver_phone}</p>
+                    </td>
+                    <td className="px-4 py-3"><p className="text-sm text-text">{d.owner_name}</p></td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-1 bg-bg rounded text-xs font-bold text-muted uppercase tracking-wider">
+                        {DOC_LABELS[d.document_type] || d.document_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-mono text-text">{d.expiry_date || "—"}</p>
+                      {d.notes && <p className="text-xs text-muted mt-1">{d.notes}</p>}
+                    </td>
+                    <td className="px-4 py-3">
+                      {d.days_left !== null ? (
+                        <span className={`text-sm font-bold ${d.days_left < 0 ? "text-red-400" : d.days_left <= 30 ? "text-orange-400" : "text-green-400"}`}>
+                          {d.days_left < 0 ? `${Math.abs(d.days_left)}d overdue` : d.days_left === 0 ? "Today" : `${d.days_left}d`}
+                        </span>
+                      ) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${STATUS_COLORS[d.status] || ""}`}>
+                        {d.status === "expiring_soon" ? "EXPIRING SOON" : d.status?.toUpperCase()}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </AdminShell>

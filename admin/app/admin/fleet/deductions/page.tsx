@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Spinner, Input } from "@/components/ui";
+import { Card, Spinner, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { Search, MinusCircle, CheckCircle2, XCircle, Clock } from "lucide-react";
 
@@ -100,40 +100,51 @@ export default function FleetDeductionsPage() {
             <p className="font-semibold">No deductions found</p>
           </div>
         ) : (
-          <Table headers={["Driver", "Owner", "Type", "Amount", "Reason", "Status", "Date"]}>
-            {visible.map(d => (
-              <Tr key={d.id}>
-                <Td>
-                  <p className="font-bold text-text">{d.driver_name}</p>
-                  <p className="text-xs text-muted">{d.driver_phone}</p>
-                </Td>
-                <Td><p className="text-sm text-text">{d.owner_name}</p></Td>
-                <Td>
-                  <span className={`px-2 py-1 rounded text-xs font-bold capitalize ${TYPE_COLORS[d.deduction_type] || "bg-bg text-muted"}`}>
-                    {d.deduction_type}
-                  </span>
-                </Td>
-                <Td>
-                  <span className="text-purple-400 font-black text-base">
-                    {formatZAR(d.amount)}
-                  </span>
-                </Td>
-                <Td><p className="text-sm text-muted max-w-[180px] truncate" title={d.reason}>{d.reason}</p></Td>
-                <Td>
-                  <div className="flex items-center gap-1.5">
-                    {STATUS_ICONS[d.status]}
-                    <span className={`text-xs font-bold capitalize ${d.status === "pending" ? "text-yellow-400" : d.status === "applied" ? "text-green-400" : "text-muted"}`}>
-                      {d.status}
-                    </span>
-                  </div>
-                  {d.applied_at && (
-                    <p className="text-xs text-muted mt-1">Applied {formatDate(d.applied_at)}</p>
-                  )}
-                </Td>
-                <Td><p className="text-xs text-muted">{formatDate(d.created_at)}</p></Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Driver", "Owner", "Type", "Amount", "Reason", "Status", "Date"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-textMuted uppercase tracking-widest">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(d => (
+                  <tr key={d.id} className="border-b border-border last:border-0 hover:bg-bg3 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-text">{d.driver_name}</p>
+                      <p className="text-xs text-muted">{d.driver_phone}</p>
+                    </td>
+                    <td className="px-4 py-3"><p className="text-sm text-text">{d.owner_name}</p></td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-bold capitalize ${TYPE_COLORS[d.deduction_type] || "bg-bg text-muted"}`}>
+                        {d.deduction_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-purple-400 font-black text-base">
+                        {formatZAR(d.amount)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3"><p className="text-sm text-muted max-w-[180px] truncate" title={d.reason}>{d.reason}</p></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        {STATUS_ICONS[d.status]}
+                        <span className={`text-xs font-bold capitalize ${d.status === "pending" ? "text-yellow-400" : d.status === "applied" ? "text-green-400" : "text-muted"}`}>
+                          {d.status}
+                        </span>
+                      </div>
+                      {d.applied_at && (
+                        <p className="text-xs text-muted mt-1">Applied {formatDate(d.applied_at)}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3"><p className="text-xs text-muted">{formatDate(d.created_at)}</p></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </AdminShell>

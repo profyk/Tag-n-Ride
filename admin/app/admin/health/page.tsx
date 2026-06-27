@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, Button, Badge, Input } from "@/components/ui";
+import { Card, Spinner, Button, Input } from "@/components/ui";
 import {
   CheckCircle, XCircle, RefreshCw, Activity, Database, Users,
   AlertTriangle, Wifi, Server, Clock, Zap, ExternalLink, FileText, Save,
@@ -336,7 +336,7 @@ export default function HealthPage() {
               </span>
               <p className="text-xs text-textMuted">Uptime this month: <span className="text-green font-bold">{uptime}%</span></p>
             </div>
-            <Badge label={isHealthy ? "healthy" : "degraded"} tone={isHealthy ? "green" : "red"} />
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${isHealthy ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"}`}>{isHealthy ? "healthy" : "degraded"}</span>
           </div>
           <div className="flex items-center gap-3">
             {lastChecked && (
