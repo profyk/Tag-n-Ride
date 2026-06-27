@@ -1,9 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Modal, Input, StatCard, Spinner } from "@/components/ui";
+import { Card, Button, Modal, Input, Spinner } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
-import { Tag, Plus, Trash2, Copy, ToggleLeft, ToggleRight, AlertTriangle } from "lucide-react";
+import { Tag, Plus, Trash2, Copy, ToggleLeft, ToggleRight, AlertTriangle, Zap, TrendingUp, Hash, Clock } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, Promotion } from "@/lib/api";
 
@@ -76,72 +76,120 @@ export default function PromotionsPage() {
   const active = promos.filter((p) => p.active).length;
   const totalUses = promos.reduce((s, p) => s + p.total_used, 0);
 
+  const expired = promos.filter(p => p.valid_to && new Date(p.valid_to) < new Date()).length;
+
   return (
-    <AdminShell title="Promotions & Vouchers">
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Active Promotions" value={String(active)} />
-          <StatCard label="Total Redemptions" value={totalUses.toLocaleString()} />
-          <StatCard label="Total Promos" value={String(promos.length)} />
-          <StatCard label="Expired" value={String(promos.filter((p) => p.valid_to && new Date(p.valid_to) < new Date()).length)} />
+    <AdminShell title="Promotions & Vouchers" subtitle="Promo codes, discounts and voucher management">
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Active",      value: String(active),                  color: "text-green",  icon: Zap       },
+            { label: "Redemptions", value: totalUses.toLocaleString(),      color: "text-cyan",   icon: TrendingUp },
+            { label: "Total Promos",value: String(promos.length),           color: "text-purple", icon: Hash      },
+            { label: "Expired",     value: String(expired),                 color: expired > 0 ? "text-red" : "text-textMuted", icon: Clock },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] font-bold text-textDim uppercase tracking-wider">{s.label}</p>
+                <s.icon size={12} className={s.color} />
+              </div>
+              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
 
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Tag size={16} className="text-cyan" />
-              <h2 className="text-text font-bold">Promo Codes</h2>
-            </div>
-            <Button onClick={() => setCreateModal(true)}>
-              <Plus size={13} /> Create Promo
-            </Button>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tag size={14} className="text-cyan" />
+            <p className="font-bold text-text">Promo Codes</p>
           </div>
+          <Button onClick={() => setCreateModal(true)}>
+            <Plus size={13} /> Create Promo
+          </Button>
+        </div>
 
-          {loading ? <Spinner /> : (
-            <Table
-              headers={["Code", "Description", "Type", "Value", "Usage", "Valid To", "Status", "Actions"]}
-              empty={!promos.length}
-            >
-              {promos.map((p) => (
-                <Tr key={p.id}>
-                  <Td>
-                    <div className="flex items-center gap-2">
-                      <code className="text-cyan font-bold text-sm tracking-widest">{p.code}</code>
-                      <button onClick={() => copy(p.code)} className="text-textDim hover:text-textMuted">
-                        <Copy size={11} />
-                      </button>
-                    </div>
-                  </Td>
-                  <Td className="text-textMuted text-xs max-w-[160px] truncate">{p.description}</Td>
-                  <Td><Badge label={TYPE_LABELS[p.discount_type] || p.discount_type} tone={TYPE_TONE[p.discount_type] || "muted"} /></Td>
-                  <Td className="font-bold">
-                    {p.discount_type === "percent" ? `${p.discount_value}%` : formatZAR(p.discount_value)}
-                  </Td>
-                  <Td>
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 h-1.5 rounded-full bg-bg3">
-                        <div className="h-1.5 rounded-full bg-cyan" style={{ width: p.max_uses ? `${Math.min((p.total_used / p.max_uses) * 100, 100)}%` : "0%" }} />
-                      </div>
-                      <span className="text-xs text-textMuted">{p.total_used}{p.max_uses ? `/${p.max_uses}` : ""}</span>
-                    </div>
-                  </Td>
-                  <Td className="text-textMuted text-xs">{formatDate(p.valid_to)}</Td>
-                  <Td><Badge label={p.active ? "active" : "inactive"} tone={p.active ? "green" : "red"} /></Td>
-                  <Td>
-                    <div className="flex gap-2">
-                      <button onClick={() => toggle(p)} className="text-textMuted hover:text-cyan transition-all">
-                        {p.active ? <ToggleRight size={16} className="text-green" /> : <ToggleLeft size={16} />}
-                      </button>
-                      <button onClick={() => remove(p)} className="text-textMuted hover:text-red transition-all">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
-          )}
-        </Card>
+        {loading ? <Spinner /> : (
+          <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["Code", "Description", "Type", "Value", "Usage", "Valid To", "Status", ""].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {promos.length === 0 ? (
+                    <tr><td colSpan={8} className="py-12 text-center text-textMuted">No promo codes yet</td></tr>
+                  ) : promos.map(p => {
+                    const isExpired = p.valid_to && new Date(p.valid_to) < new Date();
+                    return (
+                      <tr key={p.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <code className="text-cyan font-black tracking-widest">{p.code}</code>
+                            <button onClick={() => copy(p.code)} className="text-textDim hover:text-cyan transition-all">
+                              <Copy size={10} />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-textMuted max-w-[140px]">
+                          <span className="line-clamp-1">{p.description || "—"}</span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                            p.discount_type === "percent"
+                              ? "bg-cyan/10 border-cyan/20 text-cyan"
+                              : "bg-green/10 border-green/20 text-green"
+                          }`}>
+                            {TYPE_LABELS[p.discount_type] || p.discount_type}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-black tabular-nums text-text">
+                          {p.discount_type === "percent" ? `${p.discount_value}%` : formatZAR(p.discount_value)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-14 h-1.5 rounded-full bg-bg3 overflow-hidden">
+                              <div className="h-1.5 rounded-full bg-cyan"
+                                style={{ width: p.max_uses ? `${Math.min((p.total_used / p.max_uses) * 100, 100)}%` : "0%" }} />
+                            </div>
+                            <span className="text-textDim">{p.total_used}{p.max_uses ? `/${p.max_uses}` : ""}</span>
+                          </div>
+                        </td>
+                        <td className={`py-3 px-4 whitespace-nowrap ${isExpired ? "text-red" : "text-textDim"}`}>
+                          {formatDate(p.valid_to)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                            p.active && !isExpired
+                              ? "bg-green/10 border-green/20 text-green"
+                              : "bg-red/10 border-red/20 text-red"
+                          }`}>
+                            {p.active && !isExpired ? "active" : isExpired ? "expired" : "inactive"}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-2">
+                            <button onClick={() => toggle(p)} title={p.active ? "Deactivate" : "Activate"}
+                              className="text-textMuted hover:text-cyan transition-all p-1">
+                              {p.active ? <ToggleRight size={16} className="text-green" /> : <ToggleLeft size={16} />}
+                            </button>
+                            <button onClick={() => remove(p)} title="Delete"
+                              className="text-textMuted hover:text-red transition-all p-1">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       <Modal open={createModal} onClose={() => setCreateModal(false)} title="Create Promo Code">

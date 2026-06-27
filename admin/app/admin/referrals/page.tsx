@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, StatCard, Input } from "@/components/ui";
+import { Card, Button, Spinner, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { Users2, Award, Download, Search, X, AlertTriangle, Trophy } from "lucide-react";
 import { api, Referral } from "@/lib/api";
@@ -75,20 +75,35 @@ export default function ReferralsPage() {
     toast.success("Exported");
   };
 
+  const conversionRate = stats.total > 0 ? Math.round((stats.rewarded / stats.total) * 100) : 0;
+
+  const STATUS_STYLE: Record<string, string> = {
+    pending:   "bg-yellow/10 border-yellow/20 text-yellow",
+    rewarded:  "bg-green/10 border-green/20 text-green",
+    cancelled: "bg-red/10 border-red/20 text-red",
+  };
+
   return (
-    <AdminShell title="Referral Programme">
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Referrals" value={String(stats.total)} tone="cyan" />
-          <StatCard label="Rewarded" value={String(stats.rewarded)} tone="green" />
-          <StatCard label="Total Rewards Paid" value={formatZAR(stats.total_rewards)} tone="yellow" />
-          <StatCard label="Conversion Rate" value={stats.total > 0 ? `${Math.round((stats.rewarded / stats.total) * 100)}%` : "—"} tone="purple" />
+    <AdminShell title="Referral Programme" subtitle="Track referrals, rewards, and leaderboard">
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Total Referrals",   value: String(stats.total),            color: "text-cyan"   },
+            { label: "Rewarded",           value: String(stats.rewarded),         color: "text-green"  },
+            { label: "Total Rewards Paid", value: formatZAR(stats.total_rewards), color: "text-yellow" },
+            { label: "Conversion Rate",    value: stats.total > 0 ? `${conversionRate}%` : "—", color: "text-purple" },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-2">{s.label}</p>
+              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
 
         {suspiciousCount > 0 && (
           <div className="flex items-center gap-3 p-4 bg-red/5 border border-red/20 rounded-xl">
-            <AlertTriangle size={16} className="text-red flex-shrink-0" />
-            <p className="text-red text-sm font-semibold">
+            <AlertTriangle size={14} className="text-red flex-shrink-0" />
+            <p className="text-red text-xs font-bold">
               {suspiciousCount} referrer{suspiciousCount > 1 ? "s" : ""} flagged for potential abuse (&gt;10 referrals). Review the Leaderboard tab.
             </p>
           </div>
@@ -97,7 +112,7 @@ export default function ReferralsPage() {
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border">
           {[
-            { key: "records", label: "Referral Records" },
+            { key: "records",     label: "Referral Records" },
             { key: "leaderboard", label: `Leaderboard (${leaderboard.length})` },
           ].map(t => (
             <button key={t.key} onClick={() => setActiveTab(t.key as any)}
@@ -110,12 +125,14 @@ export default function ReferralsPage() {
         </div>
 
         {activeTab === "records" && (
-          <Card>
-            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex gap-2 flex-wrap">
-                {(["all", "pending", "rewarded", "cancelled"] as const).map((f) => (
+                {(["all", "pending", "rewarded", "cancelled"] as const).map(f => (
                   <button key={f} onClick={() => setFilter(f)}
-                    className={`px-3 py-1 rounded-full text-xs font-bold border transition-all capitalize ${filter === f ? "bg-cyanDim text-cyan border-cyan/20" : "bg-bg2 text-textMuted border-border hover:text-text"}`}>
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all capitalize ${
+                      filter === f ? "bg-cyanDim text-cyan border-cyan/20" : "bg-bg2 text-textMuted border-border hover:text-text"
+                    }`}>
                     {f}
                   </button>
                 ))}
@@ -123,72 +140,109 @@ export default function ReferralsPage() {
               <div className="flex gap-2">
                 <div className="relative">
                   <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-textDim" />
-                  <Input placeholder="Search name or phone..." value={search} onChange={e => setSearch(e.target.value)} className="pl-7 w-52" />
+                  <input placeholder="Search name or phone…" value={search} onChange={e => setSearch(e.target.value)}
+                    className="pl-8 pr-4 py-2 bg-bg2 border border-border rounded-lg text-xs text-text placeholder:text-textDim focus:outline-none focus:border-cyan/50 w-48" />
                 </div>
                 {search && (
-                  <Button variant="ghost" onClick={() => setSearch("")}><X size={13} /></Button>
+                  <button onClick={() => setSearch("")} className="p-2 text-textDim hover:text-text border border-border rounded-lg">
+                    <X size={12} />
+                  </button>
                 )}
                 <Button variant="secondary" onClick={exportCsv}><Download size={13} /> Export</Button>
               </div>
             </div>
 
             {loading ? <Spinner /> : (
-              <Table headers={["Referrer", "Invitee", "Reward", "Status", "Date"]} empty={!filtered.length}>
-                {filtered.map((r) => (
-                  <Tr key={r.id}>
-                    <Td>
-                      <p className="font-semibold text-sm">{r.referrer_name}</p>
-                      <p className="text-[10px] text-textMuted font-mono">{r.referrer_phone}</p>
-                    </Td>
-                    <Td>
-                      <p className="font-semibold text-sm">{r.invitee_name}</p>
-                      <p className="text-[10px] text-textMuted font-mono">{r.invitee_phone}</p>
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-1.5">
-                        <Award size={12} className="text-yellow" />
-                        <span className="font-bold text-yellow">{formatZAR(r.reward_amount)}</span>
-                      </div>
-                    </Td>
-                    <Td><Badge label={r.status} tone={STATUS_TONE[r.status] || "muted"} /></Td>
-                    <Td className="text-textMuted text-xs">{formatDate(r.created_at)}</Td>
-                  </Tr>
-                ))}
-              </Table>
+              <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3">
+                      {["Referrer", "Invitee", "Reward", "Status", "Date"].map(h => (
+                        <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr><td colSpan={5} className="py-12 text-center text-textMuted">No referrals found</td></tr>
+                    ) : filtered.map(r => (
+                      <tr key={r.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                        <td className="py-3 px-4">
+                          <p className="font-bold text-text">{r.referrer_name}</p>
+                          <p className="text-textDim text-[10px] font-mono">{r.referrer_phone}</p>
+                        </td>
+                        <td className="py-3 px-4">
+                          <p className="font-bold text-text">{r.invitee_name}</p>
+                          <p className="text-textDim text-[10px] font-mono">{r.invitee_phone}</p>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5">
+                            <Award size={11} className="text-yellow" />
+                            <span className="font-black text-yellow tabular-nums">{formatZAR(r.reward_amount)}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black capitalize ${STATUS_STYLE[r.status] || "bg-bg3 border-border text-textMuted"}`}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-textDim whitespace-nowrap">{formatDate(r.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             {!loading && filtered.length > 0 && (
-              <p className="text-xs text-textDim mt-2">{filtered.length} record{filtered.length !== 1 ? "s" : ""} shown</p>
+              <p className="text-[10px] text-textDim">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</p>
             )}
-          </Card>
+          </div>
         )}
 
         {activeTab === "leaderboard" && (
-          <Card>
-            <div className="flex items-center gap-2 mb-4">
-              <Trophy size={16} className="text-yellow" />
-              <h2 className="text-text font-bold">Top Referrers</h2>
-              <span className="text-textDim text-xs ml-auto">Red = possible abuse (&gt;10 referrals)</span>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Trophy size={14} className="text-yellow" />
+              <p className="text-text font-bold text-sm">Top Referrers</p>
+              <span className="text-textDim text-[10px] ml-auto">🔴 = possible abuse (&gt;10 referrals)</span>
             </div>
-            <Table headers={["#", "Referrer", "Total Refs", "Rewarded", "Earned", "Status"]} empty={!leaderboard.length}>
-              {leaderboard.map((l, i) => (
-                <Tr key={l.phone}>
-                  <Td className="text-textDim text-xs font-bold">{i + 1}</Td>
-                  <Td>
-                    <p className="font-semibold">{l.name}</p>
-                    <p className="text-[10px] font-mono text-textMuted">{l.phone}</p>
-                  </Td>
-                  <Td className={`font-bold ${l.suspicious ? "text-red" : "text-text"}`}>{l.total}</Td>
-                  <Td className="text-green font-bold">{l.rewarded}</Td>
-                  <Td className="text-yellow font-bold">{formatZAR(l.reward_earned)}</Td>
-                  <Td>
-                    {l.suspicious
-                      ? <Badge label="Review" tone="red" />
-                      : <Badge label="Normal" tone="green" />}
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
-          </Card>
+            <div className="bg-bg2 border border-border rounded-xl overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["#", "Referrer", "Total", "Rewarded", "Earned", "Status"].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaderboard.length === 0 ? (
+                    <tr><td colSpan={6} className="py-12 text-center text-textMuted">No referral data</td></tr>
+                  ) : leaderboard.map((l, i) => (
+                    <tr key={l.phone} className={`border-b border-border hover:bg-bg3/50 transition-colors ${l.suspicious ? "bg-red/3" : ""}`}>
+                      <td className="py-3 px-4">
+                        {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : <span className="text-textDim font-mono">#{i + 1}</span>}
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-bold text-text">{l.name}</p>
+                        <p className="text-textDim text-[10px] font-mono">{l.phone}</p>
+                      </td>
+                      <td className={`py-3 px-4 font-black tabular-nums ${l.suspicious ? "text-red" : "text-text"}`}>{l.total}</td>
+                      <td className="py-3 px-4 font-bold text-green tabular-nums">{l.rewarded}</td>
+                      <td className="py-3 px-4 font-black text-yellow tabular-nums">{formatZAR(l.reward_earned)}</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                          l.suspicious ? "bg-red/10 border-red/20 text-red" : "bg-green/10 border-green/20 text-green"
+                        }`}>
+                          {l.suspicious ? "Review" : "Normal"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
     </AdminShell>
