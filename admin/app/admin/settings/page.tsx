@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, Input, Badge, Table, Tr, Td, Modal } from "@/components/ui";
+import { Card, Button, Spinner, Input, Modal } from "@/components/ui";
 import { api, Session, FeatureFlag } from "@/lib/api";
 import { isSuperAdmin, hasPermission } from "@/lib/api";
 import { formatDate, roleBadgeColor } from "@/lib/utils";
@@ -417,7 +417,9 @@ function RolesTab() {
           <div className="flex items-center gap-3">
             <Lock size={16} className="text-cyan" />
             <h2 className="text-text font-bold text-lg">{role?.label} Permissions</h2>
-            <Badge label={`${role?.permissions.length} / ${ALL_PERMISSIONS.length}`} tone={TONE[role?.color] || "cyan"} />
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black bg-cyan/10 border-cyan/20 text-cyan">
+                {role?.permissions.length} / {ALL_PERMISSIONS.length}
+              </span>
           </div>
           <Button onClick={saveRole}>Save Changes</Button>
         </div>
@@ -562,48 +564,61 @@ function SessionsTab() {
       </div>
 
       {loading ? <Spinner /> : (
-        <Table headers={["Admin", "Email", "Role", "IP Address", "Device", "Started", "Expires", "Actions"]} empty={!sessions.length}>
-          {sessions.map((s, i) => {
-            const sharedIp = s.ip_address && sessions.filter(s2 => s2.ip_address === s.ip_address).length > 1;
-            return (
-              <Tr key={s.id} className={i === 0 ? "bg-cyan/3" : ""}>
-                <Td>
-                  <div className="flex items-center gap-1.5">
-                    {i === 0 && <span className="text-[9px] text-cyan font-bold bg-cyan/10 border border-cyan/20 rounded px-1.5 py-0.5">YOU</span>}
-                    <span className="font-semibold">{s.full_name}</span>
-                  </div>
-                </Td>
-                <Td className="text-textMuted text-sm">{s.email}</Td>
-                <Td>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(s.role)}`}>
-                    {s.role}
-                  </span>
-                </Td>
-                <Td>
-                  <div className="flex items-center gap-1.5">
-                    {sharedIp && <AlertTriangle size={10} className="text-yellow flex-shrink-0" />}
-                    <span className={`font-mono text-xs ${sharedIp ? "text-yellow" : "text-textMuted"}`}>{s.ip_address || "—"}</span>
-                  </div>
-                </Td>
-                <Td>
-                  <div className="flex items-center gap-1 text-textDim">
-                    <Monitor size={11} />
-                    <span className="text-[10px]">{(s as any).user_agent ? ((s as any).user_agent.includes("Mobile") ? "Mobile" : "Desktop") : "Unknown"}</span>
-                  </div>
-                </Td>
-                <Td className="text-textMuted text-xs">{formatDate(s.created_at)}</Td>
-                <Td className="text-textMuted text-xs">{formatDate(s.expires_at)}</Td>
-                <Td>
-                  {i !== 0 && (
-                    <Button variant="danger" onClick={() => handleRevoke(s.id, s.full_name)} loading={revoking === s.id}>
-                      <LogOut size={12} /> Revoke
-                    </Button>
-                  )}
-                </Td>
-              </Tr>
-            );
-          })}
-        </Table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border bg-bg3">
+                {["Admin", "Email", "Role", "IP Address", "Device", "Started", "Expires", "Actions"].map(h => (
+                  <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.length === 0 ? (
+                <tr><td colSpan={8} className="py-10 text-center text-textMuted">No active sessions</td></tr>
+              ) : sessions.map((s, i) => {
+                const sharedIp = s.ip_address && sessions.filter(s2 => s2.ip_address === s.ip_address).length > 1;
+                return (
+                  <tr key={s.id} className={`border-b border-border hover:bg-bg3/50 transition-colors ${i === 0 ? "bg-cyan/3" : ""}`}>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-1.5">
+                        {i === 0 && <span className="text-[9px] text-cyan font-bold bg-cyan/10 border border-cyan/20 rounded px-1.5 py-0.5">YOU</span>}
+                        <span className="font-semibold text-text">{s.full_name}</span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted">{s.email}</td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadgeColor(s.role)}`}>
+                        {s.role}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-1.5">
+                        {sharedIp && <AlertTriangle size={10} className="text-yellow flex-shrink-0" />}
+                        <span className={`font-mono text-xs ${sharedIp ? "text-yellow" : "text-textMuted"}`}>{s.ip_address || "—"}</span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-1 text-textDim">
+                        <Monitor size={11} />
+                        <span className="text-[10px]">{(s as any).user_agent ? ((s as any).user_agent.includes("Mobile") ? "Mobile" : "Desktop") : "Unknown"}</span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted whitespace-nowrap">{formatDate(s.created_at)}</td>
+                    <td className="py-3 px-4 text-textMuted whitespace-nowrap">{formatDate(s.expires_at)}</td>
+                    <td className="py-3 px-4">
+                      {i !== 0 && (
+                        <Button variant="danger" onClick={() => handleRevoke(s.id, s.full_name)} loading={revoking === s.id}>
+                          <LogOut size={12} /> Revoke
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {sessions.length > 0 && (
@@ -671,9 +686,6 @@ const MOCK_KEYS: APIKey[] = [
   { id: "4", name: "Old Integration",        prefix: "tnr_live", last4: "f0e8", scopes: ["read:users"],                                  created_by: "Admin", created_at: "2023-06-01T00:00:00Z", last_used: new Date(Date.now()-2592000000).toISOString(), is_active: false },
 ];
 
-function scopeTone(scope: string): any {
-  return scope.startsWith("write:") || scope === "webhooks:send" ? "yellow" : "cyan";
-}
 
 function APIKeysTab() {
   const [keys, setKeys] = useState<APIKey[]>(MOCK_KEYS);
@@ -744,20 +756,47 @@ function APIKeysTab() {
           <div className="flex items-center gap-2"><Key size={16} className="text-cyan" /><h2 className="text-text font-bold">API Keys</h2></div>
           <Button onClick={() => setCreateModal(true)}><Plus size={13} /> Generate Key</Button>
         </div>
-        <Table headers={["Name", "Key", "Scopes", "Created By", "Last Used", "Expires", "Status", "Actions"]} empty={false}>
-          {keys.map(k => (
-            <Tr key={k.id}>
-              <Td className="font-semibold">{k.name}</Td>
-              <Td><code className="text-xs font-mono text-textMuted">{k.prefix}_••••••••{k.last4}</code></Td>
-              <Td><div className="flex flex-wrap gap-1">{k.scopes.map(s => <Badge key={s} label={s} tone={scopeTone(s)} />)}</div></Td>
-              <Td className="text-textMuted text-xs">{k.created_by}</Td>
-              <Td className="text-textMuted text-xs">{k.last_used ? formatDate(k.last_used) : "Never"}</Td>
-              <Td className="text-textMuted text-xs">{k.expires_at ? formatDate(k.expires_at) : "Never"}</Td>
-              <Td><Badge label={k.is_active ? "active" : "revoked"} tone={k.is_active ? "green" : "red"} /></Td>
-              <Td>{k.is_active && <Button variant="danger" onClick={() => revoke(k)}><Trash2 size={12} /> Revoke</Button>}</Td>
-            </Tr>
-          ))}
-        </Table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border bg-bg3">
+                {["Name", "Key", "Scopes", "Created By", "Last Used", "Expires", "Status", "Actions"].map(h => (
+                  <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map(k => (
+                <tr key={k.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                  <td className="py-3 px-4 font-semibold text-text">{k.name}</td>
+                  <td className="py-3 px-4"><code className="text-xs font-mono text-textMuted">{k.prefix}_••••••••{k.last4}</code></td>
+                  <td className="py-3 px-4">
+                    <div className="flex flex-wrap gap-1">
+                      {k.scopes.map(s => (
+                        <span key={s} className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-bold ${
+                          s.startsWith("write:") || s === "webhooks:send"
+                            ? "bg-yellow/10 border-yellow/20 text-yellow"
+                            : "bg-cyan/10 border-cyan/20 text-cyan"
+                        }`}>{s}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-textMuted">{k.created_by}</td>
+                  <td className="py-3 px-4 text-textMuted whitespace-nowrap">{k.last_used ? formatDate(k.last_used) : "Never"}</td>
+                  <td className="py-3 px-4 text-textMuted whitespace-nowrap">{k.expires_at ? formatDate(k.expires_at) : "Never"}</td>
+                  <td className="py-3 px-4">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                      k.is_active ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"
+                    }`}>{k.is_active ? "active" : "revoked"}</span>
+                  </td>
+                  <td className="py-3 px-4">
+                    {k.is_active && <Button variant="danger" onClick={() => revoke(k)}><Trash2 size={12} /> Revoke</Button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       <Modal open={createModal} onClose={() => setCreateModal(false)} title="Generate API Key">
@@ -870,38 +909,55 @@ function FeatureFlagsTab() {
         </div>
 
         {loading ? <Spinner /> : (
-          <Table headers={["Flag", "Rollout", "Status", "Updated", "Actions"]} empty={!flags.length}>
-            {flags.map(flag => (
-              <Tr key={flag.id}>
-                <Td>
-                  <p className="font-semibold text-sm">{flag.name}</p>
-                  <p className="text-[10px] text-textMuted max-w-[280px] truncate">{flag.description}</p>
-                </Td>
-                <Td>
-                  <div className="flex items-center gap-2">
-                    <div className="w-16 h-1.5 rounded-full bg-bg3">
-                      <div className="h-1.5 rounded-full bg-cyan" style={{ width: `${flag.rollout_pct}%` }} />
-                    </div>
-                    <span className="text-xs text-textMuted">{flag.rollout_pct}%</span>
-                    <select value={flag.rollout_pct} onChange={e => updateRollout(flag, parseInt(e.target.value))}
-                      className="text-[10px] bg-bg3 border border-border rounded px-1 py-0.5 text-textMuted">
-                      {[0,10,25,50,75,100].map(p => <option key={p} value={p}>{p}%</option>)}
-                    </select>
-                  </div>
-                </Td>
-                <Td><Badge label={flag.enabled ? "enabled" : "disabled"} tone={flag.enabled ? "green" : "red"} /></Td>
-                <Td className="text-textMuted text-xs">{formatDate(flag.updated_at)}</Td>
-                <Td>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => toggle(flag)} className="text-textMuted hover:text-cyan transition-all">
-                      {flag.enabled ? <ToggleRight size={22} className="text-green" /> : <ToggleLeft size={22} className="text-textDim" />}
-                    </button>
-                    <Button variant="ghost" onClick={() => remove(flag)}><Trash2 size={13} className="text-red" /></Button>
-                  </div>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-bg3">
+                  {["Flag", "Rollout", "Status", "Updated", "Actions"].map(h => (
+                    <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {flags.length === 0 ? (
+                  <tr><td colSpan={5} className="py-10 text-center text-textMuted">No feature flags configured</td></tr>
+                ) : flags.map(flag => (
+                  <tr key={flag.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                    <td className="py-3 px-4">
+                      <p className="font-semibold text-text">{flag.name}</p>
+                      <p className="text-[10px] text-textMuted max-w-[280px] truncate">{flag.description}</p>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 rounded-full bg-bg3">
+                          <div className="h-1.5 rounded-full bg-cyan" style={{ width: `${flag.rollout_pct}%` }} />
+                        </div>
+                        <span className="text-textMuted">{flag.rollout_pct}%</span>
+                        <select value={flag.rollout_pct} onChange={e => updateRollout(flag, parseInt(e.target.value))}
+                          className="text-[10px] bg-bg3 border border-border rounded px-1 py-0.5 text-textMuted">
+                          {[0,10,25,50,75,100].map(p => <option key={p} value={p}>{p}%</option>)}
+                        </select>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                        flag.enabled ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"
+                      }`}>{flag.enabled ? "enabled" : "disabled"}</span>
+                    </td>
+                    <td className="py-3 px-4 text-textMuted whitespace-nowrap">{formatDate(flag.updated_at)}</td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => toggle(flag)} className="text-textMuted hover:text-cyan transition-all">
+                          {flag.enabled ? <ToggleRight size={22} className="text-green" /> : <ToggleLeft size={22} className="text-textDim" />}
+                        </button>
+                        <Button variant="ghost" onClick={() => remove(flag)}><Trash2 size={13} className="text-red" /></Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 

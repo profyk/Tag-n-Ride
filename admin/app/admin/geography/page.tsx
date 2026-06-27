@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Modal, Input, StatCard, Spinner } from "@/components/ui";
-import { MapPin, Plus, ToggleLeft, ToggleRight, Trash2, Edit2, Save, AlertTriangle } from "lucide-react";
+import { Card, Button, Modal, Input, Spinner } from "@/components/ui";
+import { MapPin, Plus, ToggleLeft, ToggleRight, Trash2, Edit2, Save, AlertTriangle, Globe, Zap, ZapOff } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, CoverageZone } from "@/lib/api";
 import { SA_PROVINCES } from "@/lib/utils";
@@ -94,7 +94,9 @@ export default function GeographyPage() {
   };
 
   const active = zones.filter((z) => z.active).length;
+  const inactive = zones.length - active;
   const totalDrivers = zones.reduce((s, z) => s + z.driver_count, 0);
+  const covered = zones.filter(z => z.lat && z.lng).length;
 
   const ZoneForm = ({ onSubmit, submitLabel }: { onSubmit: () => void; submitLabel: string }) => (
     <div className="space-y-4">
@@ -143,18 +145,36 @@ export default function GeographyPage() {
   return (
     <AdminShell title="Coverage & Zones">
       <div className="space-y-6">
+
+        {/* Stats strip */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Active Zones" value={String(active)} tone="green" />
-          <StatCard label="Total Zones" value={String(zones.length)} tone="cyan" />
-          <StatCard label="Total Drivers" value={String(totalDrivers)} tone="purple" />
-          <StatCard label="Inactive Zones" value={String(zones.length - active)} tone={zones.length - active > 0 ? "red" : "cyan"} />
+          {[
+            { label: "Active Zones",   value: active,       color: "text-green",  sub: "serving passengers" },
+            { label: "Total Zones",    value: zones.length, color: "text-cyan",   sub: "across South Africa" },
+            { label: "Total Drivers",  value: totalDrivers, color: "text-purple", sub: "in coverage zones" },
+            { label: "Inactive Zones", value: inactive,     color: inactive > 0 ? "text-red" : "text-textDim", sub: inactive > 0 ? "need attention" : "all zones live" },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">{s.label}</p>
+              <p className={`text-2xl font-black tabular-nums ${s.color}`}>{s.value}</p>
+              <p className="text-[10px] text-textDim mt-0.5">{s.sub}</p>
+            </div>
+          ))}
         </div>
+
+        {covered < zones.length && zones.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-yellow bg-yellow/10 border border-yellow/20 rounded-lg px-4 py-2.5">
+            <Globe size={13} />
+            {zones.length - covered} zone{zones.length - covered !== 1 ? "s" : ""} missing coordinates — add lat/lng to enable map visualization and precise radius matching.
+          </div>
+        )}
 
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <MapPin size={16} className="text-cyan" />
               <h2 className="text-text font-bold">Coverage Zones</h2>
+              {zones.length > 0 && <span className="text-textDim text-xs">{zones.length} total</span>}
             </div>
             <Button onClick={() => { setForm(emptyForm()); setCreateModal(true); }}>
               <Plus size={13} /> Add Zone
@@ -162,46 +182,76 @@ export default function GeographyPage() {
           </div>
 
           {loading ? <Spinner /> : (
-            <Table
-              headers={["Zone", "City", "Province", "Drivers", "Coordinates", "Radius", "Status", "Actions"]}
-              empty={!zones.length}
-            >
-              {zones.map((z) => (
-                <Tr key={z.id}>
-                  <Td className="font-semibold">{z.name}</Td>
-                  <Td className="text-textMuted text-xs">{z.city || "—"}</Td>
-                  <Td className="text-textMuted text-xs">{z.province || "—"}</Td>
-                  <Td>
-                    <span className="font-bold text-cyan">{z.driver_count}</span>
-                    <span className="text-textMuted text-xs"> drivers</span>
-                  </Td>
-                  <Td className="text-textMuted text-[10px] font-mono">
-                    {z.lat && z.lng ? `${z.lat.toFixed(4)}, ${z.lng.toFixed(4)}` : "—"}
-                  </Td>
-                  <Td className="text-textMuted text-xs">{z.radius_km ? `${z.radius_km} km` : "—"}</Td>
-                  <Td><Badge label={z.active ? "active" : "inactive"} tone={z.active ? "green" : "red"} /></Td>
-                  <Td>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => toggle(z)}
-                        className="text-textMuted hover:text-cyan transition-all"
-                        title={z.active ? "Deactivate" : "Activate"}
-                      >
-                        {z.active
-                          ? <ToggleRight size={20} className="text-green" />
-                          : <ToggleLeft size={20} />}
-                      </button>
-                      <Button variant="secondary" onClick={() => openEdit(z)} title="Edit zone">
-                        <Edit2 size={12} />
-                      </Button>
-                      <Button variant="danger" onClick={() => remove(z)} title="Delete zone">
-                        <Trash2 size={12} />
-                      </Button>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["Zone", "City", "Province", "Drivers", "Coordinates", "Radius", "Status", "Actions"].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {zones.length === 0 ? (
+                    <tr><td colSpan={8} className="py-12 text-center text-textMuted">No zones configured — add one to get started</td></tr>
+                  ) : zones.map((z) => (
+                    <tr key={z.id} className={`border-b border-border hover:bg-bg3/50 transition-colors ${!z.active ? "opacity-60" : ""}`}>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${z.active ? "bg-green" : "bg-red"}`} />
+                          <span className="font-bold text-text">{z.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-textMuted">{z.city || "—"}</td>
+                      <td className="py-3 px-4 text-textMuted">{z.province || "—"}</td>
+                      <td className="py-3 px-4">
+                        <span className="font-black text-cyan tabular-nums">{z.driver_count}</span>
+                        <span className="text-textDim"> drivers</span>
+                      </td>
+                      <td className="py-3 px-4 font-mono text-[10px] text-textMuted">
+                        {z.lat && z.lng ? `${z.lat.toFixed(4)}, ${z.lng.toFixed(4)}` : <span className="text-textDim italic">No coords</span>}
+                      </td>
+                      <td className="py-3 px-4 text-textMuted">{z.radius_km ? `${z.radius_km} km` : "—"}</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-black ${
+                          z.active ? "bg-green/10 border-green/20 text-green" : "bg-red/10 border-red/20 text-red"
+                        }`}>
+                          {z.active ? <Zap size={8} /> : <ZapOff size={8} />}
+                          {z.active ? "active" : "inactive"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => toggle(z)}
+                            className="text-textMuted hover:text-cyan transition-all"
+                            title={z.active ? "Deactivate" : "Activate"}
+                          >
+                            {z.active
+                              ? <ToggleRight size={20} className="text-green" />
+                              : <ToggleLeft size={20} />}
+                          </button>
+                          <button
+                            onClick={() => openEdit(z)}
+                            className="px-2 py-1 rounded-lg border border-border text-textMuted hover:text-cyan hover:border-cyan/30 transition-all"
+                            title="Edit zone"
+                          >
+                            <Edit2 size={11} />
+                          </button>
+                          <button
+                            onClick={() => remove(z)}
+                            className="px-2 py-1 rounded-lg border border-border text-textMuted hover:text-red hover:border-red/30 transition-all"
+                            title="Delete zone"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>
@@ -214,7 +264,6 @@ export default function GeographyPage() {
         <ZoneForm onSubmit={saveEdit} submitLabel="Save Changes" />
       </Modal>
 
-      {/* Delete Zone Confirmation */}
       <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Zone">
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-3 bg-red/5 border border-red/20 rounded-xl">

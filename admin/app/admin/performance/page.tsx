@@ -2,7 +2,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Spinner, StatCard, Input, Button } from "@/components/ui";
+import { Card, Spinner, Input, Button } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { Search, Star, TrendingUp, TrendingDown, X } from "lucide-react";
 import {
@@ -126,14 +126,19 @@ function PerformanceContent() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Earnings" value={formatZAR(data?.driver?.total_earnings || 0)} tone="green" />
-        <StatCard
-          label="Rating"
-          value={`★ ${data?.driver?.rating_avg?.toFixed(1) || "0.0"}`}
-          tone="yellow"
-          sub={`${data?.driver?.rating_count || 0} ratings`}
-        />
-        <StatCard label="This Month" value={formatZAR(thisMonth)} tone="cyan" />
+        <div className="bg-bg2 border border-border rounded-xl p-4">
+          <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">Total Earnings</p>
+          <p className="text-xl font-black tabular-nums text-green">{formatZAR(data?.driver?.total_earnings || 0)}</p>
+        </div>
+        <div className="bg-bg2 border border-border rounded-xl p-4">
+          <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">Rating</p>
+          <p className="text-xl font-black text-yellow">★ {data?.driver?.rating_avg?.toFixed(1) || "0.0"}</p>
+          <p className="text-[10px] text-textDim mt-0.5">{data?.driver?.rating_count || 0} ratings</p>
+        </div>
+        <div className="bg-bg2 border border-border rounded-xl p-4">
+          <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">This Month</p>
+          <p className="text-xl font-black tabular-nums text-cyan">{formatZAR(thisMonth)}</p>
+        </div>
         <Card className="flex flex-col items-center justify-center text-center p-4">
           <div className="flex items-center gap-1.5 mb-1">
             {growth !== null ? (

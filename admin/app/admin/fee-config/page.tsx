@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, Input, StatCard } from "@/components/ui";
+import { Card, Button, Spinner, Input } from "@/components/ui";
 import { formatZAR } from "@/lib/utils";
 import {
   Save, Settings, DollarSign, Fuel, Clock, AlertTriangle, RefreshCw, CheckCircle,
@@ -85,10 +85,17 @@ export default function FeeConfigPage() {
 
         {/* Stats overview */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Auto-approve Limit" value={formatZAR(settings?.auto_approve_limit ?? 0)} tone="cyan" />
-          <StatCard label="Driver Commission" value={`${settings?.default_commission_pct ?? 0}%`} tone="green" />
-          <StatCard label="Subscription / Taxi" value={formatZAR(settings?.subscription_price_per_taxi ?? 0)} tone="yellow" />
-          <StatCard label="Fuel Payments" value={settings?.pay_fuel_enabled ? "Enabled" : "Disabled"} tone={settings?.pay_fuel_enabled ? "green" : "red"} />
+          {[
+            { label: "Auto-approve Limit",   value: formatZAR(settings?.auto_approve_limit ?? 0),          color: "text-cyan"   },
+            { label: "Driver Commission",     value: `${settings?.default_commission_pct ?? 0}%`,            color: "text-green"  },
+            { label: "Subscription / Taxi",   value: formatZAR(settings?.subscription_price_per_taxi ?? 0), color: "text-yellow" },
+            { label: "Fuel Payments",         value: settings?.pay_fuel_enabled ? "Enabled" : "Disabled",   color: settings?.pay_fuel_enabled ? "text-green" : "text-red" },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">{s.label}</p>
+              <p className={`text-xl font-black tabular-nums ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Warning banner */}

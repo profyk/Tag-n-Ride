@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Table, Tr, Td, Badge, Button, Spinner, Modal, Input, StatCard } from "@/components/ui";
+import { Card, Button, Spinner, Modal, Input } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   DollarSign, Plus, Edit2, Trash2, Save, Zap, ZapOff, AlertTriangle,
@@ -11,8 +11,13 @@ import { api, PricingRule } from "@/lib/api";
 
 const VEHICLE_TYPES = ["minibus_taxi", "sedan", "suv", "motorcycle", "tuk_tuk", "bus"];
 
-const VEH_TONE: Record<string, "cyan" | "green" | "yellow" | "purple" | "red" | "muted"> = {
-  minibus_taxi: "cyan", sedan: "green", suv: "purple", motorcycle: "yellow", tuk_tuk: "orange" as any, bus: "red",
+const VEH_CLS: Record<string, string> = {
+  minibus_taxi: "bg-cyan/10 border-cyan/20 text-cyan",
+  sedan:        "bg-green/10 border-green/20 text-green",
+  suv:          "bg-purple/10 border-purple/20 text-purple",
+  motorcycle:   "bg-yellow/10 border-yellow/20 text-yellow",
+  tuk_tuk:      "bg-orange-400/10 border-orange-400/20 text-orange-400",
+  bus:          "bg-red/10 border-red/20 text-red",
 };
 
 const emptyForm = (): Partial<PricingRule> => ({
@@ -100,10 +105,17 @@ export default function PricingPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Active Rules" value={String(rules.length)} tone="cyan" />
-          <StatCard label="Surge Active" value={String(surgeActive)} tone={surgeActive > 0 ? "red" : "green"} />
-          <StatCard label="Avg Base Fare" value={formatZAR(avgBase)} tone="yellow" />
-          <StatCard label="Avg / km" value={formatZAR(avgPerKm)} tone="purple" />
+          {[
+            { label: "Active Rules",  value: String(rules.length), color: "text-cyan"   },
+            { label: "Surge Active",  value: String(surgeActive),  color: surgeActive > 0 ? "text-red" : "text-green" },
+            { label: "Avg Base Fare", value: formatZAR(avgBase),   color: "text-yellow" },
+            { label: "Avg / km",      value: formatZAR(avgPerKm),  color: "text-purple" },
+          ].map(s => (
+            <div key={s.label} className="bg-bg2 border border-border rounded-xl p-4">
+              <p className="text-[9px] font-bold text-textDim uppercase tracking-wider mb-1">{s.label}</p>
+              <p className={`text-2xl font-black tabular-nums ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Surge alert */}
@@ -129,51 +141,65 @@ export default function PricingPage() {
           </div>
 
           {loading ? <Spinner /> : (
-            <Table
-              headers={["Vehicle Type", "Zone", "Base Fare", "Per km", "Per min", "Min Fare", "Surge", "Updated", "Actions"]}
-              empty={!rules.length}
-            >
-              {rules.map((r) => (
-                <Tr key={r.id}>
-                  <Td>
-                    <Badge label={r.vehicle_type.replace(/_/g, " ")} tone={VEH_TONE[r.vehicle_type] || "muted"} />
-                  </Td>
-                  <Td className="text-textMuted text-xs">{r.zone_name || "Default"}</Td>
-                  <Td className="font-bold text-green">{formatZAR(r.base_fare)}</Td>
-                  <Td className="text-text font-semibold">{formatZAR(r.per_km)}</Td>
-                  <Td className="text-textMuted text-xs">{formatZAR(r.per_minute)}</Td>
-                  <Td className="text-textMuted text-xs">{formatZAR(r.min_fare)}</Td>
-                  <Td>
-                    {r.surge_active ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red bg-red/10 border border-red/20 px-2 py-0.5 rounded-full">
-                        <Zap size={9} /> {r.surge_multiplier}×
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-textDim">Off</span>
-                    )}
-                  </Td>
-                  <Td className="text-textMuted text-xs">{formatDate(r.updated_at)}</Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      <Button
-                        variant={r.surge_active ? "danger" : "secondary"}
-                        loading={surgeTarget === r.id}
-                        onClick={() => toggleSurge(r)}
-                        title={r.surge_active ? "Deactivate surge" : "Activate surge"}
-                      >
-                        {r.surge_active ? <ZapOff size={12} /> : <Zap size={12} />}
-                      </Button>
-                      <Button variant="secondary" onClick={() => openEdit(r)}>
-                        <Edit2 size={12} />
-                      </Button>
-                      <Button variant="danger" onClick={() => setDeleteTarget(r)}>
-                        <Trash2 size={12} />
-                      </Button>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-bg3">
+                    {["Vehicle Type", "Zone", "Base Fare", "Per km", "Per min", "Min Fare", "Surge", "Updated", "Actions"].map(h => (
+                      <th key={h} className="text-left py-3 px-4 text-[10px] font-bold text-textDim uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.length === 0 ? (
+                    <tr><td colSpan={9} className="py-12 text-center text-textMuted">No pricing rules configured</td></tr>
+                  ) : rules.map((r) => (
+                    <tr key={r.id} className="border-b border-border hover:bg-bg3/50 transition-colors">
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black capitalize ${
+                          VEH_CLS[r.vehicle_type] || "bg-bg3 border-border text-textMuted"
+                        }`}>
+                          {r.vehicle_type.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-textMuted">{r.zone_name || "Default"}</td>
+                      <td className="py-3 px-4 font-bold text-green tabular-nums">{formatZAR(r.base_fare)}</td>
+                      <td className="py-3 px-4 font-semibold text-text tabular-nums">{formatZAR(r.per_km)}</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{formatZAR(r.per_minute)}</td>
+                      <td className="py-3 px-4 text-textMuted tabular-nums">{formatZAR(r.min_fare)}</td>
+                      <td className="py-3 px-4">
+                        {r.surge_active ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red bg-red/10 border border-red/20 px-2 py-0.5 rounded-full">
+                            <Zap size={9} /> {r.surge_multiplier}×
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-textDim">Off</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-textMuted whitespace-nowrap">{formatDate(r.updated_at)}</td>
+                      <td className="py-3 px-4">
+                        <div className="flex gap-1.5">
+                          <Button
+                            variant={r.surge_active ? "danger" : "secondary"}
+                            loading={surgeTarget === r.id}
+                            onClick={() => toggleSurge(r)}
+                            title={r.surge_active ? "Deactivate surge" : "Activate surge"}
+                          >
+                            {r.surge_active ? <ZapOff size={12} /> : <Zap size={12} />}
+                          </Button>
+                          <Button variant="secondary" onClick={() => openEdit(r)}>
+                            <Edit2 size={12} />
+                          </Button>
+                          <Button variant="danger" onClick={() => setDeleteTarget(r)}>
+                            <Trash2 size={12} />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
 
