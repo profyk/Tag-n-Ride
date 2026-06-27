@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner, Card, Input, Select, Modal } from "@/components/ui";
+import { Button, Spinner, Card, Input, Select, Modal } from "@/components/ui";
 import { api, Withdrawal, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { CheckCircle, XCircle, Snowflake, Zap, RefreshCw, AlertTriangle, Search, X, Download, Settings, Save, ShieldCheck, Fuel } from "lucide-react";
@@ -132,12 +132,16 @@ function PayoutSettingsPanel() {
   );
 }
 
-function getStatusTone(status: string) {
-  if (status === "approved" || status === "paid" || status === "completed") return "green";
-  if (status === "pending" || status === "processing") return "yellow";
-  if (status === "rejected" || status === "failed" || status === "payout_failed") return "red";
-  return "muted";
-}
+const W_STATUS_CLS: Record<string, string> = {
+  approved:      "bg-green/10 border-green/20 text-green",
+  paid:          "bg-green/10 border-green/20 text-green",
+  completed:     "bg-green/10 border-green/20 text-green",
+  pending:       "bg-yellow/10 border-yellow/20 text-yellow",
+  processing:    "bg-yellow/10 border-yellow/20 text-yellow",
+  rejected:      "bg-red/10 border-red/20 text-red",
+  failed:        "bg-red/10 border-red/20 text-red",
+  payout_failed: "bg-red/10 border-red/20 text-red",
+};
 
 export default function WithdrawalsPage() {
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
@@ -440,89 +444,102 @@ export default function WithdrawalsPage() {
             </div>
 
             {loading ? <Spinner /> : (
-              <Table
-                headers={[
-                  ...(canApprove && filter === "pending" ? [
-                    <input
-                      type="checkbox"
-                      className="w-3.5 h-3.5 accent-cyan"
-                      checked={filteredAndSorted.filter(w => w.status === "pending").length > 0 &&
-                        filteredAndSorted.filter(w => w.status === "pending").every(w => selected.has(w.id))}
-                      onChange={toggleSelectAll}
-                      title="Select all pending"
-                    />
-                  ] : []),
-                  "Driver", "Phone", "Amount", "Net Payout", "Bank", "Account", "Wallet", "Status", "Date", "Actions"
-                ]}
-                empty={!filteredAndSorted.length}>
-                {filteredAndSorted.map(w => (
-                  <Tr key={w.id}>
-                    {canApprove && filter === "pending" && (
-                      <Td>
-                        {w.status === "pending" && (
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3/60">
+                      {canApprove && filter === "pending" && (
+                        <th className="py-2.5 px-4">
                           <input
                             type="checkbox"
-                            checked={selected.has(w.id)}
-                            onChange={() => toggleSelect(w.id)}
                             className="w-3.5 h-3.5 accent-cyan"
+                            checked={filteredAndSorted.filter(w => w.status === "pending").length > 0 &&
+                              filteredAndSorted.filter(w => w.status === "pending").every(w => selected.has(w.id))}
+                            onChange={toggleSelectAll}
+                            title="Select all pending"
                           />
+                        </th>
+                      )}
+                      {["Driver", "Phone", "Amount", "Net Payout", "Bank", "Account", "Wallet", "Status", "Date", "Actions"].map(h => (
+                        <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAndSorted.length === 0 ? (
+                      <tr><td colSpan={canApprove && filter === "pending" ? 11 : 10} className="py-10 text-center text-textMuted text-sm">No records found</td></tr>
+                    ) : filteredAndSorted.map(w => (
+                      <tr key={w.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                        {canApprove && filter === "pending" && (
+                          <td className="py-3 px-4">
+                            {w.status === "pending" && (
+                              <input
+                                type="checkbox"
+                                checked={selected.has(w.id)}
+                                onChange={() => toggleSelect(w.id)}
+                                className="w-3.5 h-3.5 accent-cyan"
+                              />
+                            )}
+                          </td>
                         )}
-                      </Td>
-                    )}
-                    <Td className="font-semibold">{w.user_name || "—"}</Td>
-                    <Td className="font-mono text-xs text-textMuted">{w.phone_number || "—"}</Td>
-                    <Td>
-                      <span className={`font-bold ${w.amount > 10000 ? "text-red" : "text-text"}`}>
-                        {formatZAR(w.amount)}
-                        {w.amount > 10000 && !canLarge && (
-                          <span className="ml-1 text-[9px] text-red block">FINANCE REQ</span>
-                        )}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="text-green font-bold text-xs">{formatZAR(w.amount - 3.50)}</span>
-                      <span className="text-textDim text-[10px] block">after R3.50 fee</span>
-                    </Td>
-                    <Td className="text-textMuted text-xs">{w.bank_name}</Td>
-                    <Td className="font-mono text-xs text-textMuted">{w.account_number}</Td>
-                    <Td className="text-xs">
-                      {w.wallet_balance !== undefined ? (
-                        <span className={w.is_frozen ? "text-red" : "text-green"}>
-                          {formatZAR(w.wallet_balance)}
-                          {w.is_frozen && <Snowflake size={10} className="inline ml-1" />}
-                        </span>
-                      ) : "—"}
-                    </Td>
-                    <Td>
-                      <Badge label={w.status.replace("_", " ")} tone={getStatusTone(w.status)} />
-                    </Td>
-                    <Td className="text-textMuted text-xs">{formatDate(w.created_at)}</Td>
-                    <Td>
-                      {w.status === "pending" && canApprove && (
-                        <div className="flex gap-1.5">
-                          <Button variant="secondary" onClick={() => handleApprove(w)} loading={processing === w.id}>
-                            <Zap size={12} className="text-cyan" /> Pay Now
-                          </Button>
-                          <Button variant="danger" onClick={() => handleReject(w)}>
-                            <XCircle size={12} /> Reject
-                          </Button>
-                        </div>
-                      )}
-                      {w.status === "payout_failed" && canApprove && (
-                        <Button variant="secondary" onClick={() => handleRetry(w.id)} loading={processing === w.id}>
-                          <RefreshCw size={12} /> Retry
-                        </Button>
-                      )}
-                      {w.status === "payout_failed" && (
-                        <div className="flex items-center gap-1 mt-1">
-                          <AlertTriangle size={10} className="text-red" />
-                          <span className="text-[10px] text-red">Payout failed</span>
-                        </div>
-                      )}
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+                        <td className="py-3 px-4 font-semibold text-text text-xs">{w.user_name || "—"}</td>
+                        <td className="py-3 px-4 font-mono text-xs text-textMuted">{w.phone_number || "—"}</td>
+                        <td className="py-3 px-4">
+                          <span className={`font-bold text-xs ${w.amount > 10000 ? "text-red" : "text-text"}`}>
+                            {formatZAR(w.amount)}
+                            {w.amount > 10000 && !canLarge && (
+                              <span className="ml-1 text-[9px] text-red block">FINANCE REQ</span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-green font-bold text-xs">{formatZAR(w.amount - 3.50)}</span>
+                          <span className="text-textDim text-[10px] block">after R3.50 fee</span>
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs">{w.bank_name}</td>
+                        <td className="py-3 px-4 font-mono text-xs text-textMuted">{w.account_number}</td>
+                        <td className="py-3 px-4 text-xs">
+                          {w.wallet_balance !== undefined ? (
+                            <span className={w.is_frozen ? "text-red" : "text-green"}>
+                              {formatZAR(w.wallet_balance)}
+                              {w.is_frozen && <Snowflake size={10} className="inline ml-1" />}
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${W_STATUS_CLS[w.status] || "bg-bg3 border-border text-textDim"}`}>
+                            {w.status.replace("_", " ")}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs">{formatDate(w.created_at)}</td>
+                        <td className="py-3 px-4">
+                          {w.status === "pending" && canApprove && (
+                            <div className="flex gap-1.5">
+                              <Button variant="secondary" onClick={() => handleApprove(w)} loading={processing === w.id}>
+                                <Zap size={12} className="text-cyan" /> Pay Now
+                              </Button>
+                              <Button variant="danger" onClick={() => handleReject(w)}>
+                                <XCircle size={12} /> Reject
+                              </Button>
+                            </div>
+                          )}
+                          {w.status === "payout_failed" && canApprove && (
+                            <Button variant="secondary" onClick={() => handleRetry(w.id)} loading={processing === w.id}>
+                              <RefreshCw size={12} /> Retry
+                            </Button>
+                          )}
+                          {w.status === "payout_failed" && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <AlertTriangle size={10} className="text-red" />
+                              <span className="text-[10px] text-red">Payout failed</span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </>
         )}
@@ -564,25 +581,38 @@ export default function WithdrawalsPage() {
               {loading ? <Spinner /> : filteredPayouts.length === 0 ? (
                 <div className="text-center py-12 text-textMuted text-sm">No payouts found</div>
               ) : (
-                <Table headers={["Driver", "Phone", "Requested", "Fee", "Net Paid", "Bank", "Account", "Status", "Stitch ID", "Date"]} empty={false}>
-                  {filteredPayouts.map((p: any) => (
-                    <Tr key={p.id}>
-                      <Td className="font-semibold">{p.driver_name || "—"}</Td>
-                      <Td className="font-mono text-xs text-textMuted">{p.phone_number || "—"}</Td>
-                      <Td className="font-bold">{formatZAR(p.amount)}</Td>
-                      <Td className="text-red text-xs">R{(p.fee ?? 0).toFixed(2)}</Td>
-                      <Td className="text-green font-bold">{formatZAR(p.net_amount ?? p.amount)}</Td>
-                      <Td className="text-textMuted text-xs">{p.bank_name || "—"}</Td>
-                      <Td className="font-mono text-xs text-textMuted">{p.account_number || "—"}</Td>
-                      <Td>
-                        <Badge label={p.status} tone={getStatusTone(p.status)} />
-                        {p.failure_reason && <p className="text-[10px] text-red mt-0.5">{p.failure_reason}</p>}
-                      </Td>
-                      <Td><span className="font-mono text-[10px] text-textDim">{p.stitch_disbursement_id?.slice(0, 16) || "—"}</span></Td>
-                      <Td className="text-textMuted text-xs">{formatDate(p.initiated_at || p.created_at)}</Td>
-                    </Tr>
-                  ))}
-                </Table>
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-border bg-bg3/60">
+                        {["Driver", "Phone", "Requested", "Fee", "Net Paid", "Bank", "Account", "Status", "Stitch ID", "Date"].map(h => (
+                          <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredPayouts.map((p: any) => (
+                        <tr key={p.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                          <td className="py-3 px-4 font-semibold text-text text-xs">{p.driver_name || "—"}</td>
+                          <td className="py-3 px-4 font-mono text-xs text-textMuted">{p.phone_number || "—"}</td>
+                          <td className="py-3 px-4 font-bold text-text text-xs">{formatZAR(p.amount)}</td>
+                          <td className="py-3 px-4 text-red text-xs">R{(p.fee ?? 0).toFixed(2)}</td>
+                          <td className="py-3 px-4 text-green font-bold text-xs">{formatZAR(p.net_amount ?? p.amount)}</td>
+                          <td className="py-3 px-4 text-textMuted text-xs">{p.bank_name || "—"}</td>
+                          <td className="py-3 px-4 font-mono text-xs text-textMuted">{p.account_number || "—"}</td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${W_STATUS_CLS[p.status] || "bg-bg3 border-border text-textDim"}`}>
+                              {p.status}
+                            </span>
+                            {p.failure_reason && <p className="text-[10px] text-red mt-0.5">{p.failure_reason}</p>}
+                          </td>
+                          <td className="py-3 px-4"><span className="font-mono text-[10px] text-textDim">{p.stitch_disbursement_id?.slice(0, 16) || "—"}</span></td>
+                          <td className="py-3 px-4 text-textMuted text-xs">{formatDate(p.initiated_at || p.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           );

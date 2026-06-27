@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Table, Tr, Td, Badge, Button, Spinner } from "@/components/ui";
+import { Button, Spinner } from "@/components/ui";
 import { api, OwnerDetail, OwnerDriver, TaxiAssociation, hasPermission } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import { ArrowLeft, Car, Star, Phone, Building2, CreditCard, Wallet, ExternalLink, CheckCircle } from "lucide-react";
@@ -224,43 +224,60 @@ export default function OwnerDetailPage() {
           drivers.length === 0
             ? <p className="text-textMuted text-sm py-8 text-center">No drivers linked to this owner yet.</p>
             : (
-              <Table headers={["Driver", "Phone", "Plate", "Earnings", "Rating", "Daily Target", "Status", "Actions"]} empty={false}>
-                {drivers.map((d: OwnerDriver) => (
-                  <Tr key={d.user_id}>
-                    <Td><p className="font-semibold">{d.full_name}</p></Td>
-                    <Td className="font-mono text-xs text-textMuted">{d.phone_number}</Td>
-                    <Td>
-                      {d.vehicle_plate
-                        ? <span className="font-mono text-xs bg-yellow/10 text-yellow px-2 py-0.5 rounded border border-yellow/20">{d.vehicle_plate}</span>
-                        : <span className="text-textDim text-xs">—</span>}
-                    </Td>
-                    <Td className="font-bold text-green">{formatZAR(d.total_earnings)}</Td>
-                    <Td>
-                      {d.rating_count > 0
-                        ? <span className="flex items-center gap-1 text-yellow text-xs font-bold">
-                            <Star size={11} fill="currentColor" />
-                            {d.rating_avg.toFixed(1)}
-                            <span className="text-textMuted font-normal">({d.rating_count})</span>
-                          </span>
-                        : <span className="text-textMuted text-xs italic">New</span>}
-                    </Td>
-                    <Td className="text-textMuted text-xs">
-                      {d.daily_target > 0 ? formatZAR(d.daily_target) : <span className="italic">Not set</span>}
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-1.5">
-                        <Badge label={d.is_verified ? "Verified" : "Pending"} tone={d.is_verified ? "green" : "yellow"} />
-                        {d.confirmed && <Badge label="Confirmed" tone="cyan" />}
-                      </div>
-                    </Td>
-                    <Td>
-                      <Link href={`/admin/drivers/${d.user_id}`}>
-                        <Button variant="ghost"><ExternalLink size={13} /> View</Button>
-                      </Link>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3/60">
+                      {["Driver", "Phone", "Plate", "Earnings", "Rating", "Daily Target", "Status", "Actions"].map(h => (
+                        <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drivers.map((d: OwnerDriver) => (
+                      <tr key={d.user_id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                        <td className="py-3 px-4 font-semibold text-text text-xs">{d.full_name}</td>
+                        <td className="py-3 px-4 font-mono text-xs text-textMuted">{d.phone_number}</td>
+                        <td className="py-3 px-4">
+                          {d.vehicle_plate
+                            ? <span className="font-mono text-xs bg-yellow/10 text-yellow px-2 py-0.5 rounded border border-yellow/20">{d.vehicle_plate}</span>
+                            : <span className="text-textDim text-xs">—</span>}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-green text-xs">{formatZAR(d.total_earnings)}</td>
+                        <td className="py-3 px-4">
+                          {d.rating_count > 0
+                            ? <span className="flex items-center gap-1 text-yellow text-xs font-bold">
+                                <Star size={11} fill="currentColor" />
+                                {d.rating_avg.toFixed(1)}
+                                <span className="text-textMuted font-normal">({d.rating_count})</span>
+                              </span>
+                            : <span className="text-textMuted text-xs italic">New</span>}
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs">
+                          {d.daily_target > 0 ? formatZAR(d.daily_target) : <span className="italic">Not set</span>}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${d.is_verified ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>
+                              {d.is_verified ? "Verified" : "Pending"}
+                            </span>
+                            {d.confirmed && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-cyan/20 bg-cyan/10 text-cyan text-[10px] font-bold">
+                                Confirmed
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Link href={`/admin/drivers/${d.user_id}`}>
+                            <Button variant="ghost"><ExternalLink size={13} /> View</Button>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
         )}
 
@@ -269,28 +286,45 @@ export default function OwnerDetailPage() {
           cashup_history.length === 0
             ? <p className="text-textMuted text-sm py-8 text-center">No cashup records yet.</p>
             : (
-              <Table headers={["Driver", "Cashup Amount", "Driver Profit", "Shortfall", "Fee", "Method", "Status", "Date"]} empty={false}>
-                {cashup_history.map(c => (
-                  <Tr key={c.id}>
-                    <Td className="font-medium">{c.driver_name}</Td>
-                    <Td className="font-bold text-green">{formatZAR(c.cashup_amount)}</Td>
-                    <Td className="text-cyan">{formatZAR(c.driver_profit)}</Td>
-                    <Td>
-                      {c.shortfall > 0
-                        ? <span className="text-red-400 font-semibold">{formatZAR(c.shortfall)}</span>
-                        : <span className="text-textDim">—</span>}
-                    </Td>
-                    <Td className="text-textMuted text-xs">
-                      {c.payout_fee > 0 ? formatZAR(c.payout_fee) : "Free"}
-                    </Td>
-                    <Td>
-                      <Badge label={c.cashup_method === "wallet" ? "Wallet" : "Bank"} tone={c.cashup_method === "wallet" ? "cyan" : "purple"} />
-                    </Td>
-                    <Td><Badge label={c.status} tone={c.status === "completed" ? "green" : "yellow"} /></Td>
-                    <Td className="text-textMuted text-xs">{formatDate(c.created_at)}</Td>
-                  </Tr>
-                ))}
-              </Table>
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg3/60">
+                      {["Driver", "Cashup Amount", "Driver Profit", "Shortfall", "Fee", "Method", "Status", "Date"].map(h => (
+                        <th key={h} className="py-2.5 px-4 text-left text-[10px] font-extrabold text-textDim uppercase tracking-widest whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cashup_history.map(c => (
+                      <tr key={c.id} className="border-b border-border/50 hover:bg-bg3/40 transition-colors">
+                        <td className="py-3 px-4 font-medium text-text text-xs">{c.driver_name}</td>
+                        <td className="py-3 px-4 font-bold text-green text-xs">{formatZAR(c.cashup_amount)}</td>
+                        <td className="py-3 px-4 text-cyan text-xs">{formatZAR(c.driver_profit)}</td>
+                        <td className="py-3 px-4">
+                          {c.shortfall > 0
+                            ? <span className="text-red-400 font-semibold text-xs">{formatZAR(c.shortfall)}</span>
+                            : <span className="text-textDim text-xs">—</span>}
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs">
+                          {c.payout_fee > 0 ? formatZAR(c.payout_fee) : "Free"}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${c.cashup_method === "wallet" ? "bg-cyan/10 border-cyan/20 text-cyan" : "bg-purple/10 border-purple/20 text-purple"}`}>
+                            {c.cashup_method === "wallet" ? "Wallet" : "Bank"}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold ${c.status === "completed" ? "bg-green/10 border-green/20 text-green" : "bg-yellow/10 border-yellow/20 text-yellow"}`}>
+                            {c.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-textMuted text-xs">{formatDate(c.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
         )}
 
