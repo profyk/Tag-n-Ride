@@ -204,13 +204,10 @@ export default function AnnouncementsPage() {
                 <div className="grid grid-cols-2 gap-2">
                   {(["info", "warning", "success", "error"] as NotifType[]).map(t => {
                     const Icon = TYPE_ICONS[t];
-                    const tone = TYPE_TONES[t];
                     return (
                       <button key={t} onClick={() => setPushType(t)}
                         className={`flex items-center gap-2 py-2 px-3 rounded-lg border text-xs font-bold capitalize transition-all ${
-                          pushType === t
-                            ? `border-${tone}/30 text-${tone} bg-bg3`
-                            : "bg-bg border-border text-textMuted"
+                          pushType === t ? TYPE_CLS[t] : "bg-bg border-border text-textMuted"
                         }`}>
                         <Icon size={12} /> {t}
                       </button>
