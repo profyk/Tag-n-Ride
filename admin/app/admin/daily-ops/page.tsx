@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Card, Button, Spinner, Badge } from "@/components/ui";
+import { Card, Button, Spinner } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   Activity, RefreshCw, CheckCircle, AlertTriangle, Zap, Users, Car,

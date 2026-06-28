@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Button, Spinner, Input, Select, Modal } from "@/components/ui";
+import { Button, Spinner, Input, Select, Modal } from "@/components/ui";
 import { api, Transaction } from "@/lib/api";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {

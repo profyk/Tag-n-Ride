@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Button, Modal } from "@/components/ui";
+import { Button, Modal } from "@/components/ui";
 import { formatZAR, formatDate } from "@/lib/utils";
 import {
   ShieldAlert, UserX, Snowflake, RefreshCw, AlertTriangle,

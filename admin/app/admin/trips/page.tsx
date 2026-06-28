@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner, Button, Card, Modal, Input, PermissionGate } from "@/components/ui";
+import { Spinner, Button, Card, Modal, Input, PermissionGate } from "@/components/ui";
 import client, { api, DriverLocation } from "@/lib/api";
 import { LiveMap, MapPin as LiveMapPin } from "@/components/saferide/LiveMap";
 import { formatDate, formatZAR } from "@/lib/utils";

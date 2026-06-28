@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
-import { Badge, Spinner } from "@/components/ui";
+import { Spinner } from "@/components/ui";
 import client, { hasPermission } from "@/lib/api";
 import { CheckCircle, XCircle, RefreshCw, User, Phone } from "lucide-react";
 import toast from "react-hot-toast";
