@@ -9,15 +9,23 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 export function setToken(t: string) { localStorage.setItem(TOKEN_KEY, t); }
+let _permCache: string[] | null = null;
+
 export function clearToken() {
+  _permCache = null;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(PERMS_KEY);
 }
 export function setPermissions(perms: string[]) {
+  _permCache = perms;
   localStorage.setItem(PERMS_KEY, JSON.stringify(perms));
 }
 export function getPermissions(): string[] {
-  try { return JSON.parse(localStorage.getItem(PERMS_KEY) || "[]"); } catch { return []; }
+  if (_permCache) return _permCache;
+  try {
+    _permCache = JSON.parse(localStorage.getItem(PERMS_KEY) || "[]");
+    return _permCache!;
+  } catch { return []; }
 }
 export function hasPermission(p: string): boolean {
   return getPermissions().includes(p);
@@ -639,6 +647,7 @@ export const api = {
     min_amount?: number;
     max_amount?: number;
     user_id?: string;
+    limit?: number;
   }) => client.get<Transaction[]>("/api/admin/transactions", { params }),
 
   withdrawals: () => client.get<Withdrawal[]>("/api/admin/withdrawals"),

@@ -1,4 +1,6 @@
-import { getToken, clearToken, getRole } from "./api";
+import { getToken, clearToken } from "./api";
+
+const ALLOWED_ROLES = ["admin", "superadmin", "finance", "support", "ceo", "cto", "cfo", "hr"] as const;
 
 export function isAuthenticated(): boolean {
   const token = getToken();
@@ -6,15 +8,6 @@ export function isAuthenticated(): boolean {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     if (payload.exp * 1000 < Date.now()) { clearToken(); return false; }
-    return ["admin", "superadmin", "finance", "support", "ceo", "cto", "cfo"].includes(payload.role);
+    return (ALLOWED_ROLES as readonly string[]).includes(payload.role);
   } catch { return false; }
-}
-
-export function requireAuth() {
-  if (typeof window === "undefined") return;
-  if (!isAuthenticated()) window.location.href = "/login";
-}
-
-export function isSuperAdmin(): boolean {
-  return ["superadmin", "ceo"].includes(getRole() || "");
 }

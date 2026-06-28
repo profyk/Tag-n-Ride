@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Users, Car, ArrowLeftRight, Wallet,
   BarChart3, CreditCard, LogOut, Shield, ShieldCheck,
@@ -216,7 +216,6 @@ const SUPERADMIN_NAV: NavItem[] = [
   { label: "Database",          href: "/admin/database",   icon: Database },
   { label: "Superadmin Tools",  href: "/admin/superadmin", icon: ShieldCheck },
   { label: "Test Users",        href: "/admin/test-users", icon: FlaskConical },
-  { label: "System Manual",     href: "/admin/manual",     icon: BookOpen },
 ];
 
 // ── ThemeToggle ───────────────────────────────────────────────────────────────
@@ -328,6 +327,18 @@ export function Sidebar() {
   const execDocsAllowed = ["superadmin", "ceo"].includes(role);
   const [search, setSearch] = useState("");
   const [superOpen, setSuperOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const handleSignOut = async () => {
     try {
@@ -383,11 +394,15 @@ export function Sidebar() {
         <div className="relative">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-textDim" />
           <input
+            ref={searchRef}
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search pages..."
+            placeholder="Search pages…"
             className="w-full bg-bg border border-border rounded-lg pl-7 pr-7 py-1.5 text-[11px] text-text placeholder:text-textDim focus:outline-none focus:border-cyan transition-colors"
           />
+          {!search && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-textDim font-mono bg-bg3 border border-border px-1 py-0.5 rounded hidden lg:block pointer-events-none">⌘K</span>
+          )}
           {search && (
             <button
               onClick={() => setSearch("")}

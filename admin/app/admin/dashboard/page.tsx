@@ -176,13 +176,13 @@ export default function DashboardPage() {
   useEffect(() => {
     const pollLive = async () => {
       try {
-        const r = await api.transactions({});
+        const r = await api.transactions({ limit: 15 });
         const txns = Array.isArray(r?.data) ? r.data : (Array.isArray(r) ? r : []);
         setLiveActivity(txns.slice(0, 15));
       } catch {}
     };
     pollLive();
-    const id = setInterval(pollLive, 5000);
+    const id = setInterval(pollLive, 10_000);
     return () => clearInterval(id);
   }, []);
 
@@ -518,7 +518,7 @@ export default function DashboardPage() {
                       onClick={() => verifyDriver(d.user_id, d.full_name)}
                       disabled={!!verifyingId}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-green/10 border border-green/20 text-green text-[10px] font-bold rounded-lg hover:bg-green/20 transition-all disabled:opacity-50 whitespace-nowrap">
-                      {verifyingId === d.user_id ? <Spinner /> : <CheckCircle2 size={11} />} Verify
+                      {verifyingId === d.user_id ? <Spinner size={11} /> : <CheckCircle2 size={11} />} Verify
                     </button>
                   </div>
                 );
@@ -665,7 +665,7 @@ export default function DashboardPage() {
               </span>
               <h2 className="text-sm font-bold text-text">Live Activity Feed</h2>
               <span className="text-[10px] font-bold px-2 py-0.5 bg-cyan/10 text-cyan border border-cyan/20 rounded-full">
-                5s refresh
+                10s refresh
               </span>
             </div>
             <Link href="/admin/transactions" className="flex items-center gap-1 text-xs text-textMuted hover:text-cyan transition-colors font-bold">
