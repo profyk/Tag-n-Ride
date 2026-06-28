@@ -66,6 +66,10 @@ export default function TripCentre() {
   const [doneModal, setDoneModal] = useState(false);
   const [tripSummary, setTripSummary] = useState<any>(null);
   const [expandedTrip, setExpandedTrip] = useState<string | null>(null);
+  const [clearedTrips, setClearedTrips] = useState<Set<string>>(new Set());
+
+  const clearTrip = (id: string) => setClearedTrips(prev => new Set([...prev, id]));
+  const clearAllTrips = () => setClearedTrips(new Set(history.map(h => h.id)));
 
   // New modals
   const [infoModal, setInfoModal] = useState(false);
@@ -701,57 +705,76 @@ export default function TripCentre() {
         )}
 
         {/* Recent trips */}
-        {history.length > 0 && (
+        {history.filter(h => !clearedTrips.has(h.id)).length > 0 && (
           <View style={{ marginTop: trip ? 8 : 0 }}>
             <View style={[s.sectionHeader, { marginBottom: 12 }]}>
               <Text style={s.sectionLabel}>RECENT TRIPS</Text>
+              <Text style={s.histCount}>{history.filter(h => !clearedTrips.has(h.id)).length}</Text>
+              <TouchableOpacity onPress={clearAllTrips} style={s.clearAllBtn} activeOpacity={0.7}>
+                <Text style={s.clearAllText}>Clear All</Text>
+              </TouchableOpacity>
             </View>
-            <View style={{ gap: 8 }}>
-              {history.map((h) => {
-                const hGross = parseFloat(h.total_revenue || "0");
-                const hFee = Math.round(hGross * 0.03 * 100) / 100;
-                const hNet = Math.round((hGross - hFee) * 100) / 100;
-                const isExpanded = expandedTrip === h.id;
-                const durationMin = h.started_at && h.ended_at
-                  ? Math.round((new Date(h.ended_at).getTime() - new Date(h.started_at).getTime()) / 60000)
-                  : null;
-                return (
-                  <TouchableOpacity
-                    key={h.id}
-                    style={s.histCard}
-                    onPress={() => setExpandedTrip(isExpanded ? null : h.id)}
-                    activeOpacity={0.8}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.histDate}>
-                        {h.started_at ? new Date(h.started_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "—"}
-                        {h.started_at ? ` · ${new Date(h.started_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}` : ""}
-                      </Text>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
-                        <Ionicons name="people-outline" size={11} color={colors.textMuted} />
-                        <Text style={s.histMeta}>{h.total_passengers || h.passenger_count || 0} passengers</Text>
-                        {durationMin !== null && <Text style={s.histMeta}>· {durationMin}m</Text>}
+            <View style={s.histScrollCard}>
+              <ScrollView
+                style={{ maxHeight: 420 }}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled>
+                <View style={{ gap: 8 }}>
+                  {history.filter(h => !clearedTrips.has(h.id)).map((h) => {
+                    const hGross = parseFloat(h.total_revenue || "0");
+                    const hFee = Math.round(hGross * 0.03 * 100) / 100;
+                    const hNet = Math.round((hGross - hFee) * 100) / 100;
+                    const isExpanded = expandedTrip === h.id;
+                    const durationMin = h.started_at && h.ended_at
+                      ? Math.round((new Date(h.ended_at).getTime() - new Date(h.started_at).getTime()) / 60000)
+                      : null;
+                    return (
+                      <View key={h.id} style={s.histCard}>
+                        <TouchableOpacity
+                          style={s.histCardTap}
+                          onPress={() => setExpandedTrip(isExpanded ? null : h.id)}
+                          activeOpacity={0.8}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.histDate}>
+                              {h.started_at ? new Date(h.started_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                              {h.started_at ? ` · ${new Date(h.started_at).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}` : ""}
+                            </Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                              <Ionicons name="people-outline" size={11} color={colors.textMuted} />
+                              <Text style={s.histMeta}>{h.total_passengers || h.passenger_count || 0} passengers</Text>
+                              {durationMin !== null && <Text style={s.histMeta}>· {durationMin}m</Text>}
+                            </View>
+                            <Text style={s.histRef}>{h.trip_reference}</Text>
+                          </View>
+                          <View style={{ alignItems: "flex-end", paddingRight: 20 }}>
+                            <Text style={s.histNet}>{formatZAR(hNet)}</Text>
+                            <View style={[s.statusBadge, { backgroundColor: h.status === "active" ? colors.cyan + "20" : colors.green + "18" }]}>
+                              <Text style={[s.statusBadgeText, { color: h.status === "active" ? colors.cyan : colors.green }]}>
+                                {h.status === "active" ? "Active" : "Completed"}
+                              </Text>
+                            </View>
+                            <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={colors.textDim} style={{ marginTop: 6 }} />
+                          </View>
+                          {isExpanded && (
+                            <View style={s.histExpanded}>
+                              <ERow label="Gross" value={formatZAR(hGross)} colors={colors} />
+                              <ERow label="Fee 3%" value={`−${formatZAR(hFee)}`} valueColor={colors.red} colors={colors} />
+                              <ERow label="Net" value={formatZAR(hNet)} valueColor={colors.green} bold last colors={colors} />
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => clearTrip(h.id)}
+                          style={s.clearBtn}
+                          activeOpacity={0.7}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                          <Ionicons name="close-circle" size={16} color={colors.textDim} />
+                        </TouchableOpacity>
                       </View>
-                      <Text style={s.histRef}>{h.trip_reference}</Text>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={s.histNet}>{formatZAR(hNet)}</Text>
-                      <View style={[s.statusBadge, { backgroundColor: h.status === "active" ? colors.cyan + "20" : colors.green + "18" }]}>
-                        <Text style={[s.statusBadgeText, { color: h.status === "active" ? colors.cyan : colors.green }]}>
-                          {h.status === "active" ? "Active" : "Completed"}
-                        </Text>
-                      </View>
-                      <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={colors.textDim} style={{ marginTop: 6 }} />
-                    </View>
-                    {isExpanded && (
-                      <View style={s.histExpanded}>
-                        <ERow label="Gross" value={formatZAR(hGross)} colors={colors} />
-                        <ERow label="Fee 3%" value={`−${formatZAR(hFee)}`} valueColor={colors.red} colors={colors} />
-                        <ERow label="Net" value={formatZAR(hNet)} valueColor={colors.green} bold last colors={colors} />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
+                    );
+                  })}
+                </View>
+              </ScrollView>
             </View>
           </View>
         )}
@@ -1189,7 +1212,13 @@ const makeStyles = (colors: any) => StyleSheet.create({
   endBtnText: { color: "#fff", fontSize: 16, fontWeight: "900" },
 
   // History
-  histCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, flexDirection: "row", flexWrap: "wrap" },
+  histScrollCard: { borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg3, overflow: "hidden", padding: 8 },
+  histCard: { backgroundColor: colors.bg2, borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: "hidden", position: "relative" },
+  histCardTap: { padding: 14, flexDirection: "row", flexWrap: "wrap" },
+  clearBtn: { position: "absolute", top: 8, right: 8, padding: 4 },
+  clearAllBtn: { marginLeft: "auto" as any, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: colors.border },
+  clearAllText: { color: colors.textDim, fontSize: 10, fontWeight: "600" as const },
+  histCount: { backgroundColor: colors.bg3, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, color: colors.textMuted, fontSize: 10, fontWeight: "700" as const },
   histDate: { color: colors.text, fontWeight: "700", fontSize: 13 },
   histMeta: { color: colors.textMuted, fontSize: 11 },
   histRef: { color: colors.textDim, fontSize: 10, fontFamily: "monospace", marginTop: 3 },
