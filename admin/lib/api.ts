@@ -144,6 +144,7 @@ export type Owner = {
   total_cashup: number;
   province?: string | null;
   taxi_association_id?: string | null;
+  is_active?: boolean;
   created_at: string;
 };
 
