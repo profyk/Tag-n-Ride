@@ -100,7 +100,6 @@ const SEG_LABELS: Record<string, string> = {
   reports: "Reports",
   notices: "Notices",
   broadcast: "Broadcast",
-  "system-wallet": "System Wallet",
 };
 
 function isUUID(s: string) {
