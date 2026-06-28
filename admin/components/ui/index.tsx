@@ -28,28 +28,6 @@ export function Button({
   );
 }
 
-type Tone = "green" | "red" | "yellow" | "cyan" | "purple" | "muted" | "orange";
-
-export function Badge({ label, tone = "muted", children }: { label?: string; tone?: Tone; children?: React.ReactNode }) {
-  const tones: Record<Tone, string> = {
-    green: "bg-green/10 text-green border-green/20",
-    red: "bg-red/10 text-red border-red/20",
-    yellow: "bg-yellow/10 text-yellow border-yellow/20",
-    cyan: "bg-cyan/10 text-cyan border-cyan/20",
-    purple: "bg-purple/10 text-purple border-purple/20",
-    orange: "bg-orange-400/10 text-orange-400 border-orange-400/20",
-    muted: "bg-bg3 text-textMuted border-border",
-  };
-  return (
-    <span className={cn(
-      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border",
-      tones[tone]
-    )}>
-      {children ?? label}
-    </span>
-  );
-}
-
 export function Card({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
   return (
     <div className={cn("bg-bg2 border border-border rounded-xl p-5", className)} onClick={onClick}>
@@ -110,45 +88,6 @@ export function Select({
       {options ? options.map(o => <option key={o.value} value={o.value}>{o.label}</option>) : children}
     </select>
   );
-}
-
-export function Table({
-  headers, children, empty,
-}: {
-  headers: (string | React.ReactNode)[]; children?: React.ReactNode; empty?: boolean;
-}) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full text-sm">
-        <thead className="bg-bg3 border-b border-border">
-          <tr>
-            {headers.map((h, i) => (
-              <th key={i} className="px-4 py-3 text-left text-[10px] font-bold text-textMuted uppercase tracking-wider">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {empty ? (
-            <tr>
-              <td colSpan={headers.length} className="px-4 py-12 text-center text-textMuted text-sm">
-                No records found
-              </td>
-            </tr>
-          ) : children}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export function Tr({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
-  return <tr className={cn("hover:bg-bg3 transition-colors", onClick && "cursor-pointer", className)} onClick={onClick}>{children}</tr>;
-}
-
-export function Td({ children, className, colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
-  return <td className={cn("px-4 py-3 text-text", className)} colSpan={colSpan}>{children}</td>;
 }
 
 export function Modal({
