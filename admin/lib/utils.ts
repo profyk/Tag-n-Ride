@@ -1,3 +1,22 @@
+// ── SA Tax helpers (shared across HR, Payroll, Documents) ─────────────────────
+export function calcAnnualPAYE(annualGross: number): number {
+  let tax = 0;
+  if      (annualGross <= 237_100)   tax = annualGross * 0.18;
+  else if (annualGross <= 370_500)   tax = 42_678  + (annualGross - 237_100) * 0.26;
+  else if (annualGross <= 512_800)   tax = 77_362  + (annualGross - 370_500) * 0.31;
+  else if (annualGross <= 673_000)   tax = 121_475 + (annualGross - 512_800) * 0.36;
+  else if (annualGross <= 857_900)   tax = 179_147 + (annualGross - 673_000) * 0.39;
+  else if (annualGross <= 1_817_000) tax = 251_258 + (annualGross - 857_900) * 0.41;
+  else                               tax = 644_489 + (annualGross - 1_817_000) * 0.45;
+  return Math.max(0, tax - 17_235);
+}
+export const monthlyPAYE = (monthly: number) => calcAnnualPAYE(monthly * 12) / 12;
+export const monthlyUIF  = (monthly: number) => Math.min(monthly * 0.01, 177.12);
+export const monthlySDL  = (monthly: number) => monthly * 0.01;
+
+export const SA_BANKS: string[] = ["ABSA", "FNB", "Nedbank", "Standard Bank", "Capitec", "Discovery Bank", "Investec", "TymeBank", "African Bank"];
+export const SA_BRANCH: Record<string, string> = { ABSA: "632005", FNB: "250655", Nedbank: "198765", "Standard Bank": "051001", Capitec: "470010" };
+
 export const SA_PROVINCES = [
   "Gauteng", "Western Cape", "KwaZulu-Natal", "Eastern Cape",
   "Limpopo", "Mpumalanga", "North West", "Free State", "Northern Cape",

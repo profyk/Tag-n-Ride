@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Button, Spinner, Modal, Input, Select } from "@/components/ui";
-import { formatZAR, formatDate } from "@/lib/utils";
+import { formatZAR, formatDate, monthlyPAYE, monthlyUIF, SA_BANKS, SA_BRANCH } from "@/lib/utils";
 import { api, getRole, hasPermission } from "@/lib/api";
 import { DangerPinModal, useDangerPin, getDangerToken } from "@/components/DangerPinModal";
 import toast from "react-hot-toast";
@@ -20,21 +20,6 @@ const authHeaders = (extra?: Record<string, string>) => ({
   ...(extra || {}),
 });
 
-// ── SA Tax helpers ────────────────────────────────────────────────────────────
-function calcAnnualPAYE(annualGross: number): number {
-  let tax = 0;
-  if      (annualGross <= 237_100)   tax = annualGross * 0.18;
-  else if (annualGross <= 370_500)   tax = 42_678  + (annualGross - 237_100) * 0.26;
-  else if (annualGross <= 512_800)   tax = 77_362  + (annualGross - 370_500) * 0.31;
-  else if (annualGross <= 673_000)   tax = 121_475 + (annualGross - 512_800) * 0.36;
-  else if (annualGross <= 857_900)   tax = 179_147 + (annualGross - 673_000) * 0.39;
-  else if (annualGross <= 1_817_000) tax = 251_258 + (annualGross - 857_900) * 0.41;
-  else                               tax = 644_489 + (annualGross - 1_817_000) * 0.45;
-  return Math.max(0, tax - 17_235);
-}
-const monthlyPAYE = (monthly: number) => calcAnnualPAYE(monthly * 12) / 12;
-const monthlyUIF  = (monthly: number) => Math.min(monthly * 0.01, 177.12);
-
 const DEPARTMENTS = ["Engineering", "Finance", "Operations", "Business Dev", "Support", "Management", "Marketing", "Legal"];
 const EMP_TYPES = ["Permanent", "Fixed-term Contract", "Part-time", "Freelance"];
 const STATUS_CLS: Record<string, string> = {
@@ -49,8 +34,6 @@ const PAY_STATUS_CLS: Record<string, string> = {
   rejected: "bg-red/10 border-red/20 text-red",
   pending:  "bg-yellow/10 border-yellow/20 text-yellow",
 };
-const SA_BANKS = ["ABSA", "FNB", "Nedbank", "Standard Bank", "Capitec", "Discovery Bank", "Investec", "TymeBank", "African Bank"];
-const SA_BRANCH: Record<string, string> = { "ABSA": "632005", "FNB": "250655", "Nedbank": "198765", "Standard Bank": "051001", "Capitec": "470010" };
 
 type Staff = {
   id: string;
@@ -166,7 +149,7 @@ export default function HRPage() {
 function HRPageInner() {
   const { open: pinOpen, request: requestPin, handleSuccess: pinSuccess, handleCancel: pinCancel } = useDangerPin();
 
-  const [activeTab, setActiveTab] = useState<"staff" | "salary">("staff");
+  const [activeTab, setActiveTab] = useState<"staff" | "salary" | "orgchart">("staff");
 
   // ── Staff state ──
   const [staff, setStaff]   = useState<Staff[]>([]);
@@ -412,19 +395,29 @@ function HRPageInner() {
           </p>
         </div>
 
+        {/* Quick links */}
+        <div className="flex gap-3 flex-wrap">
+          <a href="/admin/hr/leave" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan/10 border border-cyan/20 text-xs font-bold text-cyan hover:bg-cyan/20 transition-all">
+            <Calendar size={12} />Leave Management →
+          </a>
+          <a href="/admin/payroll" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green/10 border border-green/20 text-xs font-bold text-green hover:bg-green/20 transition-all">
+            <CreditCard size={12} />Payroll Runs →
+          </a>
+        </div>
+
         {/* Tab navigation */}
         <div className="flex gap-1 p-1 bg-bg2 rounded-xl border border-border w-fit">
-          <button
-            onClick={() => setActiveTab("staff")}
-            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "staff" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}
-          >
-            <Users size={12} /> Staff
+          <button onClick={() => setActiveTab("staff")}
+            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "staff" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}>
+            <Users size={12} />Staff
           </button>
-          <button
-            onClick={() => setActiveTab("salary")}
-            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "salary" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}
-          >
-            <Wallet size={12} /> Salary Payouts
+          <button onClick={() => setActiveTab("salary")}
+            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "salary" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}>
+            <Wallet size={12} />Salary Payouts
+          </button>
+          <button onClick={() => setActiveTab("orgchart")}
+            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "orgchart" ? "bg-bg3 text-text shadow-sm" : "text-textMuted hover:text-text"}`}>
+            <Briefcase size={12} />Org Chart
           </button>
         </div>
 
@@ -661,6 +654,58 @@ function HRPageInner() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════ ORG CHART TAB ═══════════════ */}
+        {activeTab === "orgchart" && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-cyan/5 border border-cyan/20">
+              <Briefcase size={14} className="text-cyan flex-shrink-0" />
+              <p className="text-cyan text-xs font-semibold">
+                Organisation chart based on active staff records. Grouped by department.
+              </p>
+            </div>
+
+            {loading ? <Spinner /> : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Array.from(new Set(staff.filter(s => s.status !== "terminated").map(s => s.department))).sort().map(dept => {
+                  const members = staff.filter(s => s.department === dept && s.status !== "terminated");
+                  return (
+                    <div key={dept} className="bg-bg2 border border-border rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-border bg-bg3/50">
+                        <p className="text-xs font-extrabold text-text">{dept}</p>
+                        <p className="text-[10px] text-textDim">{members.length} member{members.length !== 1 ? "s" : ""}</p>
+                      </div>
+                      <div className="p-3 space-y-2">
+                        {members.map(m => (
+                          <div key={m.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-bg3 transition-colors cursor-pointer" onClick={() => setViewStaff(m)}>
+                            <div className="w-8 h-8 rounded-full bg-cyanDim border border-cyan/20 flex items-center justify-center text-[11px] font-extrabold text-cyan flex-shrink-0">
+                              {m.full_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-text truncate">{m.full_name}</p>
+                              <p className="text-[10px] text-textDim truncate">{m.role_title}</p>
+                            </div>
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-bold flex-shrink-0 ${STATUS_CLS[m.status] || "bg-cyan/10 border-cyan/20 text-cyan"}`}>
+                              {m.status}
+                            </span>
+                          </div>
+                        ))}
+                        {members.length === 0 && (
+                          <p className="text-xs text-textDim text-center py-3">No active members</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {staff.filter(s => s.status !== "terminated").length === 0 && (
+                  <div className="col-span-3 text-center py-12 text-textMuted">
+                    <p className="text-sm">No active staff records to display</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1083,7 +1128,6 @@ function HRPageInner() {
         </div>
       </Modal>
 
-      <style>{`.label-sm { display: block; font-size: 10px; font-weight: 700; color: var(--textMuted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }`}</style>
     </AdminShell>
   );
 }

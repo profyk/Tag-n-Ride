@@ -165,6 +165,21 @@ export default function SuperAdminPage() {
 
       <div className="space-y-6">
 
+        {/* Quick links */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Document Studio", href: "/admin/superadmin/document-studio", color: "text-purple bg-purple/10 border-purple/20", desc: "Advanced doc editor & templates" },
+            { label: "Admin Accounts", href: "/admin/admins", color: "text-cyan bg-cyan/10 border-cyan/20", desc: "Manage admin users & permissions" },
+            { label: "Settings & Config", href: "/admin/settings", color: "text-yellow bg-yellow/10 border-yellow/20", desc: "System configuration & fees" },
+            { label: "Database", href: "/admin/database", color: "text-red bg-red/10 border-red/20", desc: "Direct database management" },
+          ].map(l => (
+            <a key={l.href} href={l.href} className={`flex flex-col gap-1.5 p-4 rounded-xl border transition-all hover:opacity-80 ${l.color}`}>
+              <p className="text-xs font-extrabold">{l.label}</p>
+              <p className="text-[10px] opacity-70">{l.desc}</p>
+            </a>
+          ))}
+        </div>
+
         {/* Transfer Funds */}
         <Card>
           <div className="flex items-center gap-2 mb-4">

@@ -125,3 +125,17 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg2); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--textDim); }
+
+/* Shared form label utility */
+.label-sm {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--textMuted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+/* Scrollbar thin for nav */
+.scrollbar-thin { scrollbar-width: thin; }

@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
-import { formatZAR, formatDate } from "@/lib/utils";
+import { formatZAR, formatDate, timeAgo } from "@/lib/utils";
 import {
   AlertTriangle, CheckCircle2, Clock, RefreshCw, ArrowRight,
   Zap, Shield, ShieldAlert, Fingerprint, Users, Scale,
@@ -48,14 +48,7 @@ const SEV: Record<Severity, { label: string; color: string; bg: string; border: 
   info:     { label: "Info",     color: "text-purple", bg: "bg-purple/5",  border: "border-purple/20", ring: "bg-purple" },
 };
 
-// ── Relative time ──────────────────────────────────────────────────────────
-function rel(ts: string) {
-  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 60)  return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`;
-  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
-  return `${Math.floor(s/86400)}d ago`;
-}
+const rel = timeAgo;
 
 // ── Alert card ─────────────────────────────────────────────────────────────
 function AlertCard({ alert, snoozed, onSnooze }: {

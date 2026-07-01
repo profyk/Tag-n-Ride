@@ -11,7 +11,7 @@ import {
   AlertTriangle, Copy, CheckCheck, Users, Crown,
   Plus, Pencil, Trash2, Save, Upload, Database,
   Printer, Share2, PenLine, FileSignature, RotateCcw,
-  Receipt,
+  Receipt, Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -1245,6 +1245,17 @@ export default function DocumentsPage() {
           <GeneratePayslipModal onClose={() => setPayslipOpen(false)} />
         )}
 
+        {/* Superadmin upgrade banner */}
+        {isExec && (
+          <a href="/admin/superadmin/document-studio" className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-purple/10 border border-purple/20 hover:bg-purple/15 transition-all">
+            <Layers size={14} className="text-purple flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-xs font-bold text-purple">Try Document Studio →</p>
+              <p className="text-[10px] text-purple/70">Advanced editor with split preview, 12 templates, e-signature & full toolbar</p>
+            </div>
+          </a>
+        )}
+
         {/* Banner */}
         <div className={cn(
           "flex items-center gap-3 px-4 py-3 rounded-xl border",
@@ -1253,11 +1264,11 @@ export default function DocumentsPage() {
           {isExec ? <Crown size={16} className="flex-shrink-0" /> : <Users size={16} className="flex-shrink-0" />}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold">
-              {isExec ? "Full Document Vault — CEO & Superadmin" : "HR Document Vault"}
+              {isExec ? "Company Document Vault — CEO & Superadmin" : "HR Document Vault"}
             </p>
             <p className="text-xs opacity-70">
               {isExec
-                ? "All documents visible. Editable documents are stored in the database."
+                ? "All company documents. Use Document Studio above for advanced editing."
                 : "HR and operational documents. Legal and investor documents require CEO access."}
             </p>
           </div>

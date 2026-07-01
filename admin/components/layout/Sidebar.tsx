@@ -17,6 +17,7 @@ import {
   Rocket, Target, Calculator, Database, Repeat2, FolderLock, Percent, Cpu, Brain,
   Landmark, ClipboardList, Download, Zap,
   FileWarning, MinusCircle, Building2, Map,
+  Calendar, Key, Layers, FilePlus,
 } from "lucide-react";
 import { clearToken, getRole, isSuperAdmin, hasPermission } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -204,18 +205,23 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const HR_NAV: NavItem[] = [
-  { label: "HR · Staff",    href: "/admin/hr",        icon: Users2 },
-  { label: "Payroll",       href: "/admin/payroll",    icon: Banknote },
-  { label: "HR Documents",  href: "/admin/documents",  icon: FolderLock },
+  { label: "Staff Records",     href: "/admin/hr",           icon: Users2    },
+  { label: "Payroll Runs",      href: "/admin/payroll",      icon: Banknote  },
+  { label: "Leave Management",  href: "/admin/hr/leave",     icon: Calendar  },
+  { label: "HR Documents",      href: "/admin/documents",    icon: FolderLock },
 ];
 
 const SUPERADMIN_NAV: NavItem[] = [
-  { label: "Admin Accounts",    href: "/admin/admins",     icon: Shield },
-  { label: "Settings & Config", href: "/admin/settings",   icon: Settings },
-  { label: "System Console",    href: "/admin/console",    icon: Terminal },
-  { label: "Database",          href: "/admin/database",   icon: Database },
-  { label: "Superadmin Tools",  href: "/admin/superadmin", icon: ShieldCheck },
-  { label: "Test Users",        href: "/admin/test-users", icon: FlaskConical },
+  { label: "Admin Accounts",    href: "/admin/admins",                       icon: Shield     },
+  { label: "Settings & Config", href: "/admin/settings",                     icon: Settings   },
+  { label: "System Console",    href: "/admin/console",                      icon: Terminal   },
+  { label: "Database",          href: "/admin/database",                     icon: Database   },
+  { label: "Superadmin Tools",  href: "/admin/superadmin",                   icon: ShieldCheck },
+  { label: "Document Studio",   href: "/admin/superadmin/document-studio",   icon: Layers     },
+  { label: "Feature Flags",     href: "/admin/feature-flags",                icon: Zap        },
+  { label: "API Keys",          href: "/admin/api-keys",                     icon: Key        },
+  { label: "Sessions",          href: "/admin/sessions",                     icon: Monitor    },
+  { label: "Test Users",        href: "/admin/test-users",                   icon: FlaskConical },
 ];
 
 // ── ThemeToggle ───────────────────────────────────────────────────────────────
@@ -440,19 +446,19 @@ export function Sidebar() {
           ))}
         </div>
 
-        {/* Company Documents (full vault) — CEO & Superadmin only */}
-        {execDocsAllowed && (!search || "company documents".includes(search.toLowerCase())) && (
-          <div className="mt-2">
-            <NavLink href="/admin/documents" icon={FolderLock} label="Company Documents" />
-          </div>
-        )}
-
         {/* Human Resources — CEO / CFO / HR / Superadmin */}
         {hrAllowed && (
           <div className="mt-2">
-            <p className="px-3 py-1.5 text-[10px] font-extrabold tracking-widest uppercase text-yellow flex items-center gap-1.5">
-              <Users2 size={10} className="text-yellow" /> Human Resources
-            </p>
+            <button
+              onClick={() => {/* no-op, always open */ }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[10px] font-extrabold tracking-widest uppercase text-yellow"
+            >
+              <Users2 size={10} className="text-yellow" />
+              <span className="flex-1 text-left">Human Resources</span>
+              {HR_NAV.some(i => path === i.href || path.startsWith(i.href + "/")) && (
+                <div className="w-1.5 h-1.5 rounded-full bg-yellow" />
+              )}
+            </button>
             <div className="ml-2 pl-2 border-l border-yellow/20 space-y-0.5 mb-1">
               {HR_NAV.filter(i => !search || i.label.toLowerCase().includes(search.toLowerCase()))
                 .map(item => (

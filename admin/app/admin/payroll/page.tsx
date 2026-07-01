@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Card, Button, Spinner, Modal, Input } from "@/components/ui";
-import { formatZAR, formatDate } from "@/lib/utils";
+import { formatZAR, formatDate, monthlyPAYE, monthlyUIF, monthlySDL } from "@/lib/utils";
 import { getRole } from "@/lib/api";
 import { DangerPinModal, useDangerPin, getDangerToken } from "@/components/DangerPinModal";
 import toast from "react-hot-toast";
@@ -20,22 +20,6 @@ const authHeaders = (extra?: Record<string, string>) => ({
   Authorization: `Bearer ${localStorage.getItem("tnr_admin_token")}`,
   ...(extra || {}),
 });
-
-// ── SA Tax helpers ─────────────────────────────────────────────────────────────
-function calcAnnualPAYE(annualGross: number): number {
-  let tax = 0;
-  if      (annualGross <= 237_100)   tax = annualGross * 0.18;
-  else if (annualGross <= 370_500)   tax = 42_678  + (annualGross - 237_100) * 0.26;
-  else if (annualGross <= 512_800)   tax = 77_362  + (annualGross - 370_500) * 0.31;
-  else if (annualGross <= 673_000)   tax = 121_475 + (annualGross - 512_800) * 0.36;
-  else if (annualGross <= 857_900)   tax = 179_147 + (annualGross - 673_000) * 0.39;
-  else if (annualGross <= 1_817_000) tax = 251_258 + (annualGross - 857_900) * 0.41;
-  else                               tax = 644_489 + (annualGross - 1_817_000) * 0.45;
-  return Math.max(0, tax - 17_235);
-}
-const monthlyPAYE = (m: number) => calcAnnualPAYE(m * 12) / 12;
-const monthlyUIF  = (m: number) => Math.min(m * 0.01, 177.12);
-const monthlySDL  = (m: number) => m * 0.01;
 
 function formatMonth(iso: string) {
   if (!iso) return "—";
